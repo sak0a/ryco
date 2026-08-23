@@ -69,6 +69,11 @@ import {
 } from "../../hostedHub/nodeRouteOrchestrator";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { useHostedBrowserLifecycle } from "../../hostedHub/useHostedBrowserLifecycle";
+import {
+  hostedNodeRequiresNativeClient,
+  startHostedWorkspaceCoordinator,
+  useHostedWorkspaceState,
+} from "../../hostedHub/hostedConnectionCoordinator";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { PHONE_ANCHORED_ACTIONS_CLASS_NAME } from "../mobile/phoneAnchoredActions";
 import { GitHubIcon } from "../Icons";
@@ -180,7 +185,10 @@ export function HostedHubRoot() {
   const errorMessage = useHostedHubStore((state) => state.errorMessage);
   const recoveryCodesLeased = useHostedRecoveryCodeDisplayStore((state) => state.leased);
   const routedNode = useRoutedHostedNode();
+  const routeNotice = useHostedNodeRouteNotice();
+  const hostedWorkspace = useHostedWorkspaceState();
   useHostedNodeRouteOrchestrator();
+  useEffect(() => startHostedWorkspaceCoordinator(), []);
   // The single browser lifecycle owner, above the presentation-tier seam: the
   // tier shells mount no lifecycle listeners of their own.
   useHostedBrowserLifecycle();
@@ -230,14 +238,30 @@ export function HostedHubRoot() {
   // account rather than any node, so it is reachable with none selected, with
   // one connecting, and from inside a node session.
   if (hubRoute?.kind === "account") return <HubAccountPage section={hubRoute.section} />;
-  if (!selectedNode) {
-    // A routed node segment is pending fail-closed validation: keep the UI on
-    // a read-only restoring surface instead of flashing the directory. The
-    // orchestrator either selects the node or clears the segment.
-    if (routedNode.nodeId !== null) {
-      return <HostedNodeRestoringSurface />;
+  if (hubRoute?.kind === "nodes" || hubRoute?.kind === "nodes-enroll") {
+    return <HostedNodeDirectory />;
+  }
+  // Directory/list navigation owns no connection. A retained scoped thread may
+  // remain live behind it, but it does not own this surface or force a global
+  // disconnect.
+  if (routedNode.nodeId === null) {
+    if (routeNotice) return <HostedNodeDirectory />;
+    if (selectedNode && sessionEstablished) {
+      return <RootAppShell authGateState={{ status: "hosted-hub" }} />;
+    }
+    if (
+      hostedWorkspace.workspace.projects.length > 0 ||
+      hostedWorkspace.workspace.threads.length > 0
+    ) {
+      return <RootAppShell authGateState={{ status: "hosted-cached" }} />;
     }
     return <HostedNodeDirectory />;
+  }
+  // A routed node segment is pending fail-closed validation/acquisition. Never
+  // render another environment merely because it remains the compatibility
+  // `selectedNode` while the scoped coordinator switches targets.
+  if (!selectedNode || selectedNode.id !== routedNode.nodeId) {
+    return <HostedNodeRestoringSurface />;
   }
   if (transportStatus === "terminal-failure") {
     return <HostedNodeFailureSurface node={selectedNode} message={errorMessage} />;
@@ -1177,6 +1201,7 @@ function NodeRow({
   readonly onOpenDetail: () => void;
 }) {
   const lastSeen = lastSeenLabel(node, nowMs);
+  const nativeOnly = hostedNodeRequiresNativeClient(node);
 
   return (
     // Two sibling controls with a full-height divider — never a button inside a
@@ -1191,7 +1216,7 @@ function NodeRow({
     <li className="flex items-stretch overflow-hidden rounded-xl border border-border bg-background">
       <button
         type="button"
-        disabled={disabled}
+        disabled={disabled || nativeOnly}
         onClick={onConnect}
         className="flex min-h-16 min-w-0 flex-1 flex-wrap items-center gap-3 px-4 py-3 text-left outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-60 disabled:hover:bg-transparent phone:min-h-18"
       >
@@ -1204,6 +1229,11 @@ function NodeRow({
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium">{node.label}</span>
           <span className="block truncate text-xs text-muted-foreground">{nodeMetaLine(node)}</span>
+          {nativeOnly ? (
+            <span className="block truncate text-xs font-medium text-muted-foreground">
+              Open in Desktop/Mobile
+            </span>
+          ) : null}
         </span>
         <span className="flex shrink-0 flex-col items-end gap-0.5">
           {/* Revocation is stated exactly once, here, by the unmodified

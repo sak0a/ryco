@@ -114,11 +114,9 @@ export function useHostedConnectionActions() {
     await hostedHubController.selectNode(next.id);
   };
 
-  // "All nodes": deterministically close the browser relay session and
-  // release its channel while the remote node connector stays online —
-  // distinct from sign-out and from node revocation. With the hosted node
-  // history installed the route orchestrator drives the same teardown as
-  // history Back; otherwise the controller primitive runs directly.
+  // "All nodes" releases this route's demand and opens the Hub catalog. The
+  // coordinator, not navigation, decides whether a retained/LRU connection
+  // remains live.
   const returnToAllNodes = async () => {
     if (leaveHostedNodeRouteToDirectory()) return;
     await navigate({ to: "/", replace: true });
@@ -237,7 +235,13 @@ export function HostedNodeMenu() {
                   disabled={
                     directory !== "ready" ||
                     browserStatus !== "current" ||
-                    candidate.revokedAt !== null
+                    candidate.revokedAt !== null ||
+                    candidate.capabilities?.nativeClientRequired === true
+                  }
+                  title={
+                    candidate.capabilities?.nativeClientRequired === true
+                      ? "Open in Desktop/Mobile"
+                      : undefined
                   }
                   className="flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={() => void switchNode(candidate)}
@@ -379,11 +383,17 @@ export function HostedConnectionSheet({
               <MobileListRow
                 key={candidate.id}
                 label={candidate.label}
-                disabled={switchingDisabled || candidate.revokedAt !== null}
+                disabled={
+                  switchingDisabled ||
+                  candidate.revokedAt !== null ||
+                  candidate.capabilities?.nativeClientRequired === true
+                }
                 disabledReason={
-                  candidate.revokedAt !== null
-                    ? "Access to this node was revoked."
-                    : "Node switching is unavailable until the directory and this browser are current."
+                  candidate.capabilities?.nativeClientRequired === true
+                    ? "Open in Desktop/Mobile"
+                    : candidate.revokedAt !== null
+                      ? "Access to this node was revoked."
+                      : "Node switching is unavailable until the directory and this browser are current."
                 }
                 trailing={<NodePresence node={candidate} />}
                 onClick={() => {

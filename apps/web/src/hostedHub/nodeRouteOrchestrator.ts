@@ -1,3 +1,4 @@
+import { EnvironmentId, ThreadId } from "@ryco/contracts";
 import { useEffect, useSyncExternalStore } from "react";
 
 import {
@@ -6,12 +7,14 @@ import {
   enterHostedNodeRoute,
   getInstalledHostedNodeHistory,
   getRoutedHostedNode,
-  leaveHostedNodeRoute,
+  leaveHostedNodeRouteToHubDirectory,
   subscribeRoutedHostedNode,
   type RoutedHostedNode,
 } from "./nodeRoutes";
 import { HUB_ROUTE_TOP_SEGMENTS } from "./hubRoutes";
 import { hostedHubController, useHostedHubStore } from "./state";
+import { hasActiveHostedWorkspaceCoordinator } from "./hostedConnectionCoordinator";
+import { retainHostedWorkspaceThreadScope } from "./hostedConnectionScopes";
 
 /**
  * Orchestrates the routed node segment against the hosted lifecycle owner.
@@ -95,6 +98,22 @@ function readLegacyThreadEnvironmentId(pathname: string): string | null {
   }
 }
 
+function readScopedThreadPath(pathname: string): {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+} | null {
+  const match = /^\/([^/]+)\/([^/]+)\/?$/u.exec(pathname);
+  if (!match || RESERVED_TOP_SEGMENTS.has(match[1] ?? "")) return null;
+  try {
+    return {
+      environmentId: EnvironmentId.make(decodeURIComponent(match[1] ?? "")),
+      threadId: ThreadId.make(decodeURIComponent(match[2] ?? "")),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function isLegacyDraftPathname(pathname: string): boolean {
   return pathname.startsWith("/draft/");
 }
@@ -112,6 +131,28 @@ let lastAccountStatus: string | null = null;
 /** Active orchestrator subscriptions; scheduled runs no-op at zero. */
 let activeOrchestratorCount = 0;
 let reconcilePending = false;
+let routeScopeKey: string | null = null;
+let releaseRouteScope: (() => void) | null = null;
+
+function replaceRouteScope(scopedThread: ReturnType<typeof readScopedThreadPath>): void {
+  const nextKey = scopedThread
+    ? JSON.stringify([scopedThread.environmentId, scopedThread.threadId])
+    : null;
+  if (nextKey === routeScopeKey) return;
+  releaseRouteScope?.();
+  releaseRouteScope = null;
+  routeScopeKey = nextKey;
+  if (scopedThread) {
+    releaseRouteScope = retainHostedWorkspaceThreadScope(
+      scopedThread.environmentId,
+      scopedThread.threadId,
+    );
+  }
+}
+
+function routeScopeKeyFor(scopedThread: ReturnType<typeof readScopedThreadPath>): string | null {
+  return scopedThread ? JSON.stringify([scopedThread.environmentId, scopedThread.threadId]) : null;
+}
 
 /**
  * Reconcile runs deferred on a microtask. Route publications fire as a side
@@ -166,11 +207,13 @@ function reconcile(): void {
     // A malformed segment can never validate; normalize the URL immediately
     // and explain on the directory once it renders.
     setNotice("invalid-link");
+    replaceRouteScope(null);
     clearHostedNodeRoute();
     return;
   }
 
   if (state.accountStatus !== "authenticated") {
+    replaceRouteScope(null);
     // Authentication surfaces own the screen. The routed segment stays in the
     // URL so a re-authenticated session resumes it through this same
     // validation pipeline. A notice from the previous authenticated session
@@ -186,12 +229,10 @@ function reconcile(): void {
 
   if (nodeId === null) {
     interactiveNodeId = null;
-    if (state.selectedNode) {
-      // The URL returned to the directory (history Back or a fail-closed
-      // rewrite): tear the selection down through the lifecycle owner. A
-      // terminal selection keeps its bounded explanation for the directory.
-      restoreRequestedNodeId = null;
-      restoreOriginNodeId = null;
+    replaceRouteScope(null);
+    restoreRequestedNodeId = null;
+    restoreOriginNodeId = null;
+    if (state.selectedNode && !hasActiveHostedWorkspaceCoordinator()) {
       const terminalSelection =
         state.selectionStatus === "revoked" ||
         state.selectionStatus === "authorization-removed" ||
@@ -209,7 +250,20 @@ function reconcile(): void {
     return;
   }
 
+  const scopedThread = readScopedThreadPath(routed.logicalPathname);
+  if (routeScopeKeyFor(scopedThread) !== routeScopeKey) replaceRouteScope(null);
+  const directoryNode = state.nodes.find((candidate) => candidate.id === nodeId) ?? null;
+  if (
+    directoryNode &&
+    (directoryNode.capabilities?.nativeClientRequired === true ||
+      (scopedThread && directoryNode.environmentId !== scopedThread.environmentId))
+  ) {
+    replaceRouteScope(null);
+    failClosed(state.selectionStatus, "unavailable");
+    return;
+  }
   if (state.selectedNode?.id === nodeId) {
+    replaceRouteScope(scopedThread);
     restoreRequestedNodeId = null;
     interactiveNodeId = null;
     if (state.sessionEstablished) {
@@ -263,6 +317,11 @@ function reconcile(): void {
     failClosed(state.selectionStatus, "offline");
     return;
   }
+  replaceRouteScope(scopedThread);
+  // Scoped thread demand is acquired above. The environment-keyed
+  // coordinator owns activation and eviction; the route orchestrator must not
+  // race it through the singular compatibility controller.
+  if (scopedThread && hasActiveHostedWorkspaceCoordinator()) return;
   if (restoreRequestedNodeId === nodeId) return;
   restoreRequestedNodeId = nodeId;
   restoreOriginNodeId = interactive ? null : nodeId;
@@ -316,13 +375,9 @@ export function selectHostedNodeRoute(nodeId: string): boolean {
 }
 
 /**
- * User-facing "All nodes": leave the selected node's route and return to the
- * node directory. Returns false when no hosted history is installed (callers
- * then invoke `hostedHubController.returnToDirectory` directly). With the
- * history installed, the cleared segment reconciles through the same teardown
- * as history Back: the browser relay session closes and its channel resources
- * are released while the remote node connector stays online — distinct from
- * sign-out and from node revocation.
+ * User-facing "All nodes": leave the scoped route for the Hub catalog. This
+ * releases only the route's lease; retained work and the bounded LRU transport
+ * remain owned by the hosted workspace coordinator.
  */
 export function leaveHostedNodeRouteToDirectory(): boolean {
   if (!getInstalledHostedNodeHistory()) return false;
@@ -331,8 +386,9 @@ export function leaveHostedNodeRouteToDirectory(): boolean {
   // Already on the directory route (for example a second tap while the
   // teardown is in flight): the leave is handled without pushing a duplicate
   // "/" history entry.
-  if (getRoutedHostedNode().nodeId === null) return true;
-  return leaveHostedNodeRoute();
+  const routed = getRoutedHostedNode();
+  if (routed.nodeId === null && routed.logicalPathname === "/nodes") return true;
+  return leaveHostedNodeRouteToHubDirectory();
 }
 
 export function startHostedNodeRouteOrchestrator(): () => void {
@@ -363,5 +419,6 @@ export function resetHostedNodeRouteOrchestratorForTests(): void {
   interactiveNodeId = null;
   reconcileSuspended = false;
   lastAccountStatus = null;
+  replaceRouteScope(null);
   setNotice(null);
 }

@@ -8,7 +8,7 @@ import { useSettingsDialogStore } from "../settingsDialogStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
-import { clearWebHostedNodeScopedState } from "./environment";
+import { clearWebHostedAccountScopedState, clearWebHostedNodeScopedState } from "./environment";
 
 /**
  * The browser/UI clearing catalog. The core transition queue owns the call
@@ -20,7 +20,7 @@ import { clearWebHostedNodeScopedState } from "./environment";
 const environmentId = EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa");
 
 describe("clearWebHostedNodeScopedState", () => {
-  it("clears projections, queues, drafts, terminals, UI state, and pending dialogs", () => {
+  it("demotes only transport projections and preserves cross-node UI state", () => {
     useStore.setState({ activeEnvironmentId: environmentId });
     useComposerDraftStore.getState().setPrompt(DraftId.make("sensitiveThread"), "sensitive prompt");
     useTerminalStateStore.setState({
@@ -38,20 +38,33 @@ describe("clearWebHostedNodeScopedState", () => {
 
     clearWebHostedNodeScopedState(environmentId);
 
-    expect(useStore.getState().activeEnvironmentId).toBeNull();
-    expect(useComposerDraftStore.getState()).toMatchObject({
-      draftsByThreadKey: {},
-      draftThreadsByThreadKey: {},
-      logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+    expect(useStore.getState().activeEnvironmentId).toBe(environmentId);
+    expect(
+      useComposerDraftStore.getState().getComposerDraft(DraftId.make("sensitiveThread"))?.prompt,
+    ).toBe("sensitive prompt");
+    expect(useTerminalStateStore.getState().terminalStateByThreadKey).toHaveProperty(
+      "sensitiveThread",
+    );
+    expect(useMessageQueueStore.getState().queuesByThreadKey).toHaveProperty("sensitiveThread");
+    expect(useUiStateStore.getState()).toMatchObject({
+      projectOrder: ["sensitiveProject"],
+      pinnedThreadKeys: { sensitiveThread: true },
     });
-    expect(useTerminalStateStore.getState()).toMatchObject({
-      terminalStateByThreadKey: {},
-      terminalLaunchContextByThreadKey: {},
-      terminalEventEntriesByKey: {},
-    });
-    expect(useMessageQueueStore.getState().queuesByThreadKey).toEqual({});
-    expect(useUiStateStore.getState()).toMatchObject({ projectOrder: [], pinnedThreadKeys: {} });
-    expect(useCommandPaletteStore.getState()).toMatchObject({ open: false, openIntent: null });
-    expect(useSettingsDialogStore.getState().open).toBe(false);
+    expect(useCommandPaletteStore.getState().open).toBe(true);
+    expect(useSettingsDialogStore.getState().open).toBe(true);
+  });
+
+  it("clears preserved cross-node state at the account-session boundary", () => {
+    useComposerDraftStore.getState().setPrompt(DraftId.make("accountDraft"), "private prompt");
+    useUiStateStore.setState({ pinnedThreadKeys: { accountThread: true } });
+    useCommandPaletteStore.getState().openAddProject();
+
+    clearWebHostedAccountScopedState();
+
+    expect(
+      useComposerDraftStore.getState().getComposerDraft(DraftId.make("accountDraft")),
+    ).toBeNull();
+    expect(useUiStateStore.getState().pinnedThreadKeys).toEqual({});
+    expect(useCommandPaletteStore.getState().open).toBe(false);
   });
 });

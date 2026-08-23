@@ -727,7 +727,7 @@ describe("PhoneHome", () => {
     await expect.element(page.getByText("Beta running thread")).not.toBeInTheDocument();
   });
 
-  it("survives a hosted node switch reset of the presentation stores", async () => {
+  it("preserves cached rows and presentation state across a hosted transport switch", async () => {
     mounted = await render(
       <SidebarProvider>
         <PhoneHome />
@@ -735,10 +735,15 @@ describe("PhoneHome", () => {
     );
     await expect.element(page.getByText("Alpha thread")).toBeVisible();
 
-    // The node-switch teardown resets exactly the live stores Home consumes.
+    // Transport disposal demotes live state; only account teardown may erase
+    // the unified cross-node list or its presentation state.
     clearHostedNodeScopedState(ENV_ID);
 
-    await expect.element(page.getByText("No projects yet")).toBeVisible();
-    expect(useUiStateStore.getState().pinnedThreadKeys).toEqual({});
+    await expect.element(page.getByText("Alpha thread")).toBeVisible();
+    await expect.element(page.getByRole("region", { name: "Beta" })).toBeVisible();
+    expect(useUiStateStore.getState().pinnedThreadKeys).toEqual({ [THREAD_A_KEY]: true });
+    expect(useStore.getState().environmentStateById[ENV_ID]).toMatchObject({
+      bootstrapComplete: false,
+    });
   });
 });

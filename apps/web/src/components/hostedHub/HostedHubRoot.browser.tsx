@@ -39,6 +39,10 @@ import { HostedHubRoot, HostedNodeMenu } from "./HostedHubRoot";
 import { hostedRelayTrustDisclosure } from "./HostedRelayTrustNotice.logic";
 import { RETIRED_HOSTED_RELAY_TRUST_SENTENCE } from "../../../test/hostedConnectionVocabulary";
 import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
+import {
+  installHostedNodeHistory,
+  resetHostedNodeRoutesForTests,
+} from "../../hostedHub/nodeRoutes";
 
 const account = {
   id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
@@ -95,6 +99,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   hostedHubController.resetForTests();
+  resetHostedNodeRoutesForTests();
   resetHubRoutesForTests();
   // The §13 projection is module scope, so a channel left standing by another
   // case would render this one's disclosure at the wrong claim.
@@ -113,6 +118,7 @@ afterEach(async () => {
   await page.viewport(1_280, 720);
   mounted = null;
   hostedHubController.resetForTests();
+  resetHostedNodeRoutesForTests();
   resetHubRoutesForTests();
   resetWebE2eeSession();
   vi.restoreAllMocks();
@@ -742,6 +748,8 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
 
   it("keeps the node session UI unmounted until the initial snapshot is ready", async () => {
     const selectedNode = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    window.history.replaceState(window.history.state, "", `/node/${selectedNode.id}`);
+    installHostedNodeHistory();
     useHostedHubStore.setState({
       accountStatus: "authenticated",
       account,
@@ -761,6 +769,8 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
 
   it("shows a labelled relay failure without mounting the node session UI", async () => {
     const selectedNode = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    window.history.replaceState(window.history.state, "", `/node/${selectedNode.id}`);
+    installHostedNodeHistory();
     useHostedHubStore.setState({
       accountStatus: "authenticated",
       account,
@@ -783,6 +793,8 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
 
   it("retries bounded synchronization failures from the selected node", async () => {
     const selectedNode = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    window.history.replaceState(window.history.state, "", `/node/${selectedNode.id}`);
+    installHostedNodeHistory();
     const retry = vi.spyOn(hostedHubController, "retrySelectedNode").mockResolvedValue();
     useHostedHubStore.setState({
       accountStatus: "authenticated",

@@ -236,6 +236,14 @@ describe("selection gating", () => {
     ).toBe(true);
     expect(
       nodeSelectionBlocked({
+        ...ready,
+        node: node({
+          capabilities: { repositoryIdentity: true, nativeClientRequired: true },
+        }),
+      }),
+    ).toBe(true);
+    expect(
+      nodeSelectionBlocked({
         directoryStatus: "ready",
         browserStatus: "checking-access",
         node: node(),
@@ -244,6 +252,15 @@ describe("selection gating", () => {
   });
 
   it("explains a block with the strings the connection sheet already ships", () => {
+    expect(
+      nodeSelectionBlockedReason({
+        directoryStatus: "ready",
+        browserStatus: "current",
+        node: node({
+          capabilities: { repositoryIdentity: true, nativeClientRequired: true },
+        }),
+      }),
+    ).toBe("Open this node in Desktop/Mobile.");
     expect(
       nodeSelectionBlockedReason({
         directoryStatus: "ready",

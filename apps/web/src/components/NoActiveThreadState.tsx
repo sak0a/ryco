@@ -5,7 +5,9 @@ import { ArrowLeftIcon } from "lucide-react";
 import { SidebarInset } from "./ui/sidebar";
 import { Button } from "./ui/button";
 import { HostedConnectionControl } from "./hostedHub/HostedConnectionControls";
-import { isElectron } from "../env";
+import { HostedRelayTrustNotice } from "./hostedHub/HostedRelayTrustNotice";
+import { isElectron, isHostedHubMode } from "../env";
+import { navigateHub } from "../hostedHub/hubRoutes";
 import {
   APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS,
   COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS,
@@ -67,6 +69,14 @@ export function NoActiveThreadState() {
               <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
                 Select an existing thread or create a new one to get started.
               </EmptyDescription>
+              {isHostedHubMode() ? (
+                <div className="mt-5 space-y-3 text-left">
+                  <Button variant="outline" onClick={() => navigateHub({ kind: "nodes" })}>
+                    Manage nodes
+                  </Button>
+                  <HostedRelayTrustNotice compact />
+                </div>
+              ) : null}
             </EmptyHeader>
           </div>
         </Empty>

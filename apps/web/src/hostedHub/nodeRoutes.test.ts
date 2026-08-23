@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { EnvironmentId } from "@ryco/contracts";
 
 import { createFakeHistoryWindow } from "../../test/fakeHistoryWindow";
 import {
@@ -12,6 +13,7 @@ import {
   parseHostedNodeHref,
   resetHostedNodeRoutesForTests,
   subscribeRoutedHostedNode,
+  setHostedNodeRouteEnvironmentResolver,
 } from "./nodeRoutes";
 
 afterEach(() => {
@@ -90,6 +92,18 @@ describe("hosted node route segment parsing", () => {
     );
     expect(buildHostedNodeHref("/env_a/t_1", null)).toBe("/env_a/t_1");
     expect(buildHostedNodeHref("/env_a/t_1", "not valid!")).toBe("/env_a/t_1");
+  });
+
+  it("routes a logical environment through its own authorized node, not the current node", () => {
+    setHostedNodeRouteEnvironmentResolver((environmentId) =>
+      environmentId === EnvironmentId.make("env_b") ? "node_b" : null,
+    );
+    expect(buildHostedNodeHref("/env_b/colliding_thread", "node_a")).toBe(
+      "/node/node_b/env_b/colliding_thread",
+    );
+    expect(buildHostedNodeHref("/env_a/colliding_thread", "node_a")).toBe(
+      "/node/node_a/env_a/colliding_thread",
+    );
   });
 });
 

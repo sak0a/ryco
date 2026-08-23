@@ -15,8 +15,15 @@
 //   * account settings is mounted on the directory, and mounted exactly once.
 import "../../index.css";
 
-import { EnvironmentId } from "@ryco/contracts";
+import { EnvironmentId, ProjectId, ThreadId } from "@ryco/contracts";
+import { workspaceMetadataPayloadBytes } from "@ryco/client-runtime/state/workspace";
 import { page, userEvent } from "vite-plus/test/browser";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
@@ -25,6 +32,10 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => navigate,
   useParams: () => undefined,
+  useRouter: () => ({
+    state: { matches: [] },
+    navigate,
+  }),
 }));
 
 // The hosted client is what these suites are about, and nothing in a browser
@@ -50,6 +61,7 @@ import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot } from "./HostedHubRoot";
+import { createBrowserWorkspaceMetadataCache } from "../../persistence/workspaceMetadataCache";
 
 const account = {
   id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
@@ -178,6 +190,83 @@ afterEach(async () => {
 });
 
 describe("hosted node directory", () => {
+  it("renders a cached cross-node workspace without eagerly acquiring its node", async () => {
+    const cachedNode = node({ environmentId: EnvironmentId.make(`env_${"c".repeat(22)}`) });
+    const projectId = ProjectId.make("cached-project");
+    const snapshot = {
+      schemaVersion: 1 as const,
+      environmentId: cachedNode.environmentId,
+      capturedAt: NOW,
+      projects: [
+        {
+          environmentId: cachedNode.environmentId,
+          id: projectId,
+          name: "Cached workspace",
+          cwd: "/cached",
+          repositoryIdentity: null,
+          createdAt: null,
+          updatedAt: null,
+        },
+      ],
+      worktrees: [],
+      threads: [
+        {
+          environmentId: cachedNode.environmentId,
+          id: ThreadId.make("cached-thread"),
+          projectId,
+          worktreeId: null,
+          title: "Cached thread from another node",
+          createdAt: new Date(NOW).toISOString(),
+          updatedAt: null,
+          archivedAt: null,
+          modelSelection: null,
+          providerDriver: null,
+          branch: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+          deliveryUnknown: false,
+        },
+      ],
+    };
+    await createBrowserWorkspaceMetadataCache(localStorage).replace({
+      namespace: {
+        hubOrigin: window.location.origin,
+        accountId: account.id,
+        environmentId: cachedNode.environmentId,
+      },
+      snapshot,
+      payloadBytes: workspaceMetadataPayloadBytes(snapshot),
+      updatedAt: NOW,
+    });
+    seedDirectory([cachedNode]);
+    const selectNode = vi.spyOn(hostedHubController, "selectNode");
+    const rootRoute = createRootRoute({ component: HostedHubRoot });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    mounted = await render(<RouterProvider router={router} />);
+
+    await expect.element(page.getByText("Cached workspace")).toBeVisible();
+    expect(selectNode).not.toHaveBeenCalled();
+  });
+
+  it("keeps native-only nodes locked with the required handoff copy", async () => {
+    seedDirectory([
+      node({
+        capabilities: { repositoryIdentity: true, nativeClientRequired: true },
+      }),
+    ]);
+    mounted = await render(<HostedHubRoot />);
+
+    await expect.element(page.getByText("Open in Desktop/Mobile")).toBeVisible();
+    await expect.element(page.getByRole("button", { name: /^Studio/ })).toBeDisabled();
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await expect.element(page.getByText("Open this node in Desktop/Mobile.")).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Connect" })).toBeDisabled();
+  });
+
   it("keeps node details reachable in exactly the states where connecting is not", async () => {
     // The metadata is needed *most* when the row will not connect: a revoked
     // grant and a stale directory are the two states whose explanation lives
@@ -1039,9 +1128,7 @@ describe("account settings reachability", () => {
     ).toHaveLength(0);
   });
 
-  it("keeps account settings reachable from the surface a terminal relay failure lands on", async () => {
-    // The state where a user most needs to check their credentials is the one
-    // where their node stopped answering.
+  it("keeps an unrelated terminal relay failure local while account settings stay reachable", async () => {
     const selected = node();
     seedDirectory([selected], {
       selectedNode: selected,
@@ -1049,13 +1136,12 @@ describe("account settings reachability", () => {
       errorMessage: "The relay authentication attempt expired or was rejected.",
     });
     mounted = await render(<HostedHubRoot />);
-    await expect.element(page.getByRole("heading", { name: /Unable to connect/ })).toBeVisible();
+    await expect.element(page.getByRole("heading", { name: /Your node/ })).toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: /Unable to connect/ }))
+      .not.toBeInTheDocument();
 
-    // The desktop connection control is a `<details>` disclosure; its contents
-    // are the bounded control set, and Account sits with Refresh and Sign out
-    // inside it.
-    document.querySelector<HTMLElement>("summary")?.click();
-    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("button", { name: "Account settings" }).click();
 
     await expect.element(page.getByRole("heading", { name: "Account", level: 1 })).toBeVisible();
     expect(window.location.pathname).toBe("/account/security");

@@ -174,7 +174,8 @@ export function nodeSelectionBlocked(input: {
   return (
     input.directoryStatus !== "ready" ||
     input.browserStatus !== "current" ||
-    input.node.revokedAt !== null
+    input.node.revokedAt !== null ||
+    input.node.capabilities?.nativeClientRequired === true
   );
 }
 
@@ -187,6 +188,9 @@ export function nodeSelectionBlockedReason(input: {
   readonly browserStatus: string;
   readonly node: HostedHubNode;
 }): string | null {
+  if (input.node.capabilities?.nativeClientRequired === true) {
+    return "Open this node in Desktop/Mobile.";
+  }
   if (input.node.revokedAt !== null) return "Access to this node was revoked.";
   if (input.directoryStatus !== "ready" || input.browserStatus !== "current") {
     return "Node switching is unavailable until the directory and this browser are current.";
