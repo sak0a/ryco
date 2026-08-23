@@ -1,4 +1,11 @@
 import {
+  groupWorkspaceLogicalProjects,
+  resolveWorkspaceExecutionTarget,
+  type WorkspaceExecutionTargetResolution,
+  type WorkspacePhysicalProjectVariant,
+} from "@ryco/client-runtime/state/workspace";
+import type { Project, SidebarThreadSummary } from "@ryco/client-runtime/state/threads";
+import {
   DEFAULT_MODEL,
   ProviderInstanceId,
   type AgentTokenMode,
@@ -15,7 +22,109 @@ import {
 } from "@ryco/contracts";
 
 import { inferNodeProjectTitle, validateNodeWorkspacePath } from "../projects/projectActions";
+import type { ProjectEnvironment } from "../projects/projectsModel";
 import { inferTaskTitle } from "./newTaskModel";
+
+function projectLastUsedAt(
+  project: Project,
+  threads: ReadonlyArray<SidebarThreadSummary>,
+): number | null {
+  const values = threads
+    .filter(
+      (thread) => thread.environmentId === project.environmentId && thread.projectId === project.id,
+    )
+    .map((thread) => Date.parse(thread.updatedAt ?? thread.createdAt))
+    .filter(Number.isFinite);
+  return values.length === 0 ? null : Math.max(...values);
+}
+
+/** Build the shared resolver input from Mobile's already trust-gated roster. */
+export function resolveMobileNewTaskTarget(input: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly projects: ReadonlyArray<Project>;
+  readonly environments: ReadonlyArray<ProjectEnvironment>;
+  readonly threads: ReadonlyArray<SidebarThreadSummary>;
+  readonly overrideEnvironmentId?: EnvironmentId | null;
+}): WorkspaceExecutionTargetResolution {
+  const environments = new Map(
+    input.environments.map((environment) => [environment.environmentId, environment] as const),
+  );
+  const variants: WorkspacePhysicalProjectVariant[] = input.projects.map((project) => {
+    const environment = environments.get(project.environmentId);
+    const connected = environment?.connectionState === "connected";
+    return {
+      environmentId: project.environmentId,
+      projectId: project.id,
+      physicalKey: `${project.environmentId}:${project.cwd}`,
+      name: project.name,
+      cwd: project.cwd,
+      repositoryIdentity: project.repositoryIdentity ?? null,
+      machineLabel: environment?.label ?? "Unknown machine",
+      online: connected,
+      canMutate: connected,
+      nativeTrust: environment?.trust === "verified" ? "verified" : "not-required",
+      effectiveRole:
+        environment?.role === "owner" ||
+        environment?.role === "operator" ||
+        environment?.role === "viewer"
+          ? environment.role
+          : null,
+      lastUsedAt: projectLastUsedAt(project, input.threads),
+      lastLiveAt: null,
+      localDesktop: false,
+    };
+  });
+  const logical = groupWorkspaceLogicalProjects(variants).find((candidate) =>
+    candidate.variants.some(
+      (variant) =>
+        variant.environmentId === input.environmentId && variant.projectId === input.projectId,
+    ),
+  );
+  if (!logical) {
+    return {
+      status: "unavailable",
+      message: "No verified machine available",
+      reason: "no-eligible-variant",
+    };
+  }
+  const overrideEnvironmentId = input.overrideEnvironmentId;
+  const overrideVariant =
+    overrideEnvironmentId === null || overrideEnvironmentId === undefined
+      ? null
+      : logical.variants.find((variant) => variant.environmentId === overrideEnvironmentId);
+  return resolveWorkspaceExecutionTarget({
+    project: logical,
+    override:
+      overrideVariant === null || overrideVariant === undefined
+        ? null
+        : {
+            environmentId: overrideVariant.environmentId,
+            projectId: overrideVariant.projectId,
+          },
+  });
+}
+
+/** Retarget only physical context; all authored/model fields remain byte-for-byte intact. */
+export function retargetNewTaskDraft<
+  T extends {
+    readonly prompt: string;
+    readonly attachments: readonly unknown[];
+    readonly modelSelection: ModelSelection;
+    readonly runtimeMode: RuntimeMode;
+    readonly interactionMode: ProviderInteractionMode;
+    readonly tokenMode: AgentTokenMode;
+  },
+>(
+  draft: T,
+  environmentId: EnvironmentId,
+  projectId: ProjectId,
+): T & {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+} {
+  return { ...draft, environmentId, projectId };
+}
 
 type CommandOf<Type extends ClientOrchestrationCommand["type"]> = Extract<
   ClientOrchestrationCommand,

@@ -1,6 +1,6 @@
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, TextInput, View } from "react-native";
 
 import { SymbolView } from "../../components/AppSymbol";
@@ -18,7 +18,9 @@ import {
   requestE2eeApproval,
 } from "./e2eeTrustUiModel";
 import { useMobileE2eeSession } from "./useMobileE2eeSession";
-import { mobileHostedNodeLifecycle } from "../../hostedHub/nodeLifecycle";
+import { getMobileHostedConnectionCoordinator } from "../../connection/hostedConnectionCoordinator";
+import { useHostedHubStore } from "../../hostedHub/state";
+import { resolveExactNodeRoute } from "./exactNodeRouteModel";
 
 /**
  * The §13.2 pairing ceremony and §13.3's re-verification UI.
@@ -27,9 +29,13 @@ import { mobileHostedNodeLifecycle } from "../../hostedHub/nodeLifecycle";
  * comparison, and the single action that mints a §13.2 step 5 decision are all
  * `e2eeTrustUiModel.ts`'s.
  */
-export function E2eeNodeVerificationRouteScreen() {
+type Props = StaticScreenProps<{ readonly nodeId: string; readonly environmentId: string }>;
+
+export function E2eeNodeVerificationRouteScreen(props: Props) {
   const navigation = useNavigation();
-  const session = useMobileE2eeSession();
+  const nodes = useHostedHubStore((state) => state.nodes);
+  const target = resolveExactNodeRoute(props.route.params, nodes);
+  const session = useMobileE2eeSession(target?.environmentId ?? "__invalid-node-route__");
   const [draft, setDraft] = useState(createE2eeVerificationDraft);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanningApproval, setScanningApproval] = useState(false);
@@ -41,6 +47,21 @@ export function E2eeNodeVerificationRouteScreen() {
   const scanHandledRef = useRef(false);
   const placeholderColor = useThemeColor("--color-foreground-muted");
   const iconColor = useThemeColor("--color-icon-muted");
+  const targetNodeId = target?.nodeId;
+  const targetEnvironmentId = target?.environmentId;
+
+  useEffect(() => {
+    if (!targetNodeId || !targetEnvironmentId) return;
+    const coordinator = getMobileHostedConnectionCoordinator();
+    const release = coordinator.retainPairingScope(targetNodeId, targetEnvironmentId);
+    if (!release) return;
+    void coordinator.acquireNode(targetNodeId);
+    return release;
+  }, [targetEnvironmentId, targetNodeId]);
+
+  useEffect(() => {
+    if (session.selection?.localNodeHandle) setApprovalRequested(true);
+  }, [session.selection?.localNodeHandle]);
 
   const view = deriveE2eeVerificationView({
     session,
@@ -81,8 +102,12 @@ export function E2eeNodeVerificationRouteScreen() {
         return;
       }
       try {
-        await mobileHostedNodeLifecycle.disconnectPrimaryEnvironment();
-        mobileHostedNodeLifecycle.connectPrimaryEnvironment();
+        if (!target) throw new Error("Invalid machine route");
+        const reconnected = await getMobileHostedConnectionCoordinator().reconnectNode(
+          target.nodeId,
+          target.environmentId,
+        );
+        if (!reconnected) throw new Error("Machine reconnect refused");
       } catch {
         setApprovalError(
           "Verification was saved, but Ryco could not reconnect yet. Close this screen and reconnect to the node.",
@@ -91,7 +116,7 @@ export function E2eeNodeVerificationRouteScreen() {
       }
       navigation.goBack();
     },
-    [navigation, session],
+    [navigation, session, target],
   );
 
   const requestApproval = useCallback(async () => {
@@ -104,8 +129,12 @@ export function E2eeNodeVerificationRouteScreen() {
       return;
     }
     try {
-      await mobileHostedNodeLifecycle.disconnectPrimaryEnvironment();
-      mobileHostedNodeLifecycle.connectPrimaryEnvironment();
+      if (!target) throw new Error("Invalid machine route");
+      const reconnected = await getMobileHostedConnectionCoordinator().reconnectNode(
+        target.nodeId,
+        target.environmentId,
+      );
+      if (!reconnected) throw new Error("Machine reconnect refused");
       setApprovalRequested(true);
     } catch {
       setApprovalRequested(false);
@@ -115,7 +144,18 @@ export function E2eeNodeVerificationRouteScreen() {
     } finally {
       setApprovalBusy(false);
     }
-  }, [session]);
+  }, [session, target]);
+
+  if (!target) {
+    return (
+      <ScrollView contentInsetAdjustmentBehavior="automatic" className="flex-1 bg-screen">
+        <Text className="mx-5 mt-6 font-sans text-sm leading-relaxed text-danger-foreground">
+          This verification link does not match a current machine. Open Machines and choose the
+          machine again.
+        </Text>
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView

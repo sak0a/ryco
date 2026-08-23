@@ -200,14 +200,20 @@ export const MVP_SETTINGS_SHEET_ROUTES = {
    * state", and a sheet the owner swipes away is the closest thing this
    * navigator has to one.
    */
-  SettingsNodeSecurity: { linking: "node-security", ...SETTINGS_PUSH },
+  SettingsNodeSecurity: {
+    linking: "node-security/:environmentId/:nodeId",
+    ...SETTINGS_PUSH,
+  },
   /**
    * The §13.2 ceremony and §13.3's re-verification UI: the enrollment
    * fingerprint, the §13.4 safety number, and the one action that mints an owner
    * verification decision. A push on both platforms so the comparison cannot be
    * dismissed by a downward swipe mid-ceremony.
    */
-  SettingsNodeVerification: { linking: "node-verification", ...SETTINGS_PUSH },
+  SettingsNodeVerification: {
+    linking: "node-verification/:environmentId/:nodeId",
+    ...SETTINGS_PUSH,
+  },
   SettingsAppearance: { linking: "appearance", ...SETTINGS_PUSH },
   SettingsClientStorage: { linking: "client-storage", ...SETTINGS_PUSH },
   SettingsAbout: { linking: "about", ...SETTINGS_PUSH },

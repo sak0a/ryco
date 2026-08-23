@@ -165,8 +165,12 @@ describe("MVP route config", () => {
     // both are pushes on both platforms — §13.1.1 forbids an indication that
     // "dismisses into a verified-looking state", and a swipe-away sheet is the
     // closest thing this navigator has to one.
-    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsNodeSecurity.linking).toBe("node-security");
-    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsNodeVerification.linking).toBe("node-verification");
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsNodeSecurity.linking).toBe(
+      "node-security/:environmentId/:nodeId",
+    );
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsNodeVerification.linking).toBe(
+      "node-verification/:environmentId/:nodeId",
+    );
     expect("SettingsNodeSecurity" in MVP_ROOT_ROUTES).toBe(false);
     expect("SettingsNodeVerification" in MVP_ROOT_ROUTES).toBe(false);
     for (const name of ["SettingsNodeSecurity", "SettingsNodeVerification"] as const) {
@@ -233,12 +237,14 @@ describe("the settings navigator matches the settings route table", () => {
       join(SRC, "features", "settings", "SettingsRouteScreen.tsx"),
       "utf8",
     );
-    expect(settings).toContain('navigate("SettingsNodeSecurity"');
+    expect(settings).toContain('StackActions.push("SettingsNodeSecurity"');
+    expect(settings).toContain("exactNodeRouteParams(selectedNode)");
     // …and the ceremony is reached from the security surface itself.
     const security = readFileSync(
       join(SRC, "features", "e2ee", "E2eeNodeSecurityRouteScreen.tsx"),
       "utf8",
     );
-    expect(security).toContain('navigate("SettingsNodeVerification"');
+    expect(security).toContain('StackActions.push("SettingsNodeVerification"');
+    expect(security).toContain("exactNodeRouteParams(target.node)");
   });
 });

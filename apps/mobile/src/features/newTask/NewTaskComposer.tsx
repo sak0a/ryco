@@ -23,10 +23,12 @@ export function NewTaskComposer(props: {
   readonly prompt: string;
   readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly contextLabel: string;
+  readonly machineLabel: string;
   readonly modelLabel: string;
   readonly runtimeMode: RuntimeMode;
   readonly busy: boolean;
   readonly canSend: boolean;
+  readonly sendDisabledReason: string | null;
   readonly onChangePrompt: (prompt: string) => void;
   readonly onRemoveAttachment: (id: string) => void;
   readonly onPickAttachments: () => void;
@@ -43,6 +45,25 @@ export function NewTaskComposer(props: {
   return (
     <View className="gap-16">
       <View className="gap-3">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Machine: ${props.machineLabel}`}
+          disabled={props.busy}
+          onPress={props.onOpenContext}
+          className="h-12 flex-row items-center gap-3 rounded-2xl bg-card px-4 active:bg-card-alt disabled:opacity-40"
+        >
+          <Text className="flex-1 text-sm font-ryco-bold text-foreground">Machine</Text>
+          <Text className="text-sm font-ryco-medium text-foreground-muted" numberOfLines={1}>
+            {props.machineLabel}
+          </Text>
+          <SymbolView
+            name="chevron.right"
+            size={15}
+            tintColor={iconColor as string}
+            type="monochrome"
+          />
+        </Pressable>
+
         <TextInput
           autoFocus
           multiline
@@ -74,6 +95,11 @@ export function NewTaskComposer(props: {
           />
           <Text className="text-sm font-ryco-bold text-foreground">Attach images</Text>
         </Pressable>
+        {!props.canSend && props.sendDisabledReason ? (
+          <Text className="px-2 text-center font-sans text-xs text-danger-foreground">
+            {props.sendDisabledReason}
+          </Text>
+        ) : null}
       </View>
 
       <View className="gap-3">

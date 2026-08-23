@@ -12,7 +12,9 @@ import { UNIFIED_WORKSPACE_SCOPE_LEASE_TTL_MS } from "@ryco/client-runtime/state
 export type MobileHostedConnectionScope =
   | { readonly type: "thread-detail"; readonly threadId: ThreadId }
   | { readonly type: "vcs-status"; readonly cwd: string }
-  | { readonly type: "provider-status"; readonly instanceId?: string };
+  | { readonly type: "provider-status"; readonly instanceId?: string }
+  /** Exact-machine trust ceremony; never acquired by list rendering or prefetch. */
+  | { readonly type: "node-pairing"; readonly nodeId: string };
 
 export interface RetainedMobileHostedConnectionScope {
   readonly environmentId: EnvironmentId;
@@ -81,6 +83,8 @@ function stableScopeKey(environmentId: EnvironmentId, scope: MobileHostedConnect
       return JSON.stringify([environmentId, scope.type, scope.cwd]);
     case "provider-status":
       return JSON.stringify([environmentId, scope.type, scope.instanceId ?? null]);
+    case "node-pairing":
+      return JSON.stringify([environmentId, scope.type, scope.nodeId]);
   }
 }
 

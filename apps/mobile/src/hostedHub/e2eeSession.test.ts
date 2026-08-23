@@ -91,6 +91,53 @@ beforeEach(() => {
 });
 
 describe("the channel's claim", () => {
+  it("keeps concurrent node trust projections independent by environment", () => {
+    beginMobileE2eeChannel({
+      selection: {
+        hubOrigin: HUB,
+        accountId: ACCOUNT,
+        nodeId: "node_a",
+        nodeLabel: "A",
+        environmentId: "env_a",
+        localNodeHandle: null,
+        clientIdentityPublicKey: CLIENT_PUBLIC_KEY,
+      },
+      classification: { class: "latched" },
+      legacyPermitted: false,
+      markerSet: true,
+      pinVerified: true,
+      previouslyVerified: null,
+    });
+    beginMobileE2eeChannel({
+      selection: {
+        hubOrigin: HUB,
+        accountId: ACCOUNT,
+        nodeId: "node_b",
+        nodeLabel: "B",
+        environmentId: "env_b",
+        localNodeHandle: null,
+        clientIdentityPublicKey: CLIENT_PUBLIC_KEY,
+      },
+      classification: UNEXPECTED_FRESH,
+      legacyPermitted: false,
+      markerSet: true,
+      pinVerified: false,
+      previouslyVerified: null,
+    });
+    lockMobileE2eeChannelMode("e2ee", "env_a");
+    lockMobileE2eeChannelMode("e2ee", "env_b");
+    attachMobileE2eeLocalNodeHandle("handle-b", "env_b");
+
+    expect(getMobileE2eeSessionState("env_a")).toMatchObject({
+      channel: "verified",
+      selection: { nodeId: "node_a", localNodeHandle: null },
+    });
+    expect(getMobileE2eeSessionState("env_b")).toMatchObject({
+      channel: "unverified",
+      selection: { nodeId: "node_b", localNodeHandle: "handle-b" },
+    });
+  });
+
   it("keeps unexpected trust context without fabricating unavailable credential material", () => {
     beginMobileE2eeFailClosedSelection({
       selection: {

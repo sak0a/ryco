@@ -2,6 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import { Pressable, View } from "react-native";
 
 import type { RelayEffectiveRole } from "@ryco/contracts";
+import type { WorkspaceNativeTrustState } from "@ryco/client-runtime/state/workspace";
 import {
   deriveHostedConnectionStatusIndicator,
   deriveHostedConnectionStatusText,
@@ -16,6 +17,8 @@ import { StatusPill, type StatusTone } from "../../components/StatusPill";
 import { acquireMobileHostedNode } from "../../hostedHub/acquireNode";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useMobileE2eeChannelStatus } from "../e2ee/useMobileE2eeSession";
+import { exactNodeRouteParams } from "../e2ee/exactNodeRouteModel";
+import { useAuthoritativeNodeTrust } from "../home/useAuthoritativeNodeTrust";
 import { NodeRow } from "../nodes/NodeRow";
 import { hostedStatusTone } from "./hostedAuthModel";
 import { hostedSelectionKey, type SettledHostedStatus } from "./settledHostedStatus";
@@ -65,6 +68,7 @@ export interface HubNodeSectionActions {
   readonly returnToDirectory: () => unknown;
   readonly refreshDirectory: () => unknown;
   readonly retrySelectedNode: () => unknown;
+  readonly openNodeSecurity?: (node: HostedHubNode) => unknown;
 }
 
 export interface HubNodeRowModel {
@@ -145,6 +149,7 @@ export function deriveHubNodeSectionModel(input: {
   readonly actions: HubNodeSectionActions;
   readonly onSignIn: () => void;
   readonly query?: string;
+  readonly trustByEnvironmentId?: ReadonlyMap<string, WorkspaceNativeTrustState>;
 }): HubNodeSectionModel {
   const { state, available, actions, onSignIn } = input;
   const statusInput = {
@@ -212,11 +217,22 @@ export function deriveHubNodeSectionModel(input: {
       (node) => !query || `${node.label} ${rowDetail(node)}`.toLocaleLowerCase().includes(query),
     )
     .map((node): HubNodeRowModel => {
-      const selectable = canSelectHubNode(state, node);
+      const trust = input.trustByEnvironmentId?.get(node.environmentId);
+      const verified = trust === undefined || trust === "verified" || trust === "not-required";
+      const selectable = canSelectHubNode(state, node) && verified;
+      const canVerify = node.revokedAt === null && !verified && actions.openNodeSecurity;
+      const trustDetail =
+        trust === "identity-conflict"
+          ? "Identity changed"
+          : trust === "unknown"
+            ? "Verification unavailable"
+            : trust === "unverified"
+              ? "Not verified"
+              : null;
       return {
         nodeId: node.id,
         label: node.label,
-        detail: rowDetail(node),
+        detail: trustDetail ? `${trustDetail} · ${rowDetail(node)}` : rowDetail(node),
         transportLabel: "Hub relay",
         // The selected node's row shows the live connection status; every other
         // row shows directory presence, which is all the directory knows.
@@ -225,8 +241,12 @@ export function deriveHubNodeSectionModel(input: {
             ? base.statusTone
             : rowTone(node),
         selected: state.selectedNode?.id === node.id,
-        disabled: !selectable,
-        onPress: selectable ? () => void actions.selectNode(node.id) : undefined,
+        disabled: !selectable && !canVerify,
+        onPress: selectable
+          ? () => void actions.selectNode(node.id)
+          : canVerify
+            ? () => void actions.openNodeSecurity?.(node)
+            : undefined,
       };
     });
 
@@ -337,7 +357,10 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
   const available = useHostedModeAvailable();
   // docs/relay-e2ee-protocol.md §12.2: the pill beside a node says what §4.4
   // locked, so a fallen-back channel reads `Legacy` here and not `Online`.
-  const e2eeStatus = useMobileE2eeChannelStatus();
+  const e2eeStatus = useMobileE2eeChannelStatus(state.selectedNode?.environmentId ?? null);
+  const trustByEnvironmentId = useAuthoritativeNodeTrust(
+    state.nodes.map((node) => ({ environmentId: node.environmentId, nodeId: node.id })),
+  );
 
   // Settling is applied to the DERIVED pair, not to any input of the
   // derivation: re-targeting the hosted connection walks the chip through up to
@@ -369,10 +392,16 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
       returnToDirectory: hostedHubController.returnToDirectory,
       refreshDirectory: hostedHubController.refreshDirectory,
       retrySelectedNode: hostedHubController.retrySelectedNode,
+      openNodeSecurity: (node) =>
+        navigation.navigate("SettingsSheet", {
+          screen: "SettingsNodeSecurity",
+          params: exactNodeRouteParams(node),
+        }),
     },
     // Sign-in uses the same full-screen native identity surface as the root gate.
     onSignIn: () => navigation.navigate("Access"),
     query: props.query,
+    trustByEnvironmentId,
   });
 
   return <HubNodeSectionView model={model} />;

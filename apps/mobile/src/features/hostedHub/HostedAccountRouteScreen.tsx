@@ -49,9 +49,9 @@ export function HostedAccountRouteScreen() {
   const navigation = useNavigation();
   const isFocused = useIsFocused();
   const hostedModeAvailable = useHostedModeAvailable();
-  // §12.2 / §2.2: the connection pill names §4.4's locked mode.
-  const e2eeStatus = useMobileE2eeChannelStatus();
   const state = useHostedHubStore((value) => value);
+  // §12.2 / §2.2: the connection pill names §4.4's locked mode.
+  const e2eeStatus = useMobileE2eeChannelStatus(state.selectedNode?.environmentId ?? null);
   const accountState = useHostedAccountStore((value) => value);
   const [draft, setDraftState] = useState<HostedAccountPromptDraft | null>(null);
   // The ref is the *live* draft and the state is the rendered one. A submit

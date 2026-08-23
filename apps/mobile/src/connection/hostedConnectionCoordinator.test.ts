@@ -126,6 +126,37 @@ describe("mobile hosted connection coordinator", () => {
     expect(Array.from(active.keys())).toEqual(["env-1"]);
   });
 
+  it("pairs and retries node B without changing node A's live connection", async () => {
+    const { active, coordinator, nodes, scopes } = fixture();
+    await coordinator.acquireNode(nodes[0]!.id);
+    await coordinator.acquireNode(nodes[1]!.id);
+    const releasePairing = coordinator.retainPairingScope(nodes[1]!.id, nodes[1]!.environmentId);
+    expect(releasePairing).not.toBeNull();
+    expect(scopes.list(nodes[1]!.environmentId)).toMatchObject([
+      { scope: { type: "node-pairing", nodeId: "node-2" }, refCount: 1 },
+    ]);
+
+    expect(await coordinator.reconnectNode(nodes[1]!.id, nodes[1]!.environmentId)).toBe(true);
+    expect(Array.from(active.keys()).toSorted()).toEqual(["env-1", "env-2"]);
+    expect(coordinator.read(nodes[0]!.environmentId)?.nodeId).toBe("node-1");
+    releasePairing?.();
+  });
+
+  it("fails closed for a pairing route whose node and environment do not match", () => {
+    const { coordinator, nodes } = fixture();
+    expect(coordinator.retainPairingScope(nodes[0]!.id, nodes[1]!.environmentId)).toBeNull();
+  });
+
+  it("identity-conflict release removes only the affected environment", async () => {
+    const { active, coordinator, nodes } = fixture();
+    await coordinator.acquireNode(nodes[0]!.id);
+    await coordinator.acquireNode(nodes[1]!.id);
+    await coordinator.releaseEnvironment(nodes[1]!.environmentId);
+    expect(Array.from(active.keys())).toEqual(["env-1"]);
+    expect(coordinator.read(nodes[0]!.environmentId)).not.toBeNull();
+    expect(coordinator.read(nodes[1]!.environmentId)).toBeNull();
+  });
+
   it("keeps delivery uncertainty on the environment whose request was interrupted", () => {
     const { coordinator, nodes } = fixture();
     const first = coordinator.ensureRecord(nodes[0]!);

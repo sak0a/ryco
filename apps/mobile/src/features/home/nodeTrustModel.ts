@@ -1,17 +1,12 @@
 /**
- * Wave 4: per-row E2EE trust provenance, derived from the trust store's
- * display-only readers.
+ * Per-row presentation of the async durable trust result.
  *
  * PURE MODULE. It imports no react and no platform adapter so it can be tested;
  * `useNodeTrust.ts` is the only binding that touches the store.
  *
- * DISPLAY ONLY, AND THE WORD IS LOAD-BEARING. `mobileE2eeTrustStore` documents
- * that "there is no synchronous classification path" — a snapshot accessor
- * feeding a classifier once skipped §13.1's marker reconciliation and answered
- * legacy-eligible where `classify` answers unexpected. Nothing derived here may
- * ever reach a connect, send, retarget or fallback decision; those all go
- * through `classify`, which reconciles first and is async for that reason. This
- * module exists to put a marker on a list row, and that is its whole remit.
+ * DISPLAY ONLY. Eligibility is resolved before this module by the durable async
+ * classifier. This module merely narrows that authoritative result to the two
+ * labels supported by existing inbox presentation.
  */
 
 /**
@@ -48,18 +43,14 @@ export type NodeTrust = "verified" | "unverified";
  * only error this surface is allowed to make.
  */
 export function deriveNodeTrustByEnvironment(input: {
-  readonly markerKind: "set" | "unset" | "unobtainable";
-  readonly verifiedRecords: ReadonlyArray<{ readonly nodeIdHints: ReadonlyArray<string> }>;
-  readonly rosterNodes: ReadonlyArray<{ readonly environmentId: string; readonly nodeId: string }>;
-}): ReadonlyMap<string, NodeTrust> | null {
-  if (input.markerKind === "unobtainable") return null;
-
+  readonly authoritativeTrustByEnvironmentId: ReadonlyMap<
+    string,
+    "not-required" | "unknown" | "unverified" | "verified" | "identity-conflict"
+  >;
+}): ReadonlyMap<string, NodeTrust> {
   const trustByEnvironmentId = new Map<string, NodeTrust>();
-  for (const node of input.rosterNodes) {
-    const matches = input.verifiedRecords.filter((record) =>
-      record.nodeIdHints.includes(node.nodeId),
-    );
-    trustByEnvironmentId.set(node.environmentId, matches.length === 1 ? "verified" : "unverified");
+  for (const [environmentId, trust] of input.authoritativeTrustByEnvironmentId) {
+    trustByEnvironmentId.set(environmentId, trust === "verified" ? "verified" : "unverified");
   }
   return trustByEnvironmentId;
 }

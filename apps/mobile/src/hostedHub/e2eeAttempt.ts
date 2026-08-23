@@ -9,8 +9,10 @@ import {
 } from "@ryco/client-runtime/relay";
 import { e2eeKeyFingerprint, formatE2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
 import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
+import type { EnvironmentId } from "@ryco/contracts";
 
 import { getMobileDeviceIdentityPublicKey } from "../platform/deviceKey";
+import { getMobileHostedConnectionCoordinator } from "../connection/hostedConnectionCoordinator";
 import { mobileE2eeAgreementKey } from "../platform/e2eeAgreementKey";
 import { mobileClientE2eePrekey } from "../platform/e2eeClientPrekey";
 import { makeMobileRelayE2eeProvider } from "../platform/e2eeRelayProvider";
@@ -31,6 +33,7 @@ import {
   raiseMobileE2eeUnexpectedNode,
   recordMobileE2eeInitiatorDiagnostic,
   resetMobileE2eeSession,
+  getMobileE2eeSessionState,
   type MobileE2eeIdentityDisplay,
 } from "./e2eeSession";
 import { getMobileHostedConfig } from "./runtimeConfig";
@@ -91,11 +94,11 @@ interface SelectionScope {
   readonly hubOrigin: string;
   readonly accountId: string;
   readonly nodeId: string;
+  readonly environmentId: EnvironmentId | null;
 }
 
 interface CurrentSelection extends SelectionScope {
   readonly nodeLabel: string;
-  readonly environmentId: string | null;
   readonly generation: number;
 }
 
@@ -139,7 +142,8 @@ function sameSelection(left: SelectionScope, right: SelectionScope): boolean {
   return (
     left.hubOrigin === right.hubOrigin &&
     left.accountId === right.accountId &&
-    left.nodeId === right.nodeId
+    left.nodeId === right.nodeId &&
+    left.environmentId === right.environmentId
   );
 }
 
@@ -150,6 +154,7 @@ function attemptSlot(selection: CurrentSelection): AttemptSlot {
       hubOrigin: selection.hubOrigin,
       accountId: selection.accountId,
       nodeId: selection.nodeId,
+      environmentId: selection.environmentId,
     },
     generation: selection.generation,
     trustRevision: mobileE2eeTrustStore.revision(),
@@ -340,7 +345,7 @@ async function runPreparationPass(): Promise<boolean> {
   // while the key stores are retried. Clearing it here would let
   // `resolveMobileRelayE2eeProvider` erase the legacy label or unexpected-node
   // ceremony merely by scheduling the retry it promises to perform.
-  if (!retainsCurrentFailureClaim) resetMobileE2eeSession();
+  if (!retainsCurrentFailureClaim) resetMobileE2eeSession(selection.environmentId);
   custodyUnavailableFor = null;
   strictUnavailableFor = null;
 
@@ -399,7 +404,7 @@ async function runPreparationPass(): Promise<boolean> {
       return true;
     }
     custodyUnavailableFor = slot;
-    markMobileE2eeKeyCustodyUnavailable();
+    markMobileE2eeKeyCustodyUnavailable(selection.environmentId);
     return true;
   }
 
@@ -500,15 +505,32 @@ async function runPreparationPass(): Promise<boolean> {
         record?.index.localNodeHandle ?? null,
         verification,
       );
-      observeMobileE2eeStatement(verification);
+      observeMobileE2eeStatement(verification, selection.environmentId);
+      if (
+        selection.environmentId !== null &&
+        getMobileE2eeSessionState(selection.environmentId).event?.kind === "identity-change"
+      ) {
+        // The retained snapshot remains available only through the locked-stale
+        // workspace projection. Close exactly this environment immediately so
+        // no mutation can survive a native identity conflict.
+        try {
+          await getMobileHostedConnectionCoordinator().releaseEnvironment(selection.environmentId);
+        } catch {
+          // Cold unit/runtime setup can observe the security projection before
+          // the connection coordinator exists. The channel is already fatal;
+          // the workspace trust gate remains locked fail-closed.
+        }
+      }
       await persistence;
       // The authenticated old selection may still tighten its own durable
       // record after a deadline or navigation. It cannot resume or project into
       // a lifecycle generation that did not own this callback.
       if (!ownsSelection(selection)) throw new Error("Mobile E2EE selection was superseded.");
     },
-    onUnexpectedNode: (evidence) => raiseMobileE2eeUnexpectedNode(evidence),
-    onDiagnostic: (diagnostic) => recordMobileE2eeInitiatorDiagnostic(diagnostic),
+    onUnexpectedNode: (evidence) =>
+      raiseMobileE2eeUnexpectedNode(evidence, selection.environmentId),
+    onDiagnostic: (diagnostic) =>
+      recordMobileE2eeInitiatorDiagnostic(diagnostic, selection.environmentId),
   };
   prepared = {
     slot,
@@ -675,11 +697,12 @@ export function resolveMobileRelayE2eeProvider(): RelayE2eeProvider | undefined 
     return unresolvedAttemptChannel;
   }
   const provider = makeMobileRelayE2eeProvider({ attempt: held.attempt });
+  const environmentId = held.slot.selection.environmentId;
   return (host) => {
     // §13's projection is PER CHANNEL, not per preparation: a claim earned by one
     // channel may not describe the next one. Publishing `negotiating` here is
     // what keeps a verified label from surviving the socket that earned it.
-    beginMobileE2eeChannelAttempt();
+    beginMobileE2eeChannelAttempt(environmentId);
     const machine = provider(host);
     // §4.4's mode lock has no callback — it is a state the machine holds — so
     // the pill is synced after every operation that can cause one. Publishing is
@@ -687,7 +710,7 @@ export function resolveMobileRelayE2eeProvider(): RelayE2eeProvider | undefined 
     // store holding `negotiating`, which claims nothing.
     const sync = () => {
       const mode = machine.mode();
-      if (mode === "e2ee" || mode === "legacy") lockMobileE2eeChannelMode(mode);
+      if (mode === "e2ee" || mode === "legacy") lockMobileE2eeChannelMode(mode, environmentId);
     };
     return {
       ...machine,

@@ -83,6 +83,12 @@ export interface MobileHostedConnectionCoordinatorDeps {
 
 export interface MobileHostedConnectionCoordinator {
   readonly acquireNode: (nodeId: string) => Promise<void>;
+  readonly retainPairingScope: (
+    nodeId: string,
+    environmentId: EnvironmentId,
+  ) => (() => void) | null;
+  readonly reconnectNode: (nodeId: string, environmentId: EnvironmentId) => Promise<boolean>;
+  readonly releaseEnvironment: (environmentId: EnvironmentId) => Promise<boolean>;
   readonly shouldActivate: (environmentId: EnvironmentId) => boolean;
   readonly ensureRecord: (node: HostedHubNode) => MobileHostedConnectionState;
   readonly read: (environmentId: EnvironmentId) => MobileHostedConnectionState | null;
@@ -326,6 +332,19 @@ export function createMobileHostedConnectionCoordinator(
     acquireNode(nodeId) {
       return enqueueAcquire(nodeId);
     },
+    retainPairingScope(nodeId, environmentId) {
+      const node = deps.nodeForId(nodeId);
+      if (!node || node.environmentId !== environmentId) return null;
+      return deps.scopes.retain(environmentId, { type: "node-pairing", nodeId });
+    },
+    async reconnectNode(nodeId, environmentId) {
+      const node = deps.nodeForId(nodeId);
+      if (!node || node.environmentId !== environmentId) return false;
+      if (!(await release(environmentId))) return false;
+      await enqueueAcquire(nodeId);
+      return records.has(environmentId);
+    },
+    releaseEnvironment: release,
     shouldActivate: (environmentId) =>
       acquiringEnvironmentId === environmentId ||
       (records.has(environmentId) && deps.scopes.isEnvironmentRetained(environmentId)),

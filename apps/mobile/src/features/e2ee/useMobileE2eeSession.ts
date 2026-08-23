@@ -14,12 +14,13 @@ import {
  * subscribable module so it can be asserted by a node test without React, which
  * is the whole reason the decisions do not live in a `.tsx`.
  */
-export function useMobileE2eeSession(): MobileE2eeSessionState {
-  return useSyncExternalStore(
-    subscribeMobileE2eeSession,
-    getMobileE2eeSessionState,
-    getMobileE2eeSessionState,
-  );
+export function useMobileE2eeSession(environmentId?: string): MobileE2eeSessionState {
+  const subscribe = (listener: () => void) =>
+    environmentId
+      ? subscribeMobileE2eeSession(environmentId, listener)
+      : subscribeMobileE2eeSession(listener);
+  const snapshot = () => getMobileE2eeSessionState(environmentId);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 const channelStatus = (): HostedE2eeChannelStatus => getMobileE2eeSessionState().channel;
@@ -34,6 +35,14 @@ const channelStatus = (): HostedE2eeChannelStatus => getMobileE2eeSessionState()
  * narrowed to the one field so a change to any other part of the projection does
  * not re-render a connection pill.
  */
-export function useMobileE2eeChannelStatus(): HostedE2eeChannelStatus {
-  return useSyncExternalStore(subscribeMobileE2eeSession, channelStatus, channelStatus);
+export function useMobileE2eeChannelStatus(environmentId?: string | null): HostedE2eeChannelStatus {
+  const subscribe = (listener: () => void) =>
+    typeof environmentId === "string"
+      ? subscribeMobileE2eeSession(environmentId, listener)
+      : subscribeMobileE2eeSession(listener);
+  const snapshot = () =>
+    environmentId === undefined
+      ? channelStatus()
+      : getMobileE2eeSessionState(environmentId).channel;
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

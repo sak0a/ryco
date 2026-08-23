@@ -22,6 +22,7 @@ import { ProjectsScreen } from "../projects/ProjectsScreen";
 import { buildHomeChromeModel } from "./homeChromeModel";
 import { createHomeModeState, reduceHomeModeState, type HomeMode } from "./homeMode";
 import { useHomeEnvironments } from "./useHomeEnvironments";
+import { NeedsVerificationSection } from "./NeedsVerificationSection";
 
 export function HomeScreen() {
   const navigation = useNavigation();
@@ -31,8 +32,12 @@ export function HomeScreen() {
   const iconColor = useThemeColor("--color-icon");
   const placeholderColor = useThemeColor("--color-placeholder");
   const textColor = useThemeColor("--color-foreground");
-  const { projects, worktrees, threads } = useHomeWorkspaceData();
   const environments = useHomeEnvironments();
+  const eligibleEnvironmentIds = useMemo(
+    () => new Set(environments.map((environment) => environment.environmentId)),
+    [environments],
+  );
+  const { projects, worktrees, threads } = useHomeWorkspaceData(eligibleEnvironmentIds);
   const preferences = usePreferences();
   const groupingMode = resolveHomeGroupingMode(preferences.projectGroupingEnabled);
 
@@ -208,6 +213,7 @@ export function HomeScreen() {
         />
       ) : null}
       <View className="min-h-0 flex-1">
+        <NeedsVerificationSection />
         {home.mode === "inbox" ? (
           <InboxScreen
             sections={inboxSections}
