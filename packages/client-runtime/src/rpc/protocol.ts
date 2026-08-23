@@ -31,6 +31,8 @@ export interface WsProtocolLifecycleHandlers {
   readonly getVersionMismatchHint?: () => string | null;
   readonly isCloseIntentional?: () => boolean;
   readonly isActive?: () => boolean;
+  /** Reject lifecycle events emitted late by a superseded socket in the same transport session. */
+  readonly isSocketCurrent?: (socket: globalThis.WebSocket) => boolean;
   readonly onAttempt?: (socketUrl: string) => void;
   readonly onOpen?: () => void;
   readonly onHeartbeatPing?: () => void;
@@ -235,6 +237,7 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "open",
         () => {
+          if (handlers?.isSocketCurrent?.(socket) === false) return;
           lifecycle.onOpen();
         },
         { once: true },
@@ -242,6 +245,7 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "error",
         () => {
+          if (handlers?.isSocketCurrent?.(socket) === false) return;
           lifecycle.onError(WS_CONNECTION_ERROR_MESSAGE);
         },
         { once: true },
@@ -249,6 +253,7 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "close",
         (event) => {
+          if (handlers?.isSocketCurrent?.(socket) === false) return;
           lifecycle.onClose(
             {
               code: event.code,
