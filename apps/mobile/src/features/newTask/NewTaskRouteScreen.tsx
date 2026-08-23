@@ -37,6 +37,7 @@ import { useHomeEnvironments } from "../home/useHomeEnvironments";
 import { inferNodeProjectTitle, validateNodeWorkspacePath } from "../projects/projectActions";
 import {
   createNewTaskAttempt,
+  resolveMobileNewTaskTarget,
   runNewTaskAttempt,
   type NewTaskAttempt,
   type NewTaskProjectContext,
@@ -68,8 +69,12 @@ async function waitForAuthoritative(read: () => boolean, label: string): Promise
 
 export function NewTaskRouteScreen(props: NewTaskRouteScreenProps) {
   const navigation = useNavigation();
-  const { projects, worktrees } = useHomeWorkspaceData();
   const environments = useHomeEnvironments();
+  const eligibleEnvironmentIds = useMemo(
+    () => new Set(environments.map((environment) => environment.environmentId)),
+    [environments],
+  );
+  const { projects, worktrees, threads } = useHomeWorkspaceData(eligibleEnvironmentIds);
   const launch = useMemo(() => {
     const environmentId = firstParam(props.route.params?.environmentId);
     const projectId = firstParam(props.route.params?.projectId);
@@ -84,6 +89,24 @@ export function NewTaskRouteScreen(props: NewTaskRouteScreenProps) {
     () => deriveNewTaskDefaults({ launch, environments, projects, worktrees }),
     [environments, launch, projects, worktrees],
   );
+  const resolvedDefaultTarget = useMemo(() => {
+    if (!defaults.environment || !defaults.project) return null;
+    return resolveMobileNewTaskTarget({
+      environmentId: defaults.environment.environmentId,
+      projectId: defaults.project.id,
+      projects,
+      environments,
+      threads,
+      overrideEnvironmentId: launch.environmentId,
+    });
+  }, [
+    defaults.environment,
+    defaults.project,
+    environments,
+    launch.environmentId,
+    projects,
+    threads,
+  ]);
   const initialized = useRef(false);
   const [environmentId, setEnvironmentId] = useState<EnvironmentId | null>(null);
   const [projectId, setProjectId] = useState<ProjectId | null>(null);
@@ -114,8 +137,10 @@ export function NewTaskRouteScreen(props: NewTaskRouteScreenProps) {
   useEffect(() => {
     if (initialized.current || !defaults.environment) return;
     initialized.current = true;
-    setEnvironmentId(defaults.environment.environmentId);
-    setProjectId(defaults.project?.id ?? null);
+    const target =
+      resolvedDefaultTarget?.status === "resolved" ? resolvedDefaultTarget.target : null;
+    setEnvironmentId(target?.environmentId ?? defaults.environment.environmentId);
+    setProjectId(target?.projectId ?? defaults.project?.id ?? null);
     setWorktreeSelection(
       defaults.worktree
         ? { kind: "existing", worktreeId: defaults.worktree.id }
@@ -123,7 +148,7 @@ export function NewTaskRouteScreen(props: NewTaskRouteScreenProps) {
     );
     setModelSelection(defaults.modelSelection);
     setRuntimeMode(defaults.runtimeMode);
-  }, [defaults]);
+  }, [defaults, resolvedDefaultTarget]);
 
   useEffect(() => {
     if (environmentId) useStore.getState().setActiveEnvironmentId(environmentId);
@@ -177,13 +202,28 @@ export function NewTaskRouteScreen(props: NewTaskRouteScreenProps) {
   };
 
   const selectEnvironment = (nextEnvironmentId: EnvironmentId) => {
-    const nextProject = projects.find((candidate) => candidate.environmentId === nextEnvironmentId);
+    const target =
+      environmentId && projectId
+        ? resolveMobileNewTaskTarget({
+            environmentId,
+            projectId,
+            projects,
+            environments,
+            threads,
+            overrideEnvironmentId: nextEnvironmentId,
+          })
+        : null;
+    const nextProject =
+      target?.status === "resolved"
+        ? projects.find(
+            (candidate) =>
+              candidate.environmentId === target.target.environmentId &&
+              candidate.id === target.target.projectId,
+          )
+        : projects.find((candidate) => candidate.environmentId === nextEnvironmentId);
     setEnvironmentId(nextEnvironmentId);
     setProjectId(nextProject?.id ?? null);
     setWorktreeSelection({ kind: "local" });
-    if (nextProject?.defaultModelSelection) {
-      setModelSelection(nextProject.defaultModelSelection);
-    }
     resetAttempt();
   };
 
@@ -204,6 +244,11 @@ export function NewTaskRouteScreen(props: NewTaskRouteScreenProps) {
     environment?.connectionState === "connected" &&
     (project !== undefined || newProjectPath.trim().length > 0) &&
     (worktreeSelection.kind !== "new" || newBranch.trim().length > 0);
+  const sendDisabledReason = environments.some(
+    (candidate) => candidate.connectionState === "connected",
+  )
+    ? null
+    : "No verified machine available";
 
   const createAttempt = (): NewTaskAttempt => {
     if (!environment) throw new Error("Choose a connected node.");
@@ -341,9 +386,9 @@ export function NewTaskRouteScreen(props: NewTaskRouteScreenProps) {
       >
         <EmptyState
           variant="plain"
-          title="Add a machine first"
-          detail="A task needs a ready machine, project, and workspace."
-          actionLabel="Add a machine"
+          title="No verified machine available"
+          detail="Verify an online machine with operator access before starting work."
+          actionLabel="Open Machines"
           onAction={() => navigation.navigate("Connections")}
         />
       </ScrollView>
@@ -436,10 +481,12 @@ export function NewTaskRouteScreen(props: NewTaskRouteScreenProps) {
           prompt={prompt}
           attachments={attachments}
           contextLabel={contextLabel}
+          machineLabel={environment?.label ?? "No verified machine available"}
           modelLabel={modelLabel}
           runtimeMode={runtimeMode}
           busy={busy}
           canSend={canSend}
+          sendDisabledReason={sendDisabledReason}
           onChangePrompt={(value) => {
             setPrompt(value);
             resetAttempt();

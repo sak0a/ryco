@@ -37,6 +37,10 @@ vi.mock("../../components/HomeModeControl", () => ({ HomeModeControl: "HomeModeC
 vi.mock("../../components/NodeScopeControl", () => ({ NodeScopeControl: "NodeScopeControl" }));
 vi.mock("../inbox/InboxScreen", () => ({ InboxScreen: "InboxScreen" }));
 vi.mock("../projects/ProjectsScreen", () => ({ ProjectsScreen: "ProjectsScreen" }));
+vi.mock("./NeedsVerificationSection", () => ({
+  NeedsVerificationSection: "NeedsVerificationSection",
+}));
+vi.mock("./useHomeEnvironments", () => ({ useHomeEnvironments: () => [] }));
 // useNodeTrust reaches the E2EE trust store singleton and the hosted runtime
 // config at module scope; preferencesStore reaches expo-sqlite's KV store.
 // Both must stop at the module boundary in the node test environment.

@@ -1,14 +1,17 @@
-import { useNavigation } from "@react-navigation/native";
+import { StackActions, useNavigation } from "@react-navigation/native";
 import { useLayoutEffect } from "react";
 import { Pressable, ScrollView } from "react-native";
 
 import { SymbolView } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
+import { useHostedHubStore } from "../../hostedHub/state";
+import { exactNodeRouteParams } from "../e2ee/exactNodeRouteModel";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 
 export function SettingsRouteScreen() {
   const navigation = useNavigation();
+  const selectedNode = useHostedHubStore((state) => state.selectedNode);
   const iconColor = useThemeColor("--color-icon");
 
   useLayoutEffect(() => {
@@ -49,7 +52,15 @@ export function SettingsRouteScreen() {
         <SettingsRow
           first
           label="Node security"
-          onPress={() => navigation.navigate("SettingsNodeSecurity" as never)}
+          onPress={() => {
+            if (selectedNode) {
+              navigation.dispatch(
+                StackActions.push("SettingsNodeSecurity", exactNodeRouteParams(selectedNode)),
+              );
+              return;
+            }
+            navigation.getParent()?.navigate("Connections" as never);
+          }}
         />
       </SettingsSection>
 

@@ -16,11 +16,16 @@ import { usePreferences } from "./preferencesStore";
 export { buildHomeThreadGroups, resolveHomeGroupingMode } from "./homeGrouping";
 export type { HomeThreadGroup } from "./homeGrouping";
 
-export function useHomeWorkspaceData() {
+export function useHomeWorkspaceData(eligibleEnvironmentIds?: ReadonlySet<string>) {
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const worktrees = useStore(useShallow(selectSidebarWorktreesAcrossEnvironments));
   const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
-  return { projects, worktrees, threads } as const;
+  if (!eligibleEnvironmentIds) return { projects, worktrees, threads } as const;
+  return {
+    projects: projects.filter((project) => eligibleEnvironmentIds.has(project.environmentId)),
+    worktrees: worktrees.filter((worktree) => eligibleEnvironmentIds.has(worktree.environmentId)),
+    threads: threads.filter((thread) => eligibleEnvironmentIds.has(thread.environmentId)),
+  } as const;
 }
 
 export function useHomeThreadGroups(): ReadonlyArray<HomeThreadGroup> {

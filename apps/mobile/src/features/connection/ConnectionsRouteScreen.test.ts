@@ -93,6 +93,9 @@ vi.mock("../hostedHub/useSettledHostedStatus", () => ({
     statusText: input.statusText,
   }),
 }));
+vi.mock("../home/useAuthoritativeNodeTrust", () => ({
+  useAuthoritativeNodeTrust: () => new Map(),
+}));
 
 const hostedState: HostedHubState = {
   bootstrapAvailable: false,

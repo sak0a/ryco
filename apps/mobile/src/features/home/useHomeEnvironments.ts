@@ -6,7 +6,9 @@ import { useMobileHostedConnectionsStore } from "../../hostedHub/state";
 import { selectCacheHydratedEnvironmentIds, useStore } from "../../state/threadsRuntime";
 import { useSavedEnvironments } from "../connection/useConnectionController";
 import { buildHomeEnvironments } from "./homeEnvironmentModel";
-import { useNodeTrust } from "./useNodeTrust";
+import { deriveNodeTrustByEnvironment } from "./nodeTrustModel";
+import { useAuthoritativeNodeTrust } from "./useAuthoritativeNodeTrust";
+import { buildMobileNativeWorkspaceCatalog } from "./nativeWorkspaceCatalogModel";
 
 export function useHomeEnvironments() {
   const { rows: directRows } = useSavedEnvironments();
@@ -25,7 +27,30 @@ export function useHomeEnvironments() {
   // roster records go in whole rather than the environment ids alone. The store
   // snapshot is a stable reference between commits, so this does not re-derive
   // per render.
-  const trustByEnvironmentId = useNodeTrust(rosterNodes);
+  const authoritativeTrustByEnvironmentId = useAuthoritativeNodeTrust(rosterNodes);
+  const trustByEnvironmentId = useMemo(
+    () => deriveNodeTrustByEnvironment({ authoritativeTrustByEnvironmentId }),
+    [authoritativeTrustByEnvironmentId],
+  );
+  const nativeCatalog = useMemo(
+    () =>
+      buildMobileNativeWorkspaceCatalog({
+        nodes: rosterNodes,
+        connections: hosted.selectedNodes,
+        trustByEnvironmentId: authoritativeTrustByEnvironmentId,
+        deliveryUnknownEnvironmentIds: hosted.deliveryUnknownEnvironmentIds,
+      }),
+    [authoritativeTrustByEnvironmentId, hosted, rosterNodes],
+  );
+  const eligibleHostedEnvironmentIds = useMemo(
+    () =>
+      new Set(
+        nativeCatalog
+          .filter((machine) => machine.canReadMetadata && machine.cacheDisposition === "available")
+          .map((machine) => machine.environmentId),
+      ),
+    [nativeCatalog],
+  );
 
   return useMemo(
     () =>
@@ -36,26 +61,37 @@ export function useHomeEnvironments() {
           connectionState: row.runtime.connectionState,
           role: row.runtime.role,
         })),
-        hosted: hosted.selectedNodes.map((connection) => ({
-          environmentId: connection.environmentId,
-          label: connection.label,
-          transportStatus: connection.transportStatus,
-          sessionStatus: connection.sessionStatus,
-          role: connection.effectiveRole,
-        })),
-        cachedHubNodes: rosterNodes.map((node) => ({
-          environmentId: node.environmentId,
-          label: node.label,
-          role: node.effectiveRole,
-          revokedAt: node.revokedAt,
-          presenceOnline: node.presenceOnline,
-          lastHeartbeatAt: node.lastHeartbeatAt,
-          lastAuthenticatedAt: node.lastAuthenticatedAt,
-        })),
+        hosted: hosted.selectedNodes
+          .filter((connection) => eligibleHostedEnvironmentIds.has(connection.environmentId))
+          .map((connection) => ({
+            environmentId: connection.environmentId,
+            label: connection.label,
+            transportStatus: connection.transportStatus,
+            sessionStatus: connection.sessionStatus,
+            role: connection.effectiveRole,
+          })),
+        cachedHubNodes: rosterNodes
+          .filter((node) => eligibleHostedEnvironmentIds.has(node.environmentId))
+          .map((node) => ({
+            environmentId: node.environmentId,
+            label: node.label,
+            role: node.effectiveRole,
+            revokedAt: node.revokedAt,
+            presenceOnline: node.presenceOnline,
+            lastHeartbeatAt: node.lastHeartbeatAt,
+            lastAuthenticatedAt: node.lastAuthenticatedAt,
+          })),
         cacheProvenanceEnvironmentIds,
         deliveryUnknownEnvironmentIds: hosted.deliveryUnknownEnvironmentIds,
         trustByEnvironmentId,
       }),
-    [cacheProvenanceEnvironmentIds, directRows, hosted, rosterNodes, trustByEnvironmentId],
+    [
+      cacheProvenanceEnvironmentIds,
+      directRows,
+      eligibleHostedEnvironmentIds,
+      hosted,
+      rosterNodes,
+      trustByEnvironmentId,
+    ],
   );
 }

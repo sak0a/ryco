@@ -26,6 +26,7 @@ import {
 import { resetMobileE2eeSession } from "./e2eeSession";
 import { hydrateMobileHubProfile } from "./hubProfile";
 import { mobileHostedNodeLifecycle } from "./nodeLifecycle";
+import { configureAuthoritativeNodeTrustSource } from "../features/home/authoritativeNodeTrustSource";
 import { MobileHostedRelaySocket, mobileHostedRelayUrl } from "./relaySocket";
 import {
   getMobileHostedEndpoint,
@@ -33,6 +34,12 @@ import {
   invalidateMobileHostedRuntimeConfig,
   isMobileHostedModeConfigured,
 } from "./runtimeConfig";
+
+configureAuthoritativeNodeTrustSource({
+  hubOrigin: () => getMobileHostedEndpoint()?.origin() ?? null,
+  classify: (selection) => mobileE2eeTrustStore.classify(selection),
+  subscribe: mobileE2eeTrustStore.subscribe,
+});
 
 /**
  * Hosted runtime wiring.

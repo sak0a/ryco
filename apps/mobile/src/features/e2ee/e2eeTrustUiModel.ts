@@ -436,7 +436,7 @@ export function deriveE2eeVerificationView(input: E2eeVerificationInput): E2eeVe
     input.onDraftChange({ ...draft, ...patch });
 
   const dismiss = action("dismiss", "Close", () => {
-    clearMobileE2eeTrustEvent();
+    clearMobileE2eeTrustEvent(selection?.environmentId);
     input.onCompleted();
   });
 
@@ -524,7 +524,7 @@ export function deriveE2eeVerificationView(input: E2eeVerificationInput): E2eeVe
               return;
             }
             input.onDraftChange({ ...createE2eeVerificationDraft() });
-            clearMobileE2eeTrustEvent();
+            clearMobileE2eeTrustEvent(selection?.environmentId);
             input.onCompleted();
           })();
         })
@@ -566,7 +566,7 @@ async function confirmE2eeVerification(input: {
             accountId: selection.accountId,
             localNodeHandle: selection.localNodeHandle,
           };
-    attachMobileE2eeLocalNodeHandle(index.localNodeHandle);
+    attachMobileE2eeLocalNodeHandle(index.localNodeHandle, selection.environmentId);
     const decision = mintE2eeOwnerVerificationDecision({
       index,
       nodeIdentityPublicKey: presented.nodeIdentityPublicKey,
@@ -634,7 +634,7 @@ export async function confirmE2eeApprovalQr(input: {
             accountId: selection.accountId,
             localNodeHandle: selection.localNodeHandle,
           };
-    attachMobileE2eeLocalNodeHandle(index.localNodeHandle);
+    attachMobileE2eeLocalNodeHandle(index.localNodeHandle, selection.environmentId);
     const decision = mintE2eeOwnerVerificationDecision({
       index,
       nodeIdentityPublicKey: presented.nodeIdentityPublicKey,
@@ -646,7 +646,7 @@ export async function confirmE2eeApprovalQr(input: {
       decidedAt: input.decidedAt,
     });
     await mobileE2eeTrustStore.promote(decision);
-    clearMobileE2eeTrustEvent();
+    clearMobileE2eeTrustEvent(selection.environmentId);
     return null;
   } catch {
     return E2EE_VERIFICATION_UNAVAILABLE;
@@ -677,7 +677,7 @@ export async function requestE2eeApproval(session: MobileE2eeSessionState): Prom
       nodeId: selection.nodeId,
       ...(selection.environmentId === null ? {} : { environmentId: selection.environmentId }),
     });
-    attachMobileE2eeLocalNodeHandle(index.localNodeHandle);
+    attachMobileE2eeLocalNodeHandle(index.localNodeHandle, selection.environmentId);
     return null;
   } catch {
     return E2EE_VERIFICATION_UNAVAILABLE;
@@ -1048,7 +1048,7 @@ async function recordE2eeLegacyConsent(
           decidedAt,
         }),
       );
-      attachMobileE2eeLocalNodeHandle(index.localNodeHandle);
+      attachMobileE2eeLocalNodeHandle(index.localNodeHandle, selection.environmentId);
     } else {
       await mobileE2eeTrustStore.recordLegacyConsent(
         mintE2eeOwnerLegacyConsentDecision({
@@ -1066,5 +1066,5 @@ async function recordE2eeLegacyConsent(
     // document it cannot read. Neither is worth an error carrying a selection.
     return;
   }
-  clearMobileE2eeTrustEvent();
+  clearMobileE2eeTrustEvent(selection.environmentId);
 }

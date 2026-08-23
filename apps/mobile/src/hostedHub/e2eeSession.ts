@@ -203,22 +203,58 @@ const INITIAL: MobileE2eeSessionState = {
 /** How many local diagnostics the screen keeps. Bounded, oldest evicted. */
 const DIAGNOSTICS_MAX = 8;
 
-let state: MobileE2eeSessionState = INITIAL;
+let fallbackState: MobileE2eeSessionState = INITIAL;
+let activeEnvironmentId: string | null = null;
+const states = new Map<string, MobileE2eeSessionState>();
 const listeners = new Set<() => void>();
+const environmentListeners = new Map<string, Set<() => void>>();
 
-function publish(next: MobileE2eeSessionState): void {
-  if (next === state) return;
-  state = next;
+function stateFor(environmentId?: string | null): MobileE2eeSessionState {
+  const key = environmentId === undefined ? activeEnvironmentId : environmentId;
+  return key === null ? fallbackState : (states.get(key) ?? INITIAL);
+}
+
+function publish(next: MobileE2eeSessionState, environmentId?: string | null): void {
+  const key =
+    environmentId === undefined
+      ? (next.selection?.environmentId ?? activeEnvironmentId)
+      : environmentId;
+  const current = stateFor(key);
+  if (next === current) return;
+  if (key === null) fallbackState = next;
+  else {
+    states.set(key, next);
+    activeEnvironmentId = key;
+  }
   for (const listener of listeners) listener();
+  if (key !== null) {
+    for (const listener of environmentListeners.get(key) ?? []) listener();
+  }
 }
 
-export function getMobileE2eeSessionState(): MobileE2eeSessionState {
-  return state;
+export function getMobileE2eeSessionState(environmentId?: string | null): MobileE2eeSessionState {
+  return stateFor(environmentId);
 }
 
-export function subscribeMobileE2eeSession(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+export function subscribeMobileE2eeSession(listener: () => void): () => void;
+export function subscribeMobileE2eeSession(environmentId: string, listener: () => void): () => void;
+export function subscribeMobileE2eeSession(
+  environmentIdOrListener: string | (() => void),
+  maybeListener?: () => void,
+): () => void {
+  if (typeof environmentIdOrListener === "function") {
+    listeners.add(environmentIdOrListener);
+    return () => listeners.delete(environmentIdOrListener);
+  }
+  const scoped = environmentListeners.get(environmentIdOrListener) ?? new Set<() => void>();
+  const listener = maybeListener;
+  if (!listener) return () => undefined;
+  scoped.add(listener);
+  environmentListeners.set(environmentIdOrListener, scoped);
+  return () => {
+    scoped.delete(listener);
+    if (scoped.size === 0) environmentListeners.delete(environmentIdOrListener);
+  };
 }
 
 /**
@@ -258,16 +294,19 @@ export function beginMobileE2eeChannel(input: {
   readonly pinVerified: boolean;
   readonly previouslyVerified: MobileE2eeIdentityDisplay | null;
 }): void {
-  publish({
-    ...INITIAL,
-    channel: "negotiating",
-    selection: input.selection,
-    classification: input.classification,
-    legacyPermitted: input.legacyPermitted,
-    markerSet: input.markerSet,
-    pinVerified: input.pinVerified,
-    previouslyVerified: input.previouslyVerified,
-  });
+  publish(
+    {
+      ...INITIAL,
+      channel: "negotiating",
+      selection: input.selection,
+      classification: input.classification,
+      legacyPermitted: input.legacyPermitted,
+      markerSet: input.markerSet,
+      pinVerified: input.pinVerified,
+      previouslyVerified: input.previouslyVerified,
+    },
+    input.selection.environmentId,
+  );
 }
 
 /**
@@ -287,15 +326,18 @@ export function beginMobileE2eeFailClosedSelection(input: {
   readonly pinVerified: boolean;
 }): void {
   const situation = resolveE2eeUnexpectedNodeSituation(input.classification, { kind: "none" });
-  publish({
-    ...INITIAL,
-    selection: { ...input.selection, clientIdentityPublicKey: null },
-    classification: input.classification,
-    legacyPermitted: input.legacyPermitted,
-    markerSet: input.markerSet,
-    pinVerified: input.pinVerified,
-    event: situation === null ? null : { kind: "unexpected-node", situation, evidence: "none" },
-  });
+  publish(
+    {
+      ...INITIAL,
+      selection: { ...input.selection, clientIdentityPublicKey: null },
+      classification: input.classification,
+      legacyPermitted: input.legacyPermitted,
+      markerSet: input.markerSet,
+      pinVerified: input.pinVerified,
+      event: situation === null ? null : { kind: "unexpected-node", situation, evidence: "none" },
+    },
+    input.selection.environmentId,
+  );
 }
 
 /**
@@ -304,8 +346,8 @@ export function beginMobileE2eeFailClosedSelection(input: {
  * start, and §12.2 requires it to be labeled so everywhere — with the copy that
  * says which of the two legacy channels this is.
  */
-export function markMobileE2eeKeyCustodyUnavailable(): void {
-  publish({ ...INITIAL, channel: "legacy", keyCustodyUnavailable: true });
+export function markMobileE2eeKeyCustodyUnavailable(environmentId?: string | null): void {
+  publish({ ...INITIAL, channel: "legacy", keyCustodyUnavailable: true }, environmentId);
 }
 
 /**
@@ -320,14 +362,27 @@ export function markMobileE2eeKeyCustodyUnavailable(): void {
  * surface (§13.1.1's dismissal rule), and a reconnect must not silently empty
  * the comparison they are standing in front of.
  */
-export function beginMobileE2eeChannelAttempt(): void {
+export function beginMobileE2eeChannelAttempt(environmentId?: string | null): void {
+  const state = stateFor(environmentId);
   if (state.selection === null) return;
-  publish({ ...state, channel: "negotiating" });
+  publish({ ...state, channel: "negotiating" }, environmentId);
 }
 
 /** No hosted channel at all — signed out, no node selected, or none open yet. */
-export function resetMobileE2eeSession(): void {
-  publish(INITIAL);
+export function resetMobileE2eeSession(environmentId?: string | null): void {
+  if (environmentId === undefined) {
+    const changed = states.size > 0 || fallbackState !== INITIAL || activeEnvironmentId !== null;
+    states.clear();
+    fallbackState = INITIAL;
+    activeEnvironmentId = null;
+    if (!changed) return;
+    for (const listener of listeners) listener();
+    for (const scoped of environmentListeners.values()) {
+      for (const listener of scoped) listener();
+    }
+    return;
+  }
+  publish(INITIAL, environmentId);
 }
 
 /**
@@ -338,24 +393,39 @@ export function resetMobileE2eeSession(): void {
  * release-gated pairing channel, and it is reported `unverified` so no surface
  * can spell it the way the verified row is spelled.
  */
-export function lockMobileE2eeChannelMode(mode: "e2ee" | "legacy"): void {
-  publish({
-    ...state,
-    channel: mode === "legacy" ? "legacy" : state.pinVerified ? "verified" : "unverified",
-  });
+export function lockMobileE2eeChannelMode(
+  mode: "e2ee" | "legacy",
+  environmentId?: string | null,
+): void {
+  const state = stateFor(environmentId);
+  publish(
+    {
+      ...state,
+      channel: mode === "legacy" ? "legacy" : state.pinVerified ? "verified" : "unverified",
+    },
+    environmentId,
+  );
 }
 
 /** A §11.4 local diagnostic, bounded and oldest-evicted. Never a wire effect. */
-export function recordMobileE2eeDiagnostic(diagnostic: MobileE2eeLocalDiagnostic): void {
+export function recordMobileE2eeDiagnostic(
+  diagnostic: MobileE2eeLocalDiagnostic,
+  environmentId?: string | null,
+): void {
+  const state = stateFor(environmentId);
   const next = [...state.diagnostics, diagnostic];
-  publish({ ...state, diagnostics: next.slice(Math.max(0, next.length - DIAGNOSTICS_MAX)) });
+  publish(
+    { ...state, diagnostics: next.slice(Math.max(0, next.length - DIAGNOSTICS_MAX)) },
+    environmentId,
+  );
 }
 
 /** The initiator's own pre-key row, in the shape this store keeps. */
 export function recordMobileE2eeInitiatorDiagnostic(
   diagnostic: RelayE2eeInitiatorDiagnostic,
+  environmentId?: string | null,
 ): void {
-  recordMobileE2eeDiagnostic({ id: "pre_key_local", row: diagnostic.row });
+  recordMobileE2eeDiagnostic({ id: "pre_key_local", row: diagnostic.row }, environmentId);
 }
 
 /**
@@ -366,7 +436,11 @@ export function recordMobileE2eeInitiatorDiagnostic(
  * is explicit that conflating the three "re-creates exactly the click-through
  * training §13.3 opens by forbidding".
  */
-export function raiseMobileE2eeUnexpectedNode(evidence: RelayE2eeUnexpectedNodeEvidence): void {
+export function raiseMobileE2eeUnexpectedNode(
+  evidence: RelayE2eeUnexpectedNodeEvidence,
+  environmentId?: string | null,
+): void {
+  const state = stateFor(environmentId);
   const classification = state.classification;
   if (classification === null) return;
   const situation = resolveE2eeUnexpectedNodeSituation(
@@ -374,7 +448,7 @@ export function raiseMobileE2eeUnexpectedNode(evidence: RelayE2eeUnexpectedNodeE
     evidence === "none" ? { kind: "none" } : { kind: "first-contact-statement" },
   );
   if (situation === null) return;
-  publish({ ...state, event: { kind: "unexpected-node", situation, evidence } });
+  publish({ ...state, event: { kind: "unexpected-node", situation, evidence } }, environmentId);
 }
 
 /**
@@ -391,29 +465,38 @@ export function raiseMobileE2eeUnexpectedNode(evidence: RelayE2eeUnexpectedNodeE
  *    diagnostic "MUST NOT by itself launch the §13.2 ceremony or the §13.3
  *    re-verification UI".
  */
-export function observeMobileE2eeStatement(verification: NodeE2eeCapabilityVerification): void {
+export function observeMobileE2eeStatement(
+  verification: NodeE2eeCapabilityVerification,
+  environmentId?: string | null,
+): void {
+  const state = stateFor(environmentId);
   const outcome = resolveE2eeTrustStatementOutcome(verification);
   const presented =
-    "statement" in verification ? presentedFor(verification.statement) : state.presented;
+    "statement" in verification
+      ? presentedFor(verification.statement, environmentId)
+      : state.presented;
   switch (outcome.kind) {
     case "diagnostic-only":
-      publish({ ...state, presented });
-      recordMobileE2eeDiagnostic({ id: outcome.diagnostic, row: "local" });
+      publish({ ...state, presented }, environmentId);
+      recordMobileE2eeDiagnostic({ id: outcome.diagnostic, row: "local" }, environmentId);
       return;
     case "re-verification-required":
-      publish({ ...state, presented, event: { kind: "identity-change" } });
+      publish({ ...state, presented, event: { kind: "identity-change" } }, environmentId);
       return;
     case "pin-authenticated":
     case "pin-rotated":
     case "first-contact":
     case "no-trust-change":
-      publish({ ...state, presented });
+      publish({ ...state, presented }, environmentId);
       return;
   }
 }
 
-function presentedFor(statement: NodeE2eeCapabilityStatement): MobileE2eePresentedNode | null {
-  const selection = state.selection;
+function presentedFor(
+  statement: NodeE2eeCapabilityStatement,
+  environmentId?: string | null,
+): MobileE2eePresentedNode | null {
+  const selection = stateFor(environmentId).selection;
   if (selection === null || selection.clientIdentityPublicKey === null) return null;
   let display: MobileE2eeIdentityDisplay;
   try {
@@ -444,10 +527,14 @@ function presentedFor(statement: NodeE2eeCapabilityStatement): MobileE2eePresent
  * selection is the client-anchored handle rather than the `nodeId` that raised
  * the surface.
  */
-export function attachMobileE2eeLocalNodeHandle(localNodeHandle: string): void {
+export function attachMobileE2eeLocalNodeHandle(
+  localNodeHandle: string,
+  environmentId?: string | null,
+): void {
+  const state = stateFor(environmentId);
   const selection = state.selection;
   if (selection === null) return;
-  publish({ ...state, selection: { ...selection, localNodeHandle } });
+  publish({ ...state, selection: { ...selection, localNodeHandle } }, environmentId);
 }
 
 /**
@@ -455,13 +542,17 @@ export function attachMobileE2eeLocalNodeHandle(localNodeHandle: string): void {
  * was recorded. Clearing the EVENT is all this does — it changes no channel
  * label and unlocks no guarantee, which §13.1.1 requires of every dismissal.
  */
-export function clearMobileE2eeTrustEvent(): void {
+export function clearMobileE2eeTrustEvent(environmentId?: string | null): void {
+  const state = stateFor(environmentId);
   if (state.event === null) return;
-  publish({ ...state, event: null });
+  publish({ ...state, event: null }, environmentId);
 }
 
 /** Test seam: drop every subscriber and return to the initial state. */
 export function resetMobileE2eeSessionForTests(): void {
   listeners.clear();
-  state = INITIAL;
+  environmentListeners.clear();
+  states.clear();
+  fallbackState = INITIAL;
+  activeEnvironmentId = null;
 }

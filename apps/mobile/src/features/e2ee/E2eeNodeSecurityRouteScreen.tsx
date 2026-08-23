@@ -1,12 +1,14 @@
-import { useNavigation } from "@react-navigation/native";
+import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { showConfirmDialog } from "../../components/ConfirmDialogHost";
 import { useHostedModeAvailable } from "../hostedHub/useHostedMode";
 import { E2eeActionButton, E2eeChannelCard, E2eeUnverifiedHubNotice } from "./E2eeTrustParts";
+import { exactNodeRouteParams, resolveExactNodeRoute } from "./exactNodeRouteModel";
 import { deriveE2eeSecurityView, type E2eeTrustAction } from "./e2eeTrustUiModel";
 import { useMobileE2eeSession } from "./useMobileE2eeSession";
+import { useHostedHubStore } from "../../hostedHub/state";
 
 /**
  * The `docs/relay-e2ee-protocol.md` §13.1.1 security surface.
@@ -16,9 +18,13 @@ import { useMobileE2eeSession } from "./useMobileE2eeSession";
  * node test — react-native ships untranspiled Flow, so a decision made in this
  * file could not be.
  */
-export function E2eeNodeSecurityRouteScreen() {
+type Props = StaticScreenProps<{ readonly nodeId: string; readonly environmentId: string }>;
+
+export function E2eeNodeSecurityRouteScreen(props: Props) {
   const navigation = useNavigation();
-  const session = useMobileE2eeSession();
+  const nodes = useHostedHubStore((state) => state.nodes);
+  const target = resolveExactNodeRoute(props.route.params, nodes);
+  const session = useMobileE2eeSession(target?.environmentId ?? "__invalid-node-route__");
   // The hook, not the bare accessor: availability is false until the async
   // runtime configuration completes, and nothing about the §13 projection
   // changes when it flips — so a screen reached cold (a deep link, or Settings
@@ -33,7 +39,12 @@ export function E2eeNodeSecurityRouteScreen() {
     // to the Hub-domain screen that already owns the scoped forgets, so this
     // screen never offers a whole-namespace wipe it cannot justify.
     trustStateUnreadable: false,
-    onOpenVerification: () => navigation.navigate("SettingsNodeVerification" as never),
+    onOpenVerification: () => {
+      if (!target) return;
+      navigation.dispatch(
+        StackActions.push("SettingsNodeVerification", exactNodeRouteParams(target.node)),
+      );
+    },
     now: () => Date.now(),
   });
 
@@ -50,6 +61,17 @@ export function E2eeNodeSecurityRouteScreen() {
       onConfirm: action.run,
     });
   };
+
+  if (!target) {
+    return (
+      <ScrollView contentInsetAdjustmentBehavior="automatic" className="flex-1 bg-screen">
+        <Text className="mx-5 mt-6 font-sans text-sm leading-relaxed text-danger-foreground">
+          This verification link does not match a current machine. Open Machines and choose the
+          machine again.
+        </Text>
+      </ScrollView>
+    );
+  }
 
   if (!view.available) {
     return (

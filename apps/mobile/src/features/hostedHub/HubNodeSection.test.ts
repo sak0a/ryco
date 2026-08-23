@@ -79,6 +79,10 @@ vi.mock("./useHostedMode", () => ({ useHostedModeAvailable: () => hostedMock.ava
 vi.mock("../e2ee/useMobileE2eeSession", () => ({
   useMobileE2eeChannelStatus: () => hostedMock.e2eeStatus,
 }));
+vi.mock("../home/useAuthoritativeNodeTrust", () => ({
+  useAuthoritativeNodeTrust: (targets: ReadonlyArray<{ readonly environmentId: string }>) =>
+    new Map(targets.map((target) => [target.environmentId, "verified"])),
+}));
 // The settling seam (`settledHostedStatus`), mocked for the same reason: it
 // owns a `useRef`/`useSyncExternalStore` tracker and this renderer invokes
 // components as plain functions with no dispatcher. The step machine itself is
