@@ -563,6 +563,8 @@ export interface DesktopBridge {
     readonly port?: number;
   }) => Promise<DesktopServerExposureState>;
   getHubLaunchConfig: () => Promise<DesktopHubLaunchConfig>;
+  /** Relaunch the Desktop shell without changing persisted launch configuration. */
+  restartApp?: () => Promise<void>;
   /** Native account setup is available only in Desktop builds that support hardware-backed keys. */
   getHostedIdentityState?: () => Promise<DesktopHostedIdentityState>;
   connectHostedIdentity?: () => Promise<DesktopHostedIdentityState>;

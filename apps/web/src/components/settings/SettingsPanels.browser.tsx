@@ -360,6 +360,7 @@ const createDesktopBridgeStub = (overrides?: {
   readonly setUpdateChannel?: DesktopBridge["setUpdateChannel"];
   readonly getHubLaunchConfig?: DesktopBridge["getHubLaunchConfig"];
   readonly setHubLaunchConfig?: DesktopBridge["setHubLaunchConfig"];
+  readonly restartApp?: NonNullable<DesktopBridge["restartApp"]>;
   readonly getHostedIdentityState?: NonNullable<DesktopBridge["getHostedIdentityState"]>;
   readonly connectHostedIdentity?: NonNullable<DesktopBridge["connectHostedIdentity"]>;
   readonly disconnectHostedIdentity?: NonNullable<DesktopBridge["disconnectHostedIdentity"]>;
@@ -399,6 +400,7 @@ const createDesktopBridgeStub = (overrides?: {
         fileSecretStoreFallbackSupported: true,
       })),
     setHubLaunchConfig: overrides?.setHubLaunchConfig ?? vi.fn().mockResolvedValue(undefined),
+    ...(overrides?.restartApp === undefined ? {} : { restartApp: overrides.restartApp }),
     ...(overrides?.getHostedIdentityState === undefined
       ? {}
       : { getHostedIdentityState: overrides.getHostedIdentityState }),
@@ -1736,6 +1738,24 @@ describe("ConnectionsSettings Hub section", () => {
     await expect.element(page.getByRole("button", { name: "Enable" })).toBeInTheDocument();
     // Nothing enrolled, so the address is editable.
     await expect.element(page.getByPlaceholder("https://…")).toBeEnabled();
+  });
+
+  it("restarts Desktop when the startup credential store was unavailable", async () => {
+    const restartApp = vi.fn().mockResolvedValue(undefined);
+    stubHubFetch({
+      status: {
+        ...baseStatus,
+        state: "degraded",
+        degradedMode: "operator_action_required",
+        failure: "identity_store_unavailable",
+      },
+      identity: { enrolled: "active" },
+    });
+    await renderHub({ enabled: true, origin: "https://hub.example.com" }, { restartApp });
+
+    await page.getByRole("button", { name: "Restart Ryco" }).click();
+
+    expect(restartApp).toHaveBeenCalledOnce();
   });
 
   it("runs automatic native account setup without exposing Hub identifiers", async () => {

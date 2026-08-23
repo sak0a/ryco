@@ -15,7 +15,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   describe("resolveOffset", () => {
     it.effect("uses explicit RYCO_PORT_OFFSET when provided", () =>
       Effect.sync(() => {
-        const result = resolveOffset({ portOffset: 12, devInstance: undefined });
+        const result = resolveOffset({
+          portOffset: 12,
+          devInstance: undefined,
+        });
         assert.deepStrictEqual(result, {
           offset: 12,
           source: "RYCO_PORT_OFFSET=12",
@@ -25,7 +28,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
     it.effect("hashes non-numeric instance values", () =>
       Effect.sync(() => {
-        const result = resolveOffset({ portOffset: undefined, devInstance: "feature-branch" });
+        const result = resolveOffset({
+          portOffset: undefined,
+          devInstance: "feature-branch",
+        });
         assert.ok(result.offset >= 1);
         assert.ok(result.offset <= 3000);
       }),
@@ -64,6 +70,27 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         });
 
         assert.equal(env.RYCO_HOME, path.resolve(NodeOS.homedir(), ".ryco"));
+      }),
+    );
+
+    it.effect("isolates Desktop Dev state from installed Ryco processes", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const env = yield* createDevRunnerEnv({
+          mode: "dev:desktop",
+          baseEnv: {},
+          serverOffset: 0,
+          webOffset: 0,
+          rycoHome: undefined,
+          noBrowser: undefined,
+          autoBootstrapProjectFromCwd: undefined,
+          logWebSocketEvents: undefined,
+          host: undefined,
+          port: undefined,
+          devUrl: undefined,
+        });
+
+        assert.equal(env.RYCO_HOME, path.resolve(NodeOS.homedir(), ".ryco", "desktop-dev"));
       }),
     );
 

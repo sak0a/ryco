@@ -309,6 +309,10 @@ export function HubSection({
           case "disable":
             await desktopBridge?.setHubLaunchConfig({ enabled: action === "enable" });
             return; // The app relaunches; nothing after this runs.
+          case "restart":
+            if (!desktopBridge?.restartApp) throw new Error("Desktop restart is unavailable.");
+            await desktopBridge.restartApp();
+            return;
           case "open-hub": {
             // The origin root only. The node derives exactly one route from the
             // origin, so synthesising an approval path would invent a Hub

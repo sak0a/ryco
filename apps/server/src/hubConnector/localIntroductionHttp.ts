@@ -64,13 +64,15 @@ export function desktopLocalControlIsAuthorized(input: {
   readonly presentedToken: string | undefined;
   readonly origin: string | undefined;
   readonly remoteAddress: string | undefined;
+  readonly allowMissingRemoteAddress?: boolean;
 }): boolean {
   return (
     input.mode === "desktop" &&
     input.bindHost !== undefined &&
     LOOPBACK_BIND_HOSTS.has(input.bindHost.trim().toLowerCase()) &&
     input.origin === undefined &&
-    isLoopbackRemoteAddress(input.remoteAddress) &&
+    (isLoopbackRemoteAddress(input.remoteAddress) ||
+      (input.allowMissingRemoteAddress === true && input.remoteAddress === undefined)) &&
     input.configuredToken !== undefined &&
     input.presentedToken !== undefined &&
     exactControlToken(input.configuredToken, input.presentedToken)
@@ -80,6 +82,7 @@ export function desktopLocalControlIsAuthorized(input: {
 export const requireDesktopLocalControl = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const config = yield* ServerConfig;
+  const remoteAddress = readRemoteAddress(request.source);
   if (
     !desktopLocalControlIsAuthorized({
       mode: config.mode,
@@ -87,7 +90,13 @@ export const requireDesktopLocalControl = Effect.gen(function* () {
       configuredToken: config.desktopControlToken,
       presentedToken: request.headers[LOCAL_INTRODUCTION_CONTROL_HEADER],
       origin: request.headers.origin,
-      remoteAddress: readRemoteAddress(request.source),
+      remoteAddress,
+      // Effect's Node HTTP adapter exposes the peer address. Under Bun 1.4,
+      // the same adapter currently supplies an empty request source. The
+      // listener is still bound exclusively to loopback and the request must
+      // present the exact 256-bit per-child control credential with no Origin.
+      allowMissingRemoteAddress:
+        (process.versions as Readonly<Record<string, string | undefined>>).bun !== undefined,
     })
   ) {
     return yield* new DesktopLocalControlRefused({ reason: "authentication" });

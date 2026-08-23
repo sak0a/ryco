@@ -69,7 +69,10 @@ const result = {
   },
 } as unknown as NativeNodeClaimFinishResponse;
 
-function connector(nativeNodeClaim: NodeNativeClaimService): HubConnectorServiceShape {
+function connector(
+  nativeNodeClaim: NodeNativeClaimService,
+  onResume: () => void = () => undefined,
+): HubConnectorServiceShape {
   const status = {
     state: "online" as const,
     transitionedAt: "1970-01-01T00:00:00.000Z",
@@ -78,7 +81,7 @@ function connector(nativeNodeClaim: NodeNativeClaimService): HubConnectorService
   };
   return {
     status: () => status,
-    resume: async () => undefined,
+    resume: async () => onResume(),
     enroll: async () => {
       throw new Error("unused");
     },
@@ -107,6 +110,7 @@ const environment = {
 const withRoutes = <A, E, R>(
   nativeNodeClaim: NodeNativeClaimService,
   run: (origin: string) => Effect.Effect<A, E, R>,
+  onResume?: () => void,
 ) =>
   Effect.gen(function* () {
     const baseDir = mkdtempSync(join(tmpdir(), "ryco-native-node-claim-http-"));
@@ -132,11 +136,14 @@ const withRoutes = <A, E, R>(
       disableListenLog: true,
       disableLogger: true,
     }).pipe(
-      Layer.provide(Layer.succeed(HubConnectorService, connector(nativeNodeClaim))),
+      Layer.provide(Layer.succeed(HubConnectorService, connector(nativeNodeClaim, onResume))),
       Layer.provide(Layer.succeed(ServerEnvironment, environment)),
       Layer.provide(Layer.succeed(ServerConfig, config)),
       Layer.provideMerge(
-        NodeHttpServer.layer(NodeHttp.createServer, { host: "127.0.0.1", port: 0 }),
+        NodeHttpServer.layer(NodeHttp.createServer, {
+          host: "127.0.0.1",
+          port: 0,
+        }),
       ),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -209,6 +216,7 @@ it.layer(NodeServices.layer)("Desktop automatic native node-claim HTTP control",
 
   it.effect("signs and commits only the strict public claim envelopes", () => {
     let committed = false;
+    let resumed = false;
     return withRoutes(
       stubNativeNodeClaimService({
         sign: async (input) => {
@@ -247,12 +255,16 @@ it.layer(NodeServices.layer)("Desktop automatic native node-claim HTTP control",
           });
           assert.equal(committedResponse.status, 200);
           assert.isTrue(committed);
+          assert.isTrue(resumed);
           assert.deepEqual(yield* Effect.promise(() => committedResponse.json()), {
             protocolVersion: 1,
             status: "active",
             result,
           });
         }),
+      () => {
+        resumed = true;
+      },
     );
   });
 });

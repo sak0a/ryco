@@ -127,7 +127,11 @@ export const desktopNativeNodeClaimSignRouteLayer = HttpRouter.add(
     const hub = activeHubConfig(yield* ServerConfig);
     const connector = yield* HubConnectorService;
     const signature = yield* Effect.tryPromise({
-      try: () => connector.nativeNodeClaim.sign({ hubOrigin: hub.origin, claim: body.claim }),
+      try: () =>
+        connector.nativeNodeClaim.sign({
+          hubOrigin: hub.origin,
+          claim: body.claim,
+        }),
       catch: (cause) => new NativeClaimOperationFailed({ cause }),
     });
     return HttpServerResponse.jsonUnsafe(
@@ -169,6 +173,10 @@ export const desktopNativeNodeClaimCommitRouteLayer = HttpRouter.add(
         }),
       catch: (cause) => new NativeClaimOperationFailed({ cause }),
     });
+    // The connector may already be parked in `enrolling` from startup. The
+    // native claim committed an active identity out-of-band, so wake that same
+    // state machine instead of waiting for an app restart or a user retry.
+    yield* Effect.promise(() => connector.resume());
     return HttpServerResponse.jsonUnsafe(
       {
         protocolVersion: DESKTOP_NATIVE_NODE_CLAIM_PROTOCOL_VERSION,
