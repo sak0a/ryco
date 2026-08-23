@@ -43,7 +43,7 @@ import { getMobileHostedConfig } from "./runtimeConfig";
  */
 export interface HostedPrimaryConnectionDeps extends Pick<
   OrchestrationHandlers,
-  "applyShellEvent"
+  "applyShellEvent" | "resetShellProjection"
 > {
   readonly syncShellSnapshot: EnvironmentConnectionSupervisor["syncShellSnapshot"];
   readonly pushSequenceMonitor: Parameters<
@@ -190,6 +190,10 @@ export function createHostedPrimaryConnection(
     knownEnvironment,
     client,
     pushSequenceMonitor: deps.pushSequenceMonitor,
+    resetShellProjection: (environmentId) => {
+      if (!acceptsEvent()) return;
+      deps.resetShellProjection(environmentId);
+    },
     onResubscribe: (environmentId) => {
       coordinator.markSessionReplaying(environmentId, connectionGeneration);
       const sharedGeneration = sharedSelectionGeneration();

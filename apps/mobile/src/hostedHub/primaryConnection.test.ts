@@ -132,6 +132,7 @@ const descriptor = {
 
 const deps = () => ({
   pushSequenceMonitor: { recordEvent: () => undefined, recordSnapshot: () => undefined },
+  resetShellProjection: vi.fn(),
   applyShellEvent: vi.fn(),
   syncShellSnapshot: vi.fn(),
 });

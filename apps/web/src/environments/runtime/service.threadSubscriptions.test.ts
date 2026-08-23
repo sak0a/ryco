@@ -364,6 +364,47 @@ describe("retainThreadDetailSubscription", () => {
     await resetEnvironmentServiceForTests();
   });
 
+  it("accepts a restarted node's lower shell sequence after the stream resubscribes", async () => {
+    const { useStore } = await import("~/store");
+    const syncServerShellSnapshot = vi.spyOn(useStore.getState(), "syncServerShellSnapshot");
+    const { resetEnvironmentServiceForTests, startEnvironmentConnectionService } =
+      await import("./service");
+    const stop = startEnvironmentConnectionService();
+    const connectionInput = mockCreateEnvironmentConnection.mock.calls[0]?.[0];
+    const environmentId = EnvironmentId.make("env-1");
+    expect(connectionInput).toBeDefined();
+
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({ threadId: ThreadId.make("thread-before-restart") }),
+        snapshotSequence: 50,
+      },
+      environmentId,
+    );
+    expect(syncServerShellSnapshot).toHaveBeenCalledOnce();
+
+    connectionInput.resetShellProjection(environmentId);
+    connectionInput.syncShellSnapshot(
+      {
+        ...makeThreadShellSnapshot({ threadId: ThreadId.make("thread-after-restart") }),
+        snapshotSequence: 1,
+      },
+      environmentId,
+    );
+
+    expect(syncServerShellSnapshot).toHaveBeenCalledTimes(2);
+    expect(syncServerShellSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        snapshotSequence: 1,
+        threads: [expect.objectContaining({ id: "thread-after-restart" })],
+      }),
+      environmentId,
+    );
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+
   it("keeps non-idle thread detail subscriptions attached until the thread becomes idle", async () => {
     const {
       retainThreadDetailSubscription,

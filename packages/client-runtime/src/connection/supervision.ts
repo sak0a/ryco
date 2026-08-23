@@ -125,6 +125,7 @@ export interface EnvironmentConnectionSupervisor {
     event: OrchestrationShellStreamEvent,
     environmentId: EnvironmentId,
   ) => void;
+  readonly resetShellProjection: (environmentId: EnvironmentId) => void;
   readonly syncShellSnapshot: (
     snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
@@ -720,6 +721,7 @@ export function createEnvironmentConnectionSupervisor<
     ensureSavedEnvironmentConnection,
     cancelPendingSavedEnvironmentConnection,
     applyShellEvent,
+    resetShellProjection: (environmentId) => projectionTracker.clearEnvironment(environmentId),
     syncShellSnapshot,
     retainThreadDetailSubscription: retain,
     disposeThreadDetailSubscriptionsForEnvironment: disposeForEnvironment,
