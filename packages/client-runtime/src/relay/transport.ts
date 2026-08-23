@@ -136,6 +136,7 @@ export interface HostedRelayAttemptBinding {
   readonly failure: (generation: number, failure: HostedRelayFailure) => void;
   readonly markDeliveryUnknown: (generation: number) => void;
   readonly connectionClosed: (generation: number) => void;
+  readonly connectionRecovered?: (generation: number) => void;
 }
 
 function defaultBinding(): HostedRelayAttemptBinding {
@@ -161,8 +162,8 @@ function defaultBinding(): HostedRelayAttemptBinding {
     role: (generation, role) => hostedHubController.role(generation, role),
     failure: (generation, failure) => hostedHubController.failure(generation, failure),
     markDeliveryUnknown: (generation) => hostedHubController.markDeliveryUnknown(generation),
-    connectionClosed: (generation) => {
-      hostedHubController.connectionClosed(generation);
+    connectionClosed: (generation) => hostedHubController.connectionClosed(generation),
+    connectionRecovered: (generation) => {
       const state = hostedHubStore.getState();
       if (
         state.generation !== generation ||
@@ -175,11 +176,11 @@ function defaultBinding(): HostedRelayAttemptBinding {
         return;
       }
       // A replacement relay socket is not enough: the RPC subscriptions that
-      // ended with the old channel belong to that client session. Re-enter the
-      // authoritative selected-node lifecycle so it disposes the old client,
-      // advances the generation, and creates every subscription afresh. Its
-      // generation bump also stops this attempt factory's internal retry from
-      // racing the replacement client.
+      // ended with the old channel belong to that client session. Wait until
+      // the transport has authenticated a replacement channel before
+      // rebuilding that client. Rebuilding immediately on close races the
+      // node's own relay-ticket renewal and can turn that brief handoff into a
+      // terminal channel rejection.
       getHostedRuntimeConfiguration().timers.queueMicrotask(() => {
         const current = hostedHubStore.getState();
         if (
@@ -203,6 +204,7 @@ export class HostedRelayAttemptFactory {
   #nextAttemptId = 0;
   #activeAttemptId: number | null = null;
   #activeSocket: unknown = null;
+  #requiresClientRecreation = false;
 
   constructor(binding: HostedRelayAttemptBinding = defaultBinding()) {
     this.#binding = binding;
@@ -264,7 +266,12 @@ export class HostedRelayAttemptFactory {
     const isCurrentAttempt = () => this.#activeAttemptId === attemptId;
     const callbacks = {
       onTransportStatus: (status: HostedRelayTransportStatus) => {
-        if (isCurrentAttempt()) this.#binding.transportStatus(generation, status);
+        if (!isCurrentAttempt()) return;
+        this.#binding.transportStatus(generation, status);
+        if (status === "online" && this.#requiresClientRecreation) {
+          this.#requiresClientRecreation = false;
+          this.#binding.connectionRecovered?.(generation);
+        }
       },
       onSessionStatus: (status: HostedRycoSessionStatus) => {
         if (isCurrentAttempt()) this.#binding.sessionStatus(generation, status);
@@ -332,6 +339,7 @@ export class HostedRelayAttemptFactory {
         const generation = this.#activeGeneration;
         if (generation === null) return;
         this.#reconnect.closed();
+        this.#requiresClientRecreation = true;
         this.#binding.connectionClosed(generation);
       },
       onRequestStart: (info) => {
@@ -359,6 +367,7 @@ export class HostedRelayAttemptFactory {
     this.#activeGeneration = null;
     this.#activeAttemptId = null;
     this.#activeSocket = null;
+    this.#requiresClientRecreation = false;
     this.#nextAttemptId = 0;
     this.#reconnect.reset();
   }

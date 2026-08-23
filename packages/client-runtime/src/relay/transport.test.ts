@@ -230,7 +230,7 @@ describe("HostedRelayAttemptFactory", () => {
     expect(lifecycle.authorizeRequest?.(dispatch)).toBe(false);
   });
 
-  it("re-enters the selected-node lifecycle after a live socket closes", async () => {
+  it("re-enters the selected-node lifecycle only after the relay channel recovers", async () => {
     vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
       ticket: encodeBase64Url(new Uint8Array(32).fill(10)),
       expiresAt: Date.now() + 60_000,
@@ -251,7 +251,29 @@ describe("HostedRelayAttemptFactory", () => {
     factory.createSocket(await factory.nextUrl());
 
     lifecycle.onClose?.({ code: 4000, reason: "network" }, { intentional: false });
+    expect(retrySelectedNode).not.toHaveBeenCalled();
+
+    factory.createSocket(await factory.nextUrl());
+    sockets.at(-1)?.callbacks.onTransportStatus("online");
     await vi.waitFor(() => expect(retrySelectedNode).toHaveBeenCalledOnce());
+  });
+
+  it("does not rebuild the rpc client for the initial relay connection", async () => {
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: encodeBase64Url(new Uint8Array(32).fill(11)),
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    const retrySelectedNode = vi
+      .spyOn(hostedHubController, "retrySelectedNode")
+      .mockResolvedValue(undefined);
+    const factory = new HostedRelayAttemptFactory();
+
+    factory.createSocket(await factory.nextUrl());
+    sockets.at(-1)?.callbacks.onTransportStatus("online");
+
+    expect(retrySelectedNode).not.toHaveBeenCalled();
   });
 
   it("denies RPCs at the transport boundary until browser recovery is complete", () => {
