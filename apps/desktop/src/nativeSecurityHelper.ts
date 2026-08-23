@@ -8,6 +8,8 @@ import {
   uncompressedPointToJwk,
 } from "@ryco/client-runtime/relay";
 
+import type { DesktopAuthorizationVariant } from "./nativeAuthorization.ts";
+
 const HELPER_FILE_NAME = "ryco-desktop-security-helper";
 const HELPER_TIMEOUT_MS = 5_000;
 const HELPER_RESPONSE_BYTES = 32 * 1024;
@@ -112,6 +114,15 @@ export function desktopNativeSecurityNamespace(scope: string): string {
     .update("ryco.desktop.native-security.v1\0", "utf8")
     .update(scope, "utf8")
     .digest("hex");
+}
+
+/**
+ * Keep development and preview safeStorage records isolated from the installed app.
+ * Production retains the legacy scope so existing enrolled identities remain readable.
+ */
+export function desktopNativeInstallationNamespace(variant: DesktopAuthorizationVariant): string {
+  const scope = "ryco.desktop.installation.v1";
+  return desktopNativeSecurityNamespace(variant === "production" ? scope : `${scope}\0${variant}`);
 }
 
 export function resolveDesktopNativeSecurityHelperPath(input: {

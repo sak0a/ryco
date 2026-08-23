@@ -121,6 +121,7 @@ import { createDesktopProtectedRecordStore } from "./protectedRecordStore.ts";
 import { createDesktopNativeSecretStore } from "./nativeSecretStore.ts";
 import {
   createNativeSecurityHelperRunner,
+  desktopNativeInstallationNamespace,
   DesktopNativeSecurityHelper,
   desktopNativeSecurityNamespace,
   resolveDesktopNativeSecurityHelperPath,
@@ -663,7 +664,7 @@ async function ensureDesktopNativeIdentityContext(): Promise<
   const protection = getDesktopSecretStorage();
   const installationRecords = createDesktopProtectedRecordStore({
     directory: NATIVE_SECURITY_DIR,
-    namespace: desktopNativeSecurityNamespace("ryco.desktop.installation.v1"),
+    namespace: desktopNativeInstallationNamespace(desktopAuthorizationVariant()),
     protection,
   });
   const installationId = await getOrCreateDesktopInstallationId(installationRecords);
