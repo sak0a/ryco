@@ -8,6 +8,7 @@ const config = getDefaultConfig(__dirname);
 const workspaceRoot = path.resolve(__dirname, "../..");
 const escapedWorkspaceRoot = workspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const mobileShikiRoot = path.dirname(require.resolve("shiki/package.json", { paths: [__dirname] }));
+const clientRuntimeSourceRoot = path.join(workspaceRoot, "packages/client-runtime/src");
 const resolveShikiDependencyRoot = (packageName) => {
   const entryPath = require.resolve(packageName, { paths: [mobileShikiRoot] });
   let currentDir = path.dirname(entryPath);
@@ -26,6 +27,26 @@ const resolveShikiDependencyRoot = (packageName) => {
 config.watchFolders = [...new Set([...(config.watchFolders ?? []), workspaceRoot])];
 config.resolver = {
   ...config.resolver,
+  resolveRequest: (context, moduleName, platform) => {
+    // @ryco/client-runtime is consumed as TypeScript source. Its NodeNext
+    // barrels correctly use `.js` specifiers, but Metro does not map those
+    // specifiers back to the colocated `.ts` source file. Keep the package's
+    // Node contract intact and adapt only this React Native source boundary.
+    if (
+      context.originModulePath.startsWith(clientRuntimeSourceRoot) &&
+      moduleName.startsWith("./") &&
+      moduleName.endsWith(".js")
+    ) {
+      const sourcePath = path.resolve(
+        path.dirname(context.originModulePath),
+        `${moduleName.slice(0, -3)}.ts`,
+      );
+      if (fs.existsSync(sourcePath)) {
+        return context.resolveRequest(context, sourcePath, platform);
+      }
+    }
+    return context.resolveRequest(context, moduleName, platform);
+  },
   blockList: [
     ...(Array.isArray(config.resolver?.blockList)
       ? config.resolver.blockList

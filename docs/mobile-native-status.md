@@ -1,6 +1,6 @@
 # Native mobile delivery status
 
-**Current as of 2026-08-21 on `main`, after demand-driven multi-connect merged in PR #397.** This is
+**Current as of 2026-08-23.** This is
 the concise delivery ledger for the native app. Older design specifications and implementation
 plans remain useful as historical records, but this file is authoritative when their status
 language disagrees. Delivery states below are explicit; the distinction between merged and open
@@ -14,6 +14,10 @@ work is load-bearing.
   multi-connect through the supervision map; the hosted plane now acquires connections from
   mounted thread/provider/VCS scopes and retains at most three by scope plus LRU. Hosted operation
   never constructs direct node HTTP URLs.
+- The [unified cross-node workspace](./unified-workspace.md): all eligible machines contribute to
+  Inbox and Projects without a selected-machine application mode; physical resource keys and
+  mutations remain environment-scoped; Mobile and Desktop retain at most three live environments,
+  and cached list hydration never acquires one.
 - **Native identity v2 is merged**, not on a blocker branch. `6ff51502c` landed 2026-08-13 via
   PRs #352/#353 (polish in #354 the next day): additive v2 contracts, DPoP-mint transport, and
   the full-screen access gate — the workspace navigator mounts only after a revalidated native

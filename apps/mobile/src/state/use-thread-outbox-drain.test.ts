@@ -90,6 +90,30 @@ describe("outbox drain gate (two environments)", () => {
     expect(readThreadDeliveryState(queuedFor(ENV_B)).environmentConnected).toBe(true);
   });
 
+  it("uses the queued environment's shell readiness rather than the active environment", async () => {
+    const { useStore } = await import("./threadsRuntime");
+    const emptySnapshot = {
+      snapshotSequence: 1,
+      projects: [],
+      worktrees: [],
+      threads: [],
+      updatedAt: "2026-08-23T00:00:00.000Z",
+    } as never;
+
+    // B is the active, fully bootstrapped node. A's socket is open but its
+    // first authoritative shell snapshot has not landed yet.
+    useStore.getState().syncServerShellSnapshot(emptySnapshot, ENV_B);
+    useStore.getState().setActiveEnvironmentId(ENV_B);
+    connectEnvironment(ENV_A, "ws://node-a.local:13773/ws");
+    connectEnvironment(ENV_B, "ws://node-b.local:13774/ws");
+
+    expect(readThreadDeliveryState(queuedFor(ENV_A)).shellStatus).toBe("loading");
+    expect(readThreadDeliveryState(queuedFor(ENV_B)).shellStatus).toBe("live");
+
+    useStore.getState().removeEnvironmentState(ENV_A);
+    useStore.getState().removeEnvironmentState(ENV_B);
+  });
+
   it("never treats a cache-hydrated thread row as delivery-reconciled (wave 2)", async () => {
     const { useStore } = await import("./threadsRuntime");
     const { resolveThreadOutboxDeliveryAction } = await import("./threadOutboxModel");

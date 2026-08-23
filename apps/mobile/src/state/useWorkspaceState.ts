@@ -13,6 +13,7 @@ import { hostedState } from "../features/home/homeEnvironmentModel";
 import { useMobileHostedConnectionsStore } from "../hostedHub/state";
 import {
   hostedWorkspacePhase,
+  deriveWorkspaceShellSummary,
   mergeWorkspaceEnvironments,
   projectWorkspaceState,
   type EnvironmentConnectionPhase,
@@ -20,7 +21,7 @@ import {
   type WorkspaceEnvironment,
   type WorkspaceState,
 } from "./workspaceModel";
-import { selectBootstrapCompleteForActiveEnvironment, useStore } from "./threadsRuntime";
+import { useStore } from "./threadsRuntime";
 
 // §3-1: synthesize the WorkspaceState upstream read from the atom `state/workspace`
 // from runtime A's building blocks — the saved-environment catalog stores, the
@@ -54,7 +55,7 @@ export function useWorkspaceState(): WorkspaceState {
     catalog.runtimeStore.getState,
   );
   const wsStatus = useWsConnectionStatus();
-  const bootstrapComplete = useStore(selectBootstrapCompleteForActiveEnvironment);
+  const environmentStateById = useStore((state) => state.environmentStateById);
   const hostedConnections = useMobileHostedConnectionsStore(
     useShallow((state) => state.selectedNodes),
   );
@@ -105,18 +106,15 @@ export function useWorkspaceState(): WorkspaceState {
     connectionError: null,
   }));
   const allEnvironments = mergeWorkspaceEnvironments(environments, hostedEnvironments);
+  const shellSummary = deriveWorkspaceShellSummary(
+    allEnvironments,
+    (environmentId) => environmentStateById[environmentId]?.bootstrapComplete ?? false,
+  );
 
   return projectWorkspaceState({
     isReady,
     networkStatus,
     environments: allEnvironments,
-    shellSummary: {
-      hasSnapshot: bootstrapComplete,
-      hasSynchronizingShell:
-        allEnvironments.some((environment) => environment.connectionState === "connected") &&
-        !bootstrapComplete,
-      firstError: null,
-      latestSnapshotUpdatedAt: null,
-    },
+    shellSummary,
   });
 }

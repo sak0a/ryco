@@ -58,6 +58,8 @@ It ships as a cross-platform desktop app (macOS, Linux, Windows) and as a local 
 - **Project favicon resolver** — auto-detected per-project icons in the sidebar
 - **Branch toolbar** — branch selector plus local/worktree environment selector integration
 - **Project folders and grouped repositories** — organize local and remote projects in the sidebar
+- **Unified cross-node workspace** — see eligible projects and threads from every machine in one
+  Inbox or Projects view, with exact machine provenance and demand-driven connections
 
 ### Integrations & infrastructure
 

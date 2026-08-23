@@ -16,7 +16,7 @@ import { drainThreadOutbox, hydrateThreadOutbox } from "./threadOutbox";
 import { buildQueuedThreadMessageAttachments } from "./queuedThreadMessageAttachments";
 import type { EnvironmentShellStatus, QueuedThreadMessage } from "./threadOutboxModel";
 import {
-  selectBootstrapCompleteForActiveEnvironment,
+  selectBootstrapCompleteForEnvironment,
   selectEnvironmentHydratedFromCacheAt,
   selectSidebarThreadSummaryByRef,
   selectThreadByRef,
@@ -86,7 +86,9 @@ export function readThreadDeliveryState(message: QueuedThreadMessage): {
     selectEnvironmentHydratedFromCacheAt(state, message.environmentId) !== null;
   return {
     threadExists: Boolean(summary ?? thread),
-    shellStatus: selectBootstrapCompleteForActiveEnvironment(state) ? "live" : "loading",
+    shellStatus: selectBootstrapCompleteForEnvironment(state, message.environmentId)
+      ? "live"
+      : "loading",
     environmentConnected: connected,
     threadBusy: summary?.latestTurn?.state === "running" || thread?.latestTurn?.state === "running",
     alreadyDelivered: thread?.messages.some((entry) => entry.id === message.messageId) ?? false,

@@ -1,13 +1,17 @@
 import { EnvironmentId, type OrchestrationShellSnapshot } from "@ryco/contracts";
+import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   demoteEnvironmentStateToCachedSnapshot,
   hydrateEnvironmentStateFromCache,
+  selectBootstrapCompleteForEnvironment,
   selectCacheHydratedEnvironmentIds,
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
   selectSidebarWorktreesAcrossEnvironments,
+  selectThreadByRef,
+  setThreadError,
   syncServerShellSnapshot,
   type AppState,
   type CachedEnvironmentShellSnapshot,
@@ -98,6 +102,25 @@ const EMPTY_WIRE_SNAPSHOT = {
 } as unknown as OrchestrationShellSnapshot;
 
 describe("cache hydration", () => {
+  it("keeps shell readiness and thread errors scoped when raw ids collide", () => {
+    let state = hydrateEnvironmentStateFromCache(EMPTY_STATE, cachedSnapshot(ENV_A), ENV_A);
+    state = hydrateEnvironmentStateFromCache(state, cachedSnapshot(ENV_B), ENV_B);
+
+    expect(selectBootstrapCompleteForEnvironment(state, ENV_A)).toBe(false);
+    expect(selectBootstrapCompleteForEnvironment(state, ENV_B)).toBe(false);
+
+    state = setThreadError(state, scopeThreadRef(ENV_B, "thread-1" as never), "node B failed");
+
+    expect(selectThreadByRef(state, scopeThreadRef(ENV_A, "thread-1" as never))?.error).toBeNull();
+    expect(selectThreadByRef(state, scopeThreadRef(ENV_B, "thread-1" as never))?.error).toBe(
+      "node B failed",
+    );
+
+    state = syncServerShellSnapshot(state, EMPTY_WIRE_SNAPSHOT, ENV_A);
+    expect(selectBootstrapCompleteForEnvironment(state, ENV_A)).toBe(true);
+    expect(selectBootstrapCompleteForEnvironment(state, ENV_B)).toBe(false);
+  });
+
   it("renders the union of hydrated environments through the across-environment selectors", () => {
     let state = hydrateEnvironmentStateFromCache(EMPTY_STATE, cachedSnapshot(ENV_A), ENV_A);
     state = hydrateEnvironmentStateFromCache(state, cachedSnapshot(ENV_B), ENV_B);

@@ -45,6 +45,27 @@ export interface WorkspaceState {
   readonly networkStatus: NetworkStatus;
 }
 
+/**
+ * Aggregate shell readiness without consulting the process-global active
+ * environment. A live snapshot on node B must not make node A look settled,
+ * and changing the administration cursor must not clobber workspace status.
+ */
+export function deriveWorkspaceShellSummary(
+  environments: ReadonlyArray<WorkspaceEnvironment>,
+  bootstrapComplete: (environmentId: EnvironmentId) => boolean,
+): WorkspaceShellSummary {
+  return {
+    hasSnapshot: environments.some((environment) => bootstrapComplete(environment.environmentId)),
+    hasSynchronizingShell: environments.some(
+      (environment) =>
+        environment.connectionState === "connected" &&
+        !bootstrapComplete(environment.environmentId),
+    ),
+    firstError: null,
+    latestSnapshotUpdatedAt: null,
+  };
+}
+
 function overallConnectionState(
   environments: ReadonlyArray<WorkspaceEnvironment>,
   networkStatus: NetworkStatus,
