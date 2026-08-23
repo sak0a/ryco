@@ -4,7 +4,7 @@ import { EnvironmentId } from "@ryco/contracts";
 import { page } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
-import { StrictMode } from "react";
+import { StrictMode, type ReactNode } from "react";
 
 const navigate = vi.fn(async () => undefined);
 // These suites render the hosted root outside a `RouterProvider`. The toast
@@ -14,7 +14,12 @@ const navigate = vi.fn(async () => undefined);
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => navigate,
+  useLocation: ({ select }: { readonly select: (location: { pathname: string }) => unknown }) =>
+    select({ pathname: "/" }),
   useParams: () => undefined,
+  useRouter: () => ({ state: { matches: [] }, navigate }),
+  Outlet: () => null,
+  Link: ({ children }: { readonly children?: ReactNode }) => <a href="/">{children}</a>,
 }));
 
 // Hosted mode, which no browser test gets by default: there is no `.env` in
@@ -32,7 +37,11 @@ import {
   useHostedAccountStore,
   useHostedHubStore,
 } from "../../hostedHub/state";
-import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
+import {
+  navigateHub,
+  navigateHubPathname,
+  resetHubRoutesForTests,
+} from "../../hostedHub/hubRoutes";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot, HostedNodeMenu } from "./HostedHubRoot";
@@ -105,7 +114,7 @@ beforeEach(() => {
   // case would render this one's disclosure at the wrong claim.
   resetWebE2eeSession();
   navigate.mockClear();
-  window.history.replaceState(null, "", "/");
+  navigateHub({ kind: "nodes" }, { replace: true });
   vi.spyOn(hostedHubApi, "getPublicSignupConfiguration").mockResolvedValue({
     status: "disabled",
   });
@@ -140,6 +149,29 @@ function userScrollableAncestor(element: HTMLElement): HTMLElement | null {
 }
 
 describe("HostedHubRoot accessibility and responsive flows", () => {
+  it("opens the unified workspace at the signed-in Hub root without selecting a node", async () => {
+    navigateHubPathname("/", { replace: true });
+    const selectable = node("node_aaaaaaaaaaaaaaaaaaaaaa", true, "operator");
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      nodes: [selectable],
+    });
+    const selectNode = vi.spyOn(hostedHubController, "selectNode").mockResolvedValue();
+
+    mounted = await render(<HostedHubRoot />);
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="sidebar-wrapper"]')).not.toBeNull();
+    });
+    await expect
+      .element(page.getByRole("heading", { name: /^Your nodes?$/ }))
+      .not.toBeInTheDocument();
+    expect(selectNode).not.toHaveBeenCalled();
+  });
+
   it("shows GitHub sign-in only when the provider policy advertises it", async () => {
     mounted = await render(<HostedHubRoot />);
     await expect
@@ -183,7 +215,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     });
   });
 
-  it("replaces GitHub account completion with the directory after linked login", async () => {
+  it("replaces GitHub account completion with the unified workspace after linked login", async () => {
     window.history.replaceState(null, "", "/sign-up");
     useHostedHubStore.setState({
       accountStatus: "authenticated",
@@ -196,7 +228,8 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     mounted = await render(<HostedHubRoot />);
 
     await vi.waitFor(() => {
-      expect(window.location.pathname).toBe("/nodes");
+      expect(window.location.pathname).toBe("/");
+      expect(document.querySelector('[data-slot="sidebar-wrapper"]')).not.toBeNull();
     });
   });
 
@@ -344,6 +377,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       mounted = null;
       hostedHubController.resetForTests();
       resetHubRoutesForTests();
+      navigateHub({ kind: "nodes" }, { replace: true });
 
       // Node selection: rows and controls are named, presence reads as text
       // (never color alone), and stale directory data announces as a status.

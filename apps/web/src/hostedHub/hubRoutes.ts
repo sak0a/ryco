@@ -60,7 +60,7 @@ export type HubRoute =
   | { readonly kind: "nodes-enroll" }
   | { readonly kind: "account"; readonly section: HubAccountSection };
 
-/** The Hub home. Resolves to the directory when signed in, sign-in when not. */
+/** The Hub home. Resolves to the unified workspace when signed in, sign-in when not. */
 export const HUB_ROOT_PATHNAME = "/";
 
 const ACCOUNT_SECTION_BY_SUFFIX: Readonly<Record<string, HubAccountSection>> = Object.freeze({

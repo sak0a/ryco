@@ -57,7 +57,7 @@ vi.mock("../../env", async (importOriginal) => ({
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
-import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
+import { navigateHub, resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot } from "./HostedHubRoot";
@@ -163,6 +163,11 @@ syncDocumentPresentationTier();
 
 let mounted: Awaited<ReturnType<typeof render>> | null = null;
 
+function resetDirectoryRouteForTests(): void {
+  resetHubRoutesForTests();
+  navigateHub({ kind: "nodes" }, { replace: true });
+}
+
 beforeEach(async () => {
   // Desktop by default: the tier fork decides which account entry point and
   // which settings presentation exist, so it must be asserted rather than
@@ -174,7 +179,7 @@ beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
   hostedHubController.resetForTests();
-  resetHubRoutesForTests();
+  resetDirectoryRouteForTests();
   useSettingsDialogStore.setState({ open: false, section: "general" });
   navigate.mockClear();
 });
@@ -183,7 +188,7 @@ afterEach(async () => {
   await mounted?.unmount();
   mounted = null;
   hostedHubController.resetForTests();
-  resetHubRoutesForTests();
+  resetDirectoryRouteForTests();
   useSettingsDialogStore.setState({ open: false, section: "general" });
   vi.restoreAllMocks();
   document.body.innerHTML = "";
@@ -246,6 +251,7 @@ describe("hosted node directory", () => {
       routeTree: rootRoute,
       history: createMemoryHistory({ initialEntries: ["/"] }),
     });
+    resetHubRoutesForTests();
     mounted = await render(<RouterProvider router={router} />);
 
     await expect
@@ -517,7 +523,7 @@ describe("hosted node directory", () => {
       await mounted.unmount();
       mounted = null;
       hostedHubController.resetForTests();
-      resetHubRoutesForTests();
+      resetDirectoryRouteForTests();
     }
   });
 
@@ -534,7 +540,7 @@ describe("hosted node directory", () => {
     await mounted.unmount();
     mounted = null;
     hostedHubController.resetForTests();
-    resetHubRoutesForTests();
+    resetDirectoryRouteForTests();
     await page.viewport(390, 720);
     await vi.waitFor(() => {
       expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
@@ -554,7 +560,7 @@ describe("hosted node directory", () => {
     await mounted.unmount();
     mounted = null;
     hostedHubController.resetForTests();
-    resetHubRoutesForTests();
+    resetDirectoryRouteForTests();
     seedDirectory([
       node({ grant: { id: "grant_a", role: "operator" }, effectiveRole: "operator" }),
     ]);
@@ -1026,7 +1032,7 @@ describe("hosted node revocation", () => {
       await mounted.unmount();
       mounted = null;
       hostedHubController.resetForTests();
-      resetHubRoutesForTests();
+      resetDirectoryRouteForTests();
     }
   });
 
