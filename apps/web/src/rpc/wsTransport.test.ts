@@ -1137,8 +1137,12 @@ describe("WsTransport", () => {
   });
 
   it("re-subscribes live stream listeners after an automatic socket reconnect", async () => {
+    const onClose = vi.fn();
     const transport = createTransport("ws://localhost:3020", {
       getReconnectDelayMs: () => 0,
+      isSocketCurrent: (socket) => socket === (getSocket() as unknown as WebSocket),
+      onClose,
+      retryTransientErrors: false,
     });
     const listener = vi.fn();
     const onResubscribe = vi.fn();
@@ -1180,7 +1184,7 @@ describe("WsTransport", () => {
     );
     await waitFor(() => expect(listener).toHaveBeenCalledWith(firstEvent));
 
-    firstSocket.close(1012, "service restart");
+    firstSocket.close(1000, "node offline");
     await waitFor(() => expect(sockets).toHaveLength(2), 2_000);
     const secondSocket = getSocket();
     secondSocket.open();
@@ -1193,6 +1197,10 @@ describe("WsTransport", () => {
     expect(secondRequest.tag).toBe(WS_METHODS.subscribeServerLifecycle);
     expect(secondRequest.id).not.toBe(firstRequest.id);
     expect(onResubscribe).toHaveBeenCalledOnce();
+
+    onClose.mockClear();
+    firstSocket.close(1006, "delayed stale close");
+    expect(onClose).not.toHaveBeenCalled();
 
     unsubscribe();
     await transport.dispose();

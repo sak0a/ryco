@@ -172,6 +172,9 @@ export class HostedRelayAttemptFactory {
   #pendingTicket: PendingTicket | null = null;
   #lastRetryAfterMs: number | undefined;
   #activeGeneration: number | null = null;
+  #nextAttemptId = 0;
+  #activeAttemptId: number | null = null;
+  #activeSocket: unknown = null;
 
   constructor(binding: HostedRelayAttemptBinding = defaultBinding()) {
     this.#binding = binding;
@@ -227,13 +230,22 @@ export class HostedRelayAttemptFactory {
     const generation = pending.generation;
     const ticket = pending.ticket;
     const ticketExpiresAt = pending.expiresAt;
+    const attemptId = this.#nextAttemptId + 1;
+    this.#nextAttemptId = attemptId;
+    this.#activeAttemptId = attemptId;
+    const isCurrentAttempt = () => this.#activeAttemptId === attemptId;
     const callbacks = {
-      onTransportStatus: (status: HostedRelayTransportStatus) =>
-        this.#binding.transportStatus(generation, status),
-      onSessionStatus: (status: HostedRycoSessionStatus) =>
-        this.#binding.sessionStatus(generation, status),
-      onRole: (role: RelayEffectiveRole | null) => this.#binding.role(generation, role),
+      onTransportStatus: (status: HostedRelayTransportStatus) => {
+        if (isCurrentAttempt()) this.#binding.transportStatus(generation, status);
+      },
+      onSessionStatus: (status: HostedRycoSessionStatus) => {
+        if (isCurrentAttempt()) this.#binding.sessionStatus(generation, status);
+      },
+      onRole: (role: RelayEffectiveRole | null) => {
+        if (isCurrentAttempt()) this.#binding.role(generation, role);
+      },
       onFailure: (failure: HostedRelayFailure) => {
+        if (!isCurrentAttempt()) return;
         this.#lastRetryAfterMs = failure.retryAfterMs;
         this.#reconnect.closed();
         if (this.#pendingRequests.size > 0) {
@@ -245,7 +257,7 @@ export class HostedRelayAttemptFactory {
     };
     this.#activeGeneration = generation;
     try {
-      return this.#binding.createRelaySocket
+      const socket = this.#binding.createRelaySocket
         ? this.#binding.createRelaySocket({
             url,
             ticket,
@@ -259,8 +271,14 @@ export class HostedRelayAttemptFactory {
             ticketExpiresAt,
             callbacks,
           });
+      if (isCurrentAttempt()) this.#activeSocket = socket;
+      return socket;
     } catch (error) {
-      if (this.#activeGeneration === generation) this.#activeGeneration = null;
+      if (isCurrentAttempt()) {
+        this.#activeAttemptId = null;
+        this.#activeSocket = null;
+        if (this.#activeGeneration === generation) this.#activeGeneration = null;
+      }
       throw error;
     }
   }
@@ -268,6 +286,7 @@ export class HostedRelayAttemptFactory {
   lifecycleHandlers(): WsProtocolLifecycleHandlers {
     return {
       webSocketConstructor: (url) => this.createSocket(url) as WebSocket,
+      isSocketCurrent: (socket) => socket === this.#activeSocket,
       preserveSocketPath: true,
       retryTransientErrors: false,
       reconnectMaxRetries: 1_000_000,
@@ -310,6 +329,9 @@ export class HostedRelayAttemptFactory {
     this.#pendingRequests.clear();
     this.#lastRetryAfterMs = undefined;
     this.#activeGeneration = null;
+    this.#activeAttemptId = null;
+    this.#activeSocket = null;
+    this.#nextAttemptId = 0;
     this.#reconnect.reset();
   }
 }

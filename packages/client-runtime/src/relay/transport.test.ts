@@ -454,4 +454,34 @@ describe("HostedRelayAttemptFactory", () => {
     lifecycle.onClose?.({ code: 1006, reason: "network" }, { intentional: false });
     expect(hostedHubStore.getState().transportStatus).toBe("online");
   });
+
+  it("ignores callbacks from a superseded socket attempt in the same selection generation", async () => {
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: encodeBase64Url(new Uint8Array(32).fill(6)),
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+    const first = factory.createSocket(await factory.nextUrl()) as MockRelaySocket;
+    const second = factory.createSocket(await factory.nextUrl()) as MockRelaySocket;
+
+    second.callbacks.onRole("operator");
+    second.callbacks.onSessionStatus("ready");
+    second.callbacks.onTransportStatus("online");
+    expect(lifecycle.isSocketCurrent?.(first as unknown as WebSocket)).toBe(false);
+    expect(lifecycle.isSocketCurrent?.(second as unknown as WebSocket)).toBe(true);
+
+    first.callbacks.onRole(null);
+    first.callbacks.onSessionStatus("stale");
+    first.callbacks.onTransportStatus("reconnecting");
+    first.fail();
+
+    expect(hostedHubStore.getState()).toMatchObject({
+      effectiveRole: "operator",
+      sessionStatus: "ready",
+      transportStatus: "online",
+    });
+  });
 });
