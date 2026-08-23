@@ -179,6 +179,24 @@ describe("buildInboxSidebarSections", () => {
     });
   });
 
+  it("keeps an online demand-released machine idle instead of calling it offline", () => {
+    const sections = build({
+      environments: [
+        environment(ENV_A, {
+          connectionState: "idle",
+          stale: false,
+        }),
+      ],
+      threads: [thread("leased down")],
+    });
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0]?.rows[0]).toMatchObject({
+      state: "idle",
+      statusLabel: "Idle",
+    });
+  });
+
   it("uses the existing delivery, trust, role, and provider vocabulary per row", () => {
     const sections = build({
       environments: [

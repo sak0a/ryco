@@ -129,6 +129,46 @@ describe("hosted node history", () => {
     expect(history.createHref("/env_a/t_1")).toBe("/node/node_a/env_a/t_1");
   });
 
+  it("publishes the resolved node when a logical thread is pushed from the unified root", () => {
+    const { win, history } = install("/");
+    setHostedNodeRouteEnvironmentResolver((environmentId) =>
+      environmentId === EnvironmentId.make("env_a") ? "node_a" : null,
+    );
+    const seen: Array<string | null> = [];
+    const unsubscribe = subscribeRoutedHostedNode(() => {
+      seen.push(getRoutedHostedNode().nodeId);
+    });
+
+    history.push("/env_a/t_1");
+    history.flush();
+
+    expect(win.location.pathname).toBe("/node/node_a/env_a/t_1");
+    expect(getRoutedHostedNode()).toEqual({
+      nodeId: "node_a",
+      malformed: false,
+      logicalPathname: "/env_a/t_1",
+    });
+    expect(seen).toEqual(["node_a"]);
+    unsubscribe();
+  });
+
+  it("publishes a cross-node logical push before the destination thread renders", () => {
+    const { win, history } = install("/node/node_a/env_a/t_1");
+    setHostedNodeRouteEnvironmentResolver((environmentId) =>
+      environmentId === EnvironmentId.make("env_b") ? "node_b" : null,
+    );
+
+    history.push("/env_b/t_2");
+    history.flush();
+
+    expect(win.location.pathname).toBe("/node/node_b/env_b/t_2");
+    expect(getRoutedHostedNode()).toEqual({
+      nodeId: "node_b",
+      malformed: false,
+      logicalPathname: "/env_b/t_2",
+    });
+  });
+
   it("enters a node route with a new history entry and clears it fail-closed", () => {
     const { win, history } = install("/");
     const seen: Array<string | null> = [];

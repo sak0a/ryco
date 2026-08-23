@@ -34,7 +34,7 @@ export type InboxSidebarStatusFilter = "all" | InboxSidebarSectionKey;
 export interface InboxSidebarEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
-  readonly connectionState: "connected" | "connecting" | "reconnecting" | "offline";
+  readonly connectionState: "connected" | "connecting" | "reconnecting" | "offline" | "idle";
   readonly stale: boolean;
   readonly staleDetail?: string;
   readonly role: "viewer" | "operator" | "owner" | "client" | null;
