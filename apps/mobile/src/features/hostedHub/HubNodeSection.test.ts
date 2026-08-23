@@ -25,6 +25,7 @@ const hostedMock = vi.hoisted(() => ({
     retrySelectedNode: vi.fn(),
   },
 }));
+const acquireNodeMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 // Tripwires on the direct plane, in two layers.
 //
@@ -65,6 +66,9 @@ vi.mock("../../hostedHub/state", () => ({
   hostedHubController: hostedMock.controller,
   useHostedHubStore: (selector: (state: HostedHubState) => unknown) =>
     selector(hostedMock.state as HostedHubState),
+}));
+vi.mock("../../hostedHub/acquireNode", () => ({
+  acquireMobileHostedNode: acquireNodeMock,
 }));
 // The availability seam is shared with the other hosted surfaces; it owns the
 // `ensureMobileHostedSession()` call and its own state, so it is mocked here
@@ -211,6 +215,7 @@ beforeEach(() => {
   hostedMock.controller.returnToDirectory.mockClear();
   hostedMock.controller.refreshDirectory.mockClear();
   hostedMock.controller.retrySelectedNode.mockClear();
+  acquireNodeMock.mockClear();
   hostedMock.available = true;
   navigationMock.navigate.mockClear();
   mountEffects.length = 0;
@@ -408,14 +413,15 @@ describe("Hub node section when hosted mode is unavailable or signed out", () =>
     const tappable = pressables(tree).filter((element) => element.props.onPress !== undefined);
     // Only the EmptyState's browser-handoff capsule is tappable.
     expect(tappable).toHaveLength(1);
-    (tappable[0]?.props.onPress as () => void)();
+    (tappable[0]!.props.onPress as () => void)();
     expect(navigationMock.navigate).toHaveBeenCalledWith("Access");
     expect(hostedMock.controller.selectNode).not.toHaveBeenCalled();
+    expect(acquireNodeMock).not.toHaveBeenCalled();
   });
 });
 
 describe("Hub node section view", () => {
-  it("renders a tappable row that selects the node", () => {
+  it("renders a tappable row that acquires the node through the coordinator", () => {
     hostedMock.state = state();
     const tree = HubNodeSection();
     const row = pressables(tree).find((element) =>
@@ -423,8 +429,9 @@ describe("Hub node section view", () => {
     );
     expect(row).toBeDefined();
     expect(row?.props.disabled).toBe(false);
-    (row?.props.onPress as () => void)();
-    expect(hostedMock.controller.selectNode).toHaveBeenCalledWith("node-1");
+    (row!.props.onPress as () => void)();
+    expect(acquireNodeMock).toHaveBeenCalledWith("node-1");
+    expect(hostedMock.controller.selectNode).not.toHaveBeenCalled();
   });
 
   it("renders a disabled row with no press handler when the directory is stale", () => {
@@ -442,6 +449,7 @@ describe("Hub node section view", () => {
     const tree = HubNodeSection();
     expect(pressables(tree).filter((element) => element.props.onPress !== undefined)).toEqual([]);
     expect(hostedMock.controller.selectNode).not.toHaveBeenCalled();
+    expect(acquireNodeMock).not.toHaveBeenCalled();
   });
 });
 

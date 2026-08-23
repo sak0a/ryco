@@ -13,6 +13,7 @@ import {
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusPill, type StatusTone } from "../../components/StatusPill";
+import { acquireMobileHostedNode } from "../../hostedHub/acquireNode";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useMobileE2eeChannelStatus } from "../e2ee/useMobileE2eeSession";
 import { NodeRow } from "../nodes/NodeRow";
@@ -363,7 +364,12 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
     available,
     e2eeStatus,
     settledStatus,
-    actions: hostedHubController,
+    actions: {
+      selectNode: acquireMobileHostedNode,
+      returnToDirectory: hostedHubController.returnToDirectory,
+      refreshDirectory: hostedHubController.refreshDirectory,
+      retrySelectedNode: hostedHubController.retrySelectedNode,
+    },
     // Sign-in uses the same full-screen native identity surface as the root gate.
     onSignIn: () => navigation.navigate("Access"),
     query: props.query,
