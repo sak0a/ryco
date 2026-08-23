@@ -119,6 +119,7 @@ import {
 } from "./unsignedMacUpdateInstaller.ts";
 import { createDesktopProtectedRecordStore } from "./protectedRecordStore.ts";
 import { createDesktopNativeSecretStore } from "./nativeSecretStore.ts";
+import { resolveDesktopDataHomes } from "./desktopDataHomes.ts";
 import {
   createNativeSecurityHelperRunner,
   desktopNativeInstallationNamespace,
@@ -207,10 +208,13 @@ const CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL = "desktop:cancel-hosted-github-co
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const DEFAULT_BASE_DIR = Path.join(OS.homedir(), ".ryco");
-const BASE_DIR =
-  readEnv("RYCO_HOME")?.trim() ||
-  (isDevelopment ? Path.join(DEFAULT_BASE_DIR, "desktop-dev") : DEFAULT_BASE_DIR);
-const STATE_DIR = Path.join(BASE_DIR, "userdata");
+const { backendBaseDir: BACKEND_BASE_DIR, desktopBaseDir: DESKTOP_BASE_DIR } =
+  resolveDesktopDataHomes({
+    configuredBaseDir: readEnv("RYCO_HOME"),
+    defaultBaseDir: DEFAULT_BASE_DIR,
+    isDevelopment,
+  });
+const STATE_DIR = Path.join(DESKTOP_BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
 const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
@@ -2406,7 +2410,7 @@ function startBackend(): void {
         mode: "desktop",
         noBrowser: true,
         port: backendPort,
-        rycoHome: BASE_DIR,
+        rycoHome: BACKEND_BASE_DIR,
         host: backendBindHost,
         ...(isDevelopment ? { devUrl: resolveDesktopDevServerUrl() } : {}),
         desktopBootstrapToken: backendBootstrapToken,
