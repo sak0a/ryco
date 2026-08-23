@@ -58,6 +58,7 @@ import {
   hubRoutePathname,
   hubRouteTitle,
   navigateHub,
+  navigateHubPathname,
   useHubRoute,
 } from "../../hostedHub/hubRoutes";
 import { hubPageTitle } from "../../hubBranding";
@@ -72,7 +73,6 @@ import { useHostedBrowserLifecycle } from "../../hostedHub/useHostedBrowserLifec
 import {
   hostedNodeRequiresNativeClient,
   startHostedWorkspaceCoordinator,
-  useHostedWorkspaceState,
 } from "../../hostedHub/hostedConnectionCoordinator";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { PHONE_ANCHORED_ACTIONS_CLASS_NAME } from "../mobile/phoneAnchoredActions";
@@ -186,7 +186,6 @@ export function HostedHubRoot() {
   const recoveryCodesLeased = useHostedRecoveryCodeDisplayStore((state) => state.leased);
   const routedNode = useRoutedHostedNode();
   const routeNotice = useHostedNodeRouteNotice();
-  const hostedWorkspace = useHostedWorkspaceState();
   useHostedNodeRouteOrchestrator();
   useEffect(() => startHostedWorkspaceCoordinator(), []);
   // The single browser lifecycle owner, above the presentation-tier seam: the
@@ -198,9 +197,9 @@ export function HostedHubRoot() {
   useEffect(() => {
     // GitHub authentication returns to account completion so an unlinked
     // identity can continue without another click. A linked identity establishes
-    // a session instead, so replace that transient destination with the directory.
+    // a session instead, so replace that transient destination with the unified workspace.
     if (accountStatus === "authenticated" && hubRoute?.kind === "sign-up") {
-      navigateHub({ kind: "nodes" }, { replace: true });
+      navigateHubPathname("/", { replace: true });
     }
   }, [accountStatus, hubRoute]);
 
@@ -241,21 +240,15 @@ export function HostedHubRoot() {
   if (hubRoute?.kind === "nodes" || hubRoute?.kind === "nodes-enroll") {
     return <HostedNodeDirectory />;
   }
-  // Directory/list navigation owns no connection. A retained scoped thread may
-  // remain live behind it, but it does not own this surface or force a global
-  // disconnect.
+  // Unscoped workspace navigation owns no connection. The Hub home renders the
+  // unified cached workspace even before metadata exists; machine administration
+  // remains the explicit `/nodes` route handled above.
   if (routedNode.nodeId === null) {
-    if (routeNotice) return <HostedNodeDirectory />;
+    if (routeNotice || routedNode.malformed) return <HostedNodeDirectory />;
     if (selectedNode && sessionEstablished) {
       return <RootAppShell authGateState={{ status: "hosted-hub" }} />;
     }
-    if (
-      hostedWorkspace.workspace.projects.length > 0 ||
-      hostedWorkspace.workspace.threads.length > 0
-    ) {
-      return <RootAppShell authGateState={{ status: "hosted-cached" }} />;
-    }
-    return <HostedNodeDirectory />;
+    return <RootAppShell authGateState={{ status: "hosted-cached" }} />;
   }
   // A routed node segment is pending fail-closed validation/acquisition. Never
   // render another environment merely because it remains the compatibility

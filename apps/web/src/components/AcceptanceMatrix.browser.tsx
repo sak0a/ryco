@@ -44,7 +44,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 
 import { hostedHubController, useHostedHubStore } from "../hostedHub/state";
 import { installHostedNodeHistory, resetHostedNodeRoutesForTests } from "../hostedHub/nodeRoutes";
-import { resetHubRoutesForTests } from "../hostedHub/hubRoutes";
+import { navigateHub, resetHubRoutesForTests } from "../hostedHub/hubRoutes";
 import type { HostedHubNode } from "../hostedHub/types";
 import { syncDocumentPresentationTier } from "../lib/presentationTier";
 import {
@@ -171,6 +171,7 @@ const ENTRY_SURFACES: readonly EntrySurface[] = [
   {
     name: "node-directory",
     seed: () => {
+      navigateHub({ kind: "nodes" }, { replace: true });
       useHostedHubStore.setState({
         accountStatus: "authenticated",
         account,
@@ -435,6 +436,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
       mounted = null;
       hostedHubController.resetForTests();
       resetHubRoutesForTests();
+      navigateHub({ kind: "nodes" }, { replace: true });
 
       useHostedHubStore.setState({
         accountStatus: "authenticated",

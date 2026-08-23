@@ -27,7 +27,7 @@ vi.mock("../../env", async (importOriginal) => ({
 }));
 
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
-import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
+import { navigateHub, resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import {
   installHostedNodeHistory,
   resetHostedNodeRoutesForTests,
@@ -203,7 +203,8 @@ describe("hosted node route surfaces", () => {
 
   it("selects a node by navigating into its node-scoped route", async () => {
     const target = node("node_aaaaaaaaaaaaaaaaaaaaaa");
-    installRoute("/");
+    installRoute("/nodes");
+    navigateHub({ kind: "nodes" }, { replace: true });
     const selectNode = vi
       .spyOn(hostedHubController, "selectNode")
       .mockImplementation(async (nodeId: string) => {
@@ -238,7 +239,8 @@ describe("hosted node route surfaces", () => {
 
   it("returns to the directory when history navigates back from a node route", async () => {
     const target = node("node_aaaaaaaaaaaaaaaaaaaaaa");
-    installRoute("/");
+    installRoute("/nodes");
+    navigateHub({ kind: "nodes" }, { replace: true });
     vi.spyOn(hostedHubController, "selectNode").mockImplementation(async (nodeId: string) => {
       const found = useHostedHubStore.getState().nodes.find((entry) => entry.id === nodeId);
       useHostedHubStore.setState({
@@ -265,12 +267,13 @@ describe("hosted node route surfaces", () => {
     await expect.element(page.getByRole("heading", { name: /^Your nodes?$/ })).toBeVisible();
     expect(useHostedHubStore.getState().selectedNode?.id).toBe(target.id);
     expect(useHostedHubStore.getState().selectionStatus).toBe("online");
-    expect(fakeWindow!.location.pathname).toBe("/");
+    expect(fakeWindow!.location.pathname).toBe("/nodes");
   });
 
   it("keeps session and account material out of the URL, history, and browser storage", async () => {
     const target = node("node_aaaaaaaaaaaaaaaaaaaaaa");
-    installRoute("/");
+    installRoute("/nodes");
+    navigateHub({ kind: "nodes" }, { replace: true });
     vi.spyOn(hostedHubController, "selectNode").mockImplementation(async (nodeId: string) => {
       const found = useHostedHubStore.getState().nodes.find((entry) => entry.id === nodeId);
       useHostedHubStore.setState({

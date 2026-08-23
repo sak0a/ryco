@@ -51,7 +51,7 @@ import { resetPointerEmulation, setCoarsePointerEmulation } from "../../../test/
 import { measureEffectiveHitTarget } from "../../../test/touchTargets";
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
-import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
+import { navigateHub, resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot } from "./HostedHubRoot";
 
@@ -145,6 +145,7 @@ function seedSurface(surface: EntrySurface): void {
     });
     return;
   }
+  navigateHub({ kind: "nodes" }, { replace: true });
   useHostedHubStore.setState({
     accountStatus: "authenticated",
     account,
