@@ -42,6 +42,7 @@ import {
   startEnvironmentConnectionService,
   useSavedEnvironmentRegistryStore,
 } from "../environments/runtime";
+import { startDesktopWorkspaceBridge } from "../platform/desktopWorkspace";
 import { configureClientTracing } from "../observability/clientTracing";
 import {
   getPrimaryKnownEnvironment,
@@ -140,7 +141,12 @@ function AuthenticatedTracingBootstrap() {
 
 function EnvironmentConnectionManagerBootstrap() {
   useEffect(() => {
-    return startEnvironmentConnectionService();
+    const stopEnvironmentConnections = startEnvironmentConnectionService();
+    const stopDesktopWorkspace = startDesktopWorkspaceBridge();
+    return () => {
+      stopDesktopWorkspace();
+      stopEnvironmentConnections();
+    };
   }, []);
 
   return null;

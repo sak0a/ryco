@@ -1,7 +1,11 @@
-import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 
 import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
 import { e2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
+import {
+  encodeCrossDeviceApprovalQr,
+  encodeCrossDeviceApprovalTbs,
+} from "@ryco/shared/relayE2eeCrossDeviceApproval";
 import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
 import type { DesktopProtectedRecordStore } from "./protectedRecordStore.ts";
 import { DesktopE2eeTrustStore } from "./desktopE2eeTrust.ts";
@@ -42,7 +46,8 @@ function memoryStore(): {
   };
 }
 
-const nodeIdentityPublicKey = rawEd25519(generateKeyPairSync("ed25519").publicKey);
+const nodeIdentity = generateKeyPairSync("ed25519");
+const nodeIdentityPublicKey = rawEd25519(nodeIdentity.publicKey);
 const otherNodeIdentityPublicKey = rawEd25519(generateKeyPairSync("ed25519").publicKey);
 const clientIdentityPublicKey = rawP256(
   generateKeyPairSync("ec", { namedCurve: "prime256v1" }).publicKey,
@@ -84,6 +89,15 @@ describe("Desktop E2EE trust store", () => {
     expect(JSON.parse(memory.records.get("e2ee-trust")!).records).toHaveLength(1);
   });
 
+  it("lists account-scoped pins so client resume does not depend on node uptime", async () => {
+    const memory = memoryStore();
+    const trust = new DesktopE2eeTrustStore(memory.store);
+    const local = await trust.promoteLocal(promotion);
+
+    await expect(trust.list(promotion.hubOrigin, promotion.accountId)).resolves.toEqual([local]);
+    await expect(trust.list(promotion.hubOrigin, "another-account")).resolves.toEqual([]);
+  });
+
   it("refuses a conflicting node key without replacing durable trust", async () => {
     const memory = memoryStore();
     const trust = new DesktopE2eeTrustStore(memory.store);
@@ -93,6 +107,57 @@ describe("Desktop E2EE trust store", () => {
       trust.promoteLocal({ ...promotion, nodeIdentityPublicKey: otherNodeIdentityPublicKey }),
     ).rejects.toMatchObject({ code: "trust_conflict" });
     expect(memory.records.get("e2ee-trust")).toBe(before);
+  });
+
+  it("promotes an exact remote node from a current node-signed cross-device approval", async () => {
+    const memory = memoryStore();
+    const trust = new DesktopE2eeTrustStore(memory.store);
+    const tbs = encodeCrossDeviceApprovalTbs({
+      hubOrigin: promotion.hubOrigin,
+      accountId: promotion.accountId,
+      nodeId: promotion.nodeId,
+      nodeIdentityPublicKey,
+      clientIdentityFingerprint: e2eeKeyFingerprint("client-identity", clientIdentityPublicKey),
+      maxRole: "owner",
+      capabilitySet: ["ryco.rpc"],
+      nodeContinuityId: promotion.nodeContinuityId,
+      nodePolicyGeneration: promotion.nodePolicyGeneration,
+      approvedAt: promotion.approvedAt,
+      approvalId: new Uint8Array(32).fill(7),
+      issuedAt: promotion.approvedAt,
+      expiresAt: promotion.approvedAt + 300_000,
+    });
+    const payload = encodeCrossDeviceApprovalQr({
+      tbs,
+      signature: Uint8Array.from(sign(null, tbs, nodeIdentity.privateKey)),
+    });
+
+    await expect(
+      trust.promoteCrossDeviceApproval({
+        payload,
+        hubOrigin: promotion.hubOrigin,
+        accountId: promotion.accountId,
+        nodeId: promotion.nodeId,
+        environmentId: promotion.environmentId,
+        clientIdentityPublicKey,
+        now: promotion.approvedAt + 1,
+        randomHandle: promotion.randomHandle,
+      }),
+    ).resolves.toMatchObject({
+      environmentId: promotion.environmentId,
+      verificationMethod: "cross-device-approval-v1",
+    });
+    await expect(
+      trust.promoteCrossDeviceApproval({
+        payload,
+        hubOrigin: promotion.hubOrigin,
+        accountId: promotion.accountId,
+        nodeId: `node_${"Z".repeat(22)}`,
+        environmentId: promotion.environmentId,
+        clientIdentityPublicKey,
+        now: promotion.approvedAt + 1,
+      }),
+    ).rejects.toMatchObject({ code: "trust_conflict" });
   });
 
   it("advances only the authenticated statement policy for the exact durable pin", async () => {

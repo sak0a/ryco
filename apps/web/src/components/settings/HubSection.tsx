@@ -7,12 +7,14 @@ import type {
   HubEnrollmentCeremonyDetail,
   HubIdentitySummary,
 } from "@ryco/contracts";
+import { EnvironmentId } from "@ryco/contracts";
 import relayArchitectureGuideUrl from "../../../../../docs/relay-architecture.html?url";
 import {
   createVisibilityAwarePoller,
   type VisibilityAwarePoller,
 } from "../../lib/visibilityPolling";
 import { webAppLifecycle } from "../../platform/appLifecycle";
+import { useDesktopWorkspaceState } from "../../platform/desktopWorkspace";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
@@ -77,7 +79,14 @@ export function HubSection({
   readonly desktopBridge: typeof window.desktopBridge;
 }) {
   const nowMs = useRelativeTimeTick(1_000);
+  const desktopWorkspace = useDesktopWorkspaceState();
   const [snapshot, setSnapshot] = useState<HubSnapshot | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [verificationTarget, setVerificationTarget] = useState<{
+    readonly nodeId: string;
+    readonly environmentId: string;
+  } | null>(null);
+  const [verificationPayload, setVerificationPayload] = useState("");
   const [config, setConfig] = useState<DesktopHubLaunchConfig | null>(null);
   const [originDraft, setOriginDraft] = useState("");
   const [originError, setOriginError] = useState<string | null>(null);
@@ -212,6 +221,34 @@ export function HubSection({
     },
     [desktopBridge],
   );
+
+  const refreshDesktopWorkspace = useCallback(async () => {
+    if (!desktopBridge?.refreshDesktopWorkspaceCatalog) return;
+    setWorkspaceError(null);
+    try {
+      await desktopBridge.refreshDesktopWorkspaceCatalog();
+    } catch {
+      setWorkspaceError("Unable to refresh this account's machine directory.");
+    }
+  }, [desktopBridge]);
+
+  const verifyDesktopMachine = useCallback(async () => {
+    if (!desktopBridge?.verifyDesktopWorkspaceApproval || !verificationTarget) return;
+    setWorkspaceError(null);
+    try {
+      await desktopBridge.verifyDesktopWorkspaceApproval({
+        nodeId: verificationTarget.nodeId,
+        environmentId: EnvironmentId.make(verificationTarget.environmentId),
+        payload: verificationPayload.trim(),
+      });
+      setVerificationTarget(null);
+      setVerificationPayload("");
+    } catch {
+      setWorkspaceError(
+        "That approval code does not match this Desktop client, machine, account, or current node security state.",
+      );
+    }
+  }, [desktopBridge, verificationPayload, verificationTarget]);
 
   const runHostedGitHubAction = useCallback(
     async (action: "connect" | "disconnect", totpCode?: string) => {
@@ -539,9 +576,7 @@ export function HubSection({
         </AnimatedHeight>
       </SettingsRow>
 
-      {config?.enabled === true &&
-      config.origin !== null &&
-      desktopBridge.getHostedIdentityState !== undefined ? (
+      {config?.origin !== null && desktopBridge.getHostedIdentityState !== undefined ? (
         <SettingsRow
           title="Ryco account"
           description={
@@ -605,6 +640,84 @@ export function HubSection({
             )
           }
         />
+      ) : null}
+
+      {hostedIdentity?.status === "ready" && desktopBridge?.getDesktopWorkspaceState ? (
+        <SettingsRow
+          title="Workspace machines"
+          description="The Desktop client keeps each machine scoped independently. Cached lists do not open connections."
+          status={
+            workspaceError ??
+            `${desktopWorkspace.machines.filter((machine) => machine.online).length} online · ${desktopWorkspace.activeConnectionCount} connected`
+          }
+          control={
+            <Button size="xs" variant="outline" onClick={() => void refreshDesktopWorkspace()}>
+              Refresh
+            </Button>
+          }
+        >
+          <DataList>
+            {desktopWorkspace.machines.map((machine) => (
+              <DataListItem
+                key={`${machine.nodeId ?? "unknown"}:${machine.environmentId}`}
+                term={machine.label}
+                action={
+                  machine.nodeId &&
+                  (machine.nativeTrust === "unverified" || machine.nativeTrust === "unknown") ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => {
+                        setVerificationTarget({
+                          nodeId: machine.nodeId!,
+                          environmentId: machine.environmentId,
+                        });
+                        setVerificationPayload("");
+                      }}
+                    >
+                      Verify this machine
+                    </Button>
+                  ) : null
+                }
+              >
+                {machine.nativeTrust === "verified"
+                  ? machine.online
+                    ? "Verified · Online"
+                    : "Verified · Offline"
+                  : machine.nativeTrust === "identity-conflict"
+                    ? "Identity changed · Locked"
+                    : "Needs verification"}
+              </DataListItem>
+            ))}
+          </DataList>
+          {verificationTarget ? (
+            <div className="mt-3 flex flex-col gap-2 border-t border-border/60 py-3 sm:flex-row">
+              <Input
+                value={verificationPayload}
+                onChange={(event) => setVerificationPayload(event.target.value)}
+                placeholder="Paste the approval code shown by this exact node"
+                aria-label="Machine approval code"
+              />
+              <Button
+                size="sm"
+                disabled={verificationPayload.trim().length === 0}
+                onClick={() => void verifyDesktopMachine()}
+              >
+                Verify
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setVerificationTarget(null);
+                  setVerificationPayload("");
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : null}
+        </SettingsRow>
       ) : null}
 
       {hostedIdentity?.status === "ready" && hostedIdentity.github !== undefined ? (

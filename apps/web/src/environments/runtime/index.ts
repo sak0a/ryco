@@ -17,6 +17,7 @@ export {
 export {
   addSavedEnvironment,
   connectPrimaryEnvironment,
+  connectDesktopWorkspaceEnvironment,
   connectDesktopSshEnvironment,
   disconnectSavedEnvironment,
   disconnectPrimaryEnvironment,

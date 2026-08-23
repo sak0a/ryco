@@ -79,6 +79,7 @@ import {
 import { getHostedRelayAttemptFactory } from "~/hostedHub/transport";
 import { createWebEnvironmentStateSink } from "./environmentStateSink";
 import { webSocket } from "../../platform";
+import { DesktopWorkspaceIpcSocketFactory } from "../../platform/desktopWorkspaceSocket";
 
 function isSavedEnvironmentConnectionCancelledError(
   error: unknown,
@@ -979,6 +980,54 @@ export async function disconnectPrimaryEnvironment(): Promise<void> {
 
 export function connectPrimaryEnvironment(): EnvironmentConnection | null {
   return maybeCreatePrimaryEnvironmentConnection();
+}
+
+/** Connect one exact native-verified Hub node through Desktop main's opaque relay transport. */
+export async function connectDesktopWorkspaceEnvironment(input: {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+}): Promise<EnvironmentConnection> {
+  const bridge = globalThis.window?.desktopBridge;
+  if (!bridge?.prepareDesktopWorkspaceTransport) {
+    throw new Error("Desktop workspace transport is unavailable.");
+  }
+  const existing = getEnvironmentSupervisor().read(input.environmentId);
+  if (existing) {
+    await existing.reconnect();
+    await existing.ensureBootstrapped();
+    return existing;
+  }
+  const socketFactory = new DesktopWorkspaceIpcSocketFactory(input.environmentId, bridge);
+  const transport = new HostedWsTransport(() => socketFactory.nextUrl(), {
+    preserveSocketPath: true,
+    webSocketConstructor: (url) => socketFactory.createSocket(url) as unknown as WebSocket,
+    retryTransientErrors: false,
+    reconnectMaxRetries: 1_000_000,
+  });
+  const knownEnvironment = createKnownEnvironment({
+    id: input.environmentId,
+    label: input.label,
+    source: "hub-hosted",
+    target: {
+      httpBaseUrl: "http://desktop-workspace.invalid",
+      wsBaseUrl: "ws://desktop-workspace.invalid",
+    },
+  });
+  const connection = registerConnection(
+    createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: { ...knownEnvironment, environmentId: input.environmentId },
+      client: createWsRpcClient(transport),
+      ...createEnvironmentConnectionHandlers(),
+    }),
+  );
+  try {
+    await connection.ensureBootstrapped();
+    return connection;
+  } catch (error) {
+    await removeConnection(input.environmentId).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function ensureSavedEnvironmentConnection(

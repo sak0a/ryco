@@ -364,6 +364,69 @@ export interface DesktopHostedIdentityActionResult {
   readonly state: DesktopHostedIdentityState;
 }
 
+export type DesktopWorkspaceNativeTrustState =
+  | "not-required"
+  | "unknown"
+  | "unverified"
+  | "verified"
+  | "identity-conflict";
+
+export interface DesktopWorkspaceMachineProjection {
+  readonly environmentId: EnvironmentId;
+  readonly nodeId: string | null;
+  readonly label: string;
+  readonly online: boolean;
+  readonly nativeTrust: DesktopWorkspaceNativeTrustState;
+  readonly connectionState: "disconnected" | "connecting" | "connected" | "error";
+  readonly canReadMetadata: boolean;
+  readonly canConnect: boolean;
+  readonly canMutate: boolean;
+  readonly accessReasons: ReadonlyArray<string>;
+}
+
+/** Metadata-only snapshot transported across the isolated Desktop preload. */
+export interface DesktopWorkspaceMetadataProjection {
+  readonly schemaVersion: 1;
+  readonly environmentId: EnvironmentId;
+  readonly capturedAt: number;
+  readonly projects: ReadonlyArray<unknown>;
+  readonly worktrees: ReadonlyArray<unknown>;
+  readonly threads: ReadonlyArray<unknown>;
+}
+
+export interface DesktopWorkspaceStateProjection {
+  readonly status: "signed-out" | "ready" | "unavailable";
+  readonly accountId: string | null;
+  readonly localEnvironmentId: EnvironmentId | null;
+  readonly machines: ReadonlyArray<DesktopWorkspaceMachineProjection>;
+  readonly snapshots: ReadonlyArray<DesktopWorkspaceMetadataProjection>;
+  readonly queuedEnvironmentIds: ReadonlyArray<EnvironmentId>;
+  readonly activeConnectionCount: number;
+}
+
+export type DesktopWorkspaceScopeProjection =
+  | { readonly type: "thread-detail"; readonly threadId: ThreadId }
+  | { readonly type: "vcs-status"; readonly cwd: string }
+  | { readonly type: "provider-status"; readonly instanceId?: string };
+
+export interface DesktopWorkspaceConnectionCommand {
+  readonly action: "connect" | "release";
+  readonly environmentId: EnvironmentId;
+  readonly delayMs: number;
+}
+
+/** Opaque main-owned relay transport. Payloads are authorized RPC bytes, never credentials. */
+export type DesktopWorkspaceTransportEvent =
+  | { readonly type: "open"; readonly transportId: string }
+  | { readonly type: "message"; readonly transportId: string; readonly data: Uint8Array }
+  | { readonly type: "error"; readonly transportId: string }
+  | {
+      readonly type: "close";
+      readonly transportId: string;
+      readonly code: number;
+      readonly reason: string;
+    };
+
 export type DesktopNativeE2eePreparation =
   | { readonly kind: "web-eligible" }
   | { readonly kind: "strict-unavailable" }
@@ -511,19 +574,53 @@ export interface DesktopBridge {
     readonly totpCode?: string;
   }) => Promise<DesktopHostedIdentityActionResult>;
   cancelHostedGitHubConnection?: () => Promise<void>;
-  prepareNativeE2eeAttempt?: (input: {
-    readonly accountId: string;
+  /** Secret-free native workspace client projection and scoped operations. */
+  getDesktopWorkspaceState?: () => Promise<DesktopWorkspaceStateProjection>;
+  refreshDesktopWorkspaceCatalog?: () => Promise<DesktopWorkspaceStateProjection>;
+  publishDesktopWorkspaceSnapshot?: (
+    snapshot: DesktopWorkspaceMetadataProjection,
+  ) => Promise<DesktopWorkspaceStateProjection>;
+  retainDesktopWorkspaceScope?: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly scope: DesktopWorkspaceScopeProjection;
+  }) => Promise<{ readonly leaseId: string; readonly state: DesktopWorkspaceStateProjection }>;
+  renewDesktopWorkspaceScope?: (leaseId: string) => Promise<DesktopWorkspaceStateProjection>;
+  releaseDesktopWorkspaceScope?: (leaseId: string) => Promise<DesktopWorkspaceStateProjection>;
+  setDesktopWorkspaceBackgrounded?: (
+    backgrounded: boolean,
+  ) => Promise<DesktopWorkspaceStateProjection>;
+  purgeDesktopWorkspaceCache?: (
+    environmentId?: EnvironmentId,
+  ) => Promise<DesktopWorkspaceStateProjection>;
+  beginDesktopWorkspaceVerification?: (input: {
     readonly nodeId: string;
-  }) => Promise<DesktopNativeE2eePreparation>;
-  startNativeE2eeHandshake?: (
-    attemptHandle: string,
-    input: DesktopNativeE2eeHandshakeStartInput,
-  ) => Promise<DesktopNativeE2eeHandshakeStartResult>;
-  finishNativeE2eeHandshake?: (
-    handle: string,
-    payload: Uint8Array,
-  ) => Promise<DesktopNativeE2eeHandshakeFinishResult>;
-  destroyNativeE2eeHandshake?: (handle: string) => Promise<void>;
+    readonly environmentId: EnvironmentId;
+  }) => Promise<{ readonly handle: string }>;
+  cancelDesktopWorkspaceVerification?: (handle: string) => Promise<void>;
+  verifyDesktopWorkspaceApproval?: (input: {
+    readonly nodeId: string;
+    readonly environmentId: EnvironmentId;
+    readonly payload: string;
+  }) => Promise<DesktopWorkspaceStateProjection>;
+  onDesktopWorkspaceState?: (
+    listener: (state: DesktopWorkspaceStateProjection) => void,
+  ) => () => void;
+  onDesktopWorkspaceConnectionCommand?: (
+    listener: (command: DesktopWorkspaceConnectionCommand) => void,
+  ) => () => void;
+  prepareDesktopWorkspaceTransport?: (
+    environmentId: EnvironmentId,
+  ) => Promise<{ readonly transportId: string }>;
+  activateDesktopWorkspaceTransport?: (transportId: string) => Promise<void>;
+  sendDesktopWorkspaceTransport?: (transportId: string, data: Uint8Array) => void;
+  closeDesktopWorkspaceTransport?: (transportId: string) => void;
+  reportDesktopWorkspaceConnection?: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly connected: boolean;
+  }) => Promise<void>;
+  onDesktopWorkspaceTransportEvent?: (
+    listener: (event: DesktopWorkspaceTransportEvent) => void,
+  ) => () => void;
   /**
    * Persist hub launch configuration and relaunch to apply it.
    *

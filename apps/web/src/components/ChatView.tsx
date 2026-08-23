@@ -252,6 +252,12 @@ import {
   loadThreadHistoryAroundMessage,
   retainThreadDetailSubscription,
 } from "../environments/runtime/service";
+import {
+  retainDesktopWorkspaceProviderScope,
+  retainDesktopWorkspaceThreadScope,
+  retainDesktopWorkspaceVcsScope,
+  useDesktopWorkspaceState,
+} from "../platform/desktopWorkspace";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import {
@@ -464,6 +470,7 @@ export default function ChatView(props: ChatViewProps) {
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
   );
   const settings = useSettings();
+  const desktopWorkspace = useDesktopWorkspaceState();
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -973,7 +980,12 @@ export default function ChatView(props: ChatViewProps) {
     if (routeKind !== "server") {
       return;
     }
-    return retainThreadDetailSubscription(environmentId, threadId);
+    const releaseSubscription = retainThreadDetailSubscription(environmentId, threadId);
+    const releaseDesktopDemand = retainDesktopWorkspaceThreadScope(environmentId, threadId);
+    return () => {
+      releaseDesktopDemand();
+      releaseSubscription();
+    };
   }, [environmentId, routeKind, threadId]);
 
   // Compute the list of environments this logical project spans, used to
@@ -1070,6 +1082,7 @@ export default function ChatView(props: ChatViewProps) {
       projectId: ProjectId;
       label: string;
       isPrimary: boolean;
+      disabled?: boolean;
     }> = [];
     for (const p of memberProjects) {
       if (seen.has(p.environmentId)) continue;
@@ -1077,17 +1090,25 @@ export default function ChatView(props: ChatViewProps) {
       const isPrimary = p.environmentId === primaryEnvironmentId;
       const savedRecord = savedEnvironmentRegistry[p.environmentId];
       const runtimeState = savedEnvironmentRuntimeById[p.environmentId];
-      const label = resolveEnvironmentOptionLabel({
-        isPrimary,
-        environmentId: p.environmentId,
-        runtimeLabel: runtimeState?.descriptor?.label ?? null,
-        savedLabel: savedRecord?.label ?? null,
-      });
+      const desktopMachine = desktopWorkspace.machines.find(
+        (machine) => machine.environmentId === p.environmentId,
+      );
+      const label =
+        desktopMachine?.label ??
+        resolveEnvironmentOptionLabel({
+          isPrimary,
+          environmentId: p.environmentId,
+          runtimeLabel: runtimeState?.descriptor?.label ?? null,
+          savedLabel: savedRecord?.label ?? null,
+        });
       envs.push({
         environmentId: p.environmentId,
         projectId: p.id,
         label,
         isPrimary,
+        ...(desktopWorkspace.status === "ready"
+          ? { disabled: desktopMachine?.canMutate !== true }
+          : {}),
       });
     }
     // Sort: primary first, then alphabetical
@@ -1099,6 +1120,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [
     activeProject,
     allProjects,
+    desktopWorkspace,
     projectGroupingSettings,
     primaryEnvironmentId,
     savedEnvironmentRegistry,
@@ -1920,6 +1942,16 @@ export default function ChatView(props: ChatViewProps) {
     const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
     return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
   }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
+
+  useEffect(() => {
+    if (routeKind !== "server" || !gitCwd) return;
+    return retainDesktopWorkspaceVcsScope(environmentId, gitCwd);
+  }, [environmentId, gitCwd, routeKind]);
+
+  useEffect(() => {
+    if (routeKind !== "server") return;
+    return retainDesktopWorkspaceProviderScope(environmentId, activeProviderStatus?.instanceId);
+  }, [activeProviderStatus?.instanceId, environmentId, routeKind]);
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
@@ -1997,13 +2029,18 @@ export default function ChatView(props: ChatViewProps) {
       const target = logicalProjectEnvironments.find(
         (env) => env.environmentId === nextEnvironmentId,
       );
-      if (!target) return;
+      if (!target || target.disabled) return;
       setDraftThreadContext(draftId, {
         projectRef: scopeProjectRef(target.environmentId, target.projectId),
       });
     },
     [draftId, envLocked, logicalProjectEnvironments, setDraftThreadContext],
   );
+  const desktopExecutionTargetUnavailable =
+    routeKind === "draft" &&
+    desktopWorkspace.status === "ready" &&
+    desktopWorkspace.machines.find((machine) => machine.environmentId === environmentId)
+      ?.canMutate !== true;
 
   const activeTerminalGroup =
     terminalState.terminalGroups.find(
@@ -4366,7 +4403,9 @@ export default function ChatView(props: ChatViewProps) {
                   activeThreadGoal={serverThread?.goal ?? null}
                   phase={phase}
                   isConnecting={isConnecting}
-                  isSendBusy={isSendBusy || !dispatchCapability.allowed}
+                  isSendBusy={
+                    isSendBusy || !dispatchCapability.allowed || desktopExecutionTargetUnavailable
+                  }
                   isPreparingWorktree={isPreparingWorktree}
                   environmentUnavailable={activeEnvironmentUnavailableState}
                   activePendingApproval={activePendingApproval}
@@ -4398,6 +4437,9 @@ export default function ChatView(props: ChatViewProps) {
                   keybindings={keybindings}
                   terminalOpen={Boolean(terminalState.terminalOpen)}
                   gitCwd={gitCwd}
+                  executionTargets={logicalProjectEnvironments}
+                  executionTargetLocked={envLocked || routeKind === "server"}
+                  onExecutionTargetChange={onEnvironmentChange}
                   promptRef={promptRef}
                   composerImagesRef={composerImagesRef}
                   composerTerminalContextsRef={composerTerminalContextsRef}

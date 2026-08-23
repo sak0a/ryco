@@ -20,6 +20,8 @@ import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
 import { useSettings } from "./useSettings";
+import { useDesktopWorkspaceState } from "../platform/desktopWorkspace";
+import { resolveDesktopDefaultProjectRef } from "../platform/desktopWorkspaceTarget";
 
 function useNewThreadState() {
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
@@ -155,6 +157,10 @@ export function useNewThreadHandler() {
 
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projectGroupingSettings = useSettings((settings) => ({
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
+  }));
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),
@@ -180,13 +186,22 @@ export function useHandleNewThread() {
     });
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadState();
+  const desktopWorkspace = useDesktopWorkspaceState();
+  const defaultProjectRef = useMemo(
+    () =>
+      resolveDesktopDefaultProjectRef({
+        orderedProjects,
+        workspace: desktopWorkspace,
+        logicalKey: (project) =>
+          deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
+      }),
+    [desktopWorkspace, orderedProjects, projectGroupingSettings],
+  );
 
   return {
     activeDraftThread,
     activeThread,
-    defaultProjectRef: orderedProjects[0]
-      ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
-      : null,
+    defaultProjectRef,
     handleNewThread,
     routeThreadRef,
   };

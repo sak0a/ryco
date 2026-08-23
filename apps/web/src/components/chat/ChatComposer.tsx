@@ -334,6 +334,13 @@ export interface ChatComposerProps {
   keybindings: ResolvedKeybindingsConfig;
   terminalOpen: boolean;
   gitCwd: string | null;
+  executionTargets: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+    readonly disabled?: boolean;
+  }>;
+  executionTargetLocked: boolean;
+  onExecutionTargetChange: (environmentId: EnvironmentId) => void;
 
   // Refs the parent needs kept in sync
   promptRef: React.MutableRefObject<string>;
@@ -2533,6 +2540,10 @@ export const ChatComposer = memo(
                 onAttachFile={(file) => {
                   void addComposerAttachments([file]);
                 }}
+                executionTargets={props.executionTargets}
+                selectedExecutionEnvironmentId={environmentId}
+                executionTargetLocked={props.executionTargetLocked}
+                onExecutionTargetChange={props.onExecutionTargetChange}
                 selectedInstanceId={selectedInstanceId}
                 selectedModel={selectedModelForPickerWithCustomFallback}
                 lockedProvider={lockedProvider}

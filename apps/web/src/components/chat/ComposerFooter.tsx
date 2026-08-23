@@ -11,7 +11,7 @@ import {
 } from "@ryco/contracts";
 import type { ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { ListTodoIcon } from "lucide-react";
+import { ListTodoIcon, MonitorIcon } from "lucide-react";
 import { ComposerExpandableLabelControl } from "./ComposerExpandableLabelControl";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import {
@@ -460,6 +460,14 @@ export interface ComposerFooterProps {
   onSelectIssue: (issue: SourceControlIssueSummary) => void;
   onSelectChangeRequest: (cr: ChangeRequest) => void;
   onAttachFile: (file: File) => void;
+  executionTargets?: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+    readonly disabled?: boolean;
+  }>;
+  selectedExecutionEnvironmentId?: EnvironmentId;
+  executionTargetLocked?: boolean;
+  onExecutionTargetChange?: (environmentId: EnvironmentId) => void;
 
   // Model picker
   selectedInstanceId: ProviderInstanceId;
@@ -565,6 +573,48 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
           onOpenChange={props.onModelPickerOpenChange}
           onInstanceModelChange={props.onProviderModelSelect}
         />
+        {(props.executionTargets?.length ?? 0) > 0 && props.selectedExecutionEnvironmentId ? (
+          <Select
+            value={props.selectedExecutionEnvironmentId}
+            disabled={props.executionTargetLocked}
+            onValueChange={(value) => {
+              if (value) props.onExecutionTargetChange?.(value as EnvironmentId);
+            }}
+          >
+            <SelectTrigger
+              variant="ghost"
+              size="xs"
+              className="max-w-40 gap-1 px-1.5 text-muted-foreground/80"
+              aria-label="Execution machine"
+              title={
+                props.executionTargetLocked
+                  ? "Existing threads stay on their owning machine"
+                  : "Execution machine"
+              }
+            >
+              <MonitorIcon className="size-3.5 shrink-0" />
+              <SelectValue>
+                {props.executionTargets?.find(
+                  (target) => target.environmentId === props.selectedExecutionEnvironmentId,
+                )?.label ?? "No verified machine"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup alignItemWithTrigger={false} className="w-56 p-0.5">
+              {props.executionTargets?.map((target) => (
+                <SelectItem
+                  key={target.environmentId}
+                  value={target.environmentId}
+                  disabled={target.disabled}
+                >
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    <MonitorIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{target.label}</span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        ) : null}
 
         {isPhoneTier ? (
           <>

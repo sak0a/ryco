@@ -202,11 +202,7 @@ export class DesktopNativeE2eeHandshakeService {
     if (pin === null) return marker ? { kind: "strict-unavailable" } : { kind: "web-eligible" };
 
     const identity = this.#identityStatus();
-    if (
-      identity.status !== "ready" ||
-      identity.accountId !== input.accountId ||
-      identity.nodeId !== input.nodeId
-    ) {
+    if (identity.status !== "ready" || identity.accountId !== input.accountId) {
       return { kind: "strict-unavailable" };
     }
     const certificate = await this.#prekey.ensure(input.accountId);
@@ -258,7 +254,6 @@ export class DesktopNativeE2eeHandshakeService {
     if (
       identity.status !== "ready" ||
       identity.accountId !== prepared.accountId ||
-      identity.nodeId !== prepared.nodeId ||
       input.channel.hubOrigin !== this.#origin ||
       input.intendedCapability !== input.channel.channelOpenCapability ||
       input.intendedRole !== input.channel.channelOpenEffectiveRole ||
@@ -365,6 +360,7 @@ export class DesktopNativeE2eeHandshakeService {
 
   destroy(handle: string): void {
     if (!HANDLE.test(handle)) return;
+    this.#prepared.delete(handle);
     const held = this.#handshakes.get(handle);
     this.#handshakes.delete(handle);
     held?.client.destroy();
