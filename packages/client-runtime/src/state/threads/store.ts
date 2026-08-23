@@ -394,9 +394,11 @@ function mapThreadShell(
     environmentId,
     projectId: thread.projectId,
     title: thread.title,
+    modelSelection: normalizeModelSelection(thread.modelSelection),
     interactionMode: thread.interactionMode,
     tokenMode: thread.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
     session,
+    providerDriver: session?.provider ?? null,
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
     updatedAt: thread.updatedAt,
@@ -2946,7 +2948,15 @@ export function hydrateEnvironmentStateFromCache(
         latestTurn: thread.summary.latestTurn,
         pendingSourceProposedPlan: thread.summary.latestTurn?.sourceProposedPlan,
       },
-      summary: { ...thread.summary, session: null, backgroundLiveness: null },
+      summary: {
+        ...thread.summary,
+        // Older mobile snapshot records predate modelSelection on the sidebar
+        // summary, but their paired shell always carried it. Backfill so a
+        // cached Inbox row can still show the correct provider identity.
+        modelSelection: thread.summary.modelSelection ?? thread.shell.modelSelection,
+        session: null,
+        backgroundLiveness: null,
+      },
     });
   }
   return commitEnvironmentState(state, environmentId, environmentState);

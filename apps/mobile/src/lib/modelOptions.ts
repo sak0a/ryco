@@ -5,6 +5,7 @@ import {
 } from "@ryco/shared/model";
 
 import { shortModelName } from "./modelDisplayName";
+import { providerDisplayLabel } from "./providerDisplay";
 
 export type ModelOption = {
   readonly key: string;
@@ -23,17 +24,6 @@ export type ProviderGroup = {
   readonly providerLabel: string;
   readonly models: ReadonlyArray<ModelOption>;
 };
-
-function providerDisplayLabel(provider: {
-  readonly displayName?: string | undefined;
-  readonly driver: string;
-  readonly instanceId: string;
-}): string {
-  if (provider.displayName) return provider.displayName;
-  if (provider.driver === "codex") return "Codex";
-  if (provider.driver === "claudeAgent") return "Claude";
-  return provider.instanceId;
-}
 
 function normalizeSelectionOptions(
   selection: ModelSelection,
@@ -67,7 +57,8 @@ export function buildModelOptions(
       continue;
     }
 
-    const providerLabel = providerDisplayLabel(provider);
+    const providerLabel =
+      providerDisplayLabel(provider.driver, provider.displayName) ?? provider.instanceId;
     for (const model of provider.models) {
       const key = `${provider.instanceId}:${model.slug}`;
       options.set(key, {

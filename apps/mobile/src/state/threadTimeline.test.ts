@@ -69,4 +69,57 @@ describe("buildThreadTimeline", () => {
     const kinds = built!.timeline.map((entry) => entry.kind);
     expect(kinds).toEqual(["message", "proposed-plan"]);
   });
+
+  it("anchors a persisted context handoff immediately before its target message", () => {
+    const built = buildThreadTimeline(
+      thread({
+        messages: [
+          {
+            id: "message-target",
+            role: "user",
+            text: "Continue with Claude",
+            createdAt: "2026-08-23T10:00:00.000Z",
+            streaming: false,
+          },
+        ] as unknown as Thread["messages"],
+        activities: [
+          {
+            id: "handoff-activity",
+            createdAt: "2026-08-23T10:00:00.000Z",
+            kind: "context-handoff",
+            summary: "Context handoff",
+            tone: "info",
+            turnId: "turn-target",
+            payload: {
+              schemaVersion: 1,
+              handoffId: "handoff-1",
+              mode: "full-context-fresh-session",
+              targetMessageId: "message-target",
+              targetTurnId: "turn-target",
+              sourceSelection: { instanceId: "codex-work", model: "gpt-5.6" },
+              targetSelection: { instanceId: "claude-work", model: "claude-opus-5" },
+              sources: [
+                {
+                  providerInstanceId: "codex-work",
+                  driverKind: "codex",
+                  modelSlug: "gpt-5.6",
+                },
+              ],
+              target: {
+                providerInstanceId: "claude-work",
+                driverKind: "claudeAgent",
+                modelSlug: "claude-opus-5",
+              },
+              contextVersion: 1,
+              contextDigest: "a".repeat(64),
+              status: "consumed",
+            },
+          },
+        ] as unknown as Thread["activities"],
+      }),
+    );
+
+    expect(built?.timeline.map((entry) => entry.kind)).toEqual(["context-handoff", "message"]);
+    expect(built?.viewModel.contextHandoffEntries).toHaveLength(1);
+  });
 });

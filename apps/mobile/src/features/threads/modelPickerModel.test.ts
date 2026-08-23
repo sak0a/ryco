@@ -76,7 +76,7 @@ describe("model picker", () => {
       providerLocked: true,
     });
     expect(model.lockedProviderKey).toBe("codex-1");
-    expect(model.lockNotice).toContain("already started");
+    expect(model.lockNotice).toContain("become idle");
 
     const codex = model.groups.find((group) => group.providerKey === "codex-1");
     const claude = model.groups.find((group) => group.providerKey === "claude-1");
@@ -84,7 +84,7 @@ describe("model picker", () => {
     expect(codex?.entries.every((entry) => !entry.disabled)).toBe(true);
     // ...the other provider is visible but refused, with a stated reason.
     expect(claude?.entries.every((entry) => entry.disabled)).toBe(true);
-    expect(claude?.entries[0]?.disabledReason).toContain("already started");
+    expect(claude?.entries[0]?.disabledReason).toContain("become idle");
   });
 
   it("leaves everything switchable when the thread has not started", () => {

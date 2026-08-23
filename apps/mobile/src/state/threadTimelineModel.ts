@@ -28,6 +28,7 @@ export function buildThreadTimeline(thread: Thread | null | undefined): ThreadTi
     thread.proposedPlans,
     viewModel.workLogEntries,
     viewModel.contextCompactionEntries,
+    viewModel.contextHandoffEntries,
   );
   return { viewModel, timeline };
 }

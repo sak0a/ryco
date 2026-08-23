@@ -16,6 +16,8 @@ import {
 } from "../../lib/composerImages";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { ComposerEditor } from "../../native/ComposerEditor";
+import type { PendingContextHandoffPresentation } from "./contextHandoffModel";
+import { PendingContextHandoffChip } from "./PendingContextHandoffChip";
 
 // Floating glass composer capsule (§3.5.2, §5). It uses the shared native
 // ComposerEditor so mentions/skills, hardware-keyboard submit, and pasted images
@@ -50,6 +52,7 @@ export function ThreadComposer(props: {
   readonly modelReasoningLabel?: string | null;
   readonly modelFastEnabled?: boolean;
   readonly onOpenModel?: () => void;
+  readonly pendingContextHandoff?: PendingContextHandoffPresentation | null;
 }) {
   const safeAreaInsets = useSafeAreaInsets();
   const [text, setText] = useState("");
@@ -82,7 +85,9 @@ export function ThreadComposer(props: {
   };
 
   const pickImages = async () => {
-    const result = await pickComposerImages({ existingCount: attachments.length });
+    const result = await pickComposerImages({
+      existingCount: attachments.length,
+    });
     setAttachmentError(result.error);
     if (result.images.length > 0) {
       setAttachments((current) => [...current, ...result.images]);
@@ -108,6 +113,9 @@ export function ThreadComposer(props: {
         <Text className="px-3 pb-1.5 text-xs font-ryco-medium text-danger-foreground">
           {attachmentError}
         </Text>
+      ) : null}
+      {props.pendingContextHandoff ? (
+        <PendingContextHandoffChip {...props.pendingContextHandoff} />
       ) : null}
       <GlassSurface
         radius={26}
