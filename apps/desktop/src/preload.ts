@@ -43,6 +43,7 @@ const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_HUB_LAUNCH_CONFIG_CHANNEL = "desktop:get-hub-launch-config";
 const SET_HUB_LAUNCH_CONFIG_CHANNEL = "desktop:set-hub-launch-config";
+const RESTART_APP_CHANNEL = "desktop:restart-app";
 const VALIDATE_HUB_ORIGIN_CHANNEL = "desktop:validate-hub-origin";
 const GET_HOSTED_IDENTITY_STATUS_CHANNEL = "desktop:get-hosted-identity-status";
 const CONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:connect-hosted-identity";
@@ -130,6 +131,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   setTailscaleServeEnabled: (input) =>
     ipcRenderer.invoke(SET_TAILSCALE_SERVE_ENABLED_CHANNEL, input),
   getHubLaunchConfig: () => ipcRenderer.invoke(GET_HUB_LAUNCH_CONFIG_CHANNEL),
+  restartApp: () => ipcRenderer.invoke(RESTART_APP_CHANNEL),
   getHostedIdentityState: () => ipcRenderer.invoke(GET_HOSTED_IDENTITY_STATUS_CHANNEL),
   connectHostedIdentity: () => ipcRenderer.invoke(CONNECT_HOSTED_IDENTITY_CHANNEL),
   disconnectHostedIdentity: () => ipcRenderer.invoke(DISCONNECT_HOSTED_IDENTITY_CHANNEL),

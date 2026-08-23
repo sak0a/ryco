@@ -194,6 +194,7 @@ const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const SET_TAILSCALE_SERVE_ENABLED_CHANNEL = "desktop:set-tailscale-serve-enabled";
 const GET_HUB_LAUNCH_CONFIG_CHANNEL = "desktop:get-hub-launch-config";
 const SET_HUB_LAUNCH_CONFIG_CHANNEL = "desktop:set-hub-launch-config";
+const RESTART_APP_CHANNEL = "desktop:restart-app";
 const VALIDATE_HUB_ORIGIN_CHANNEL = "desktop:validate-hub-origin";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
 const NOTIFY_TURN_COMPLETE_CHANNEL = "desktop:notify-turn-complete";
@@ -204,7 +205,11 @@ const CONNECT_HOSTED_GITHUB_CHANNEL = "desktop:connect-hosted-github";
 const DISCONNECT_HOSTED_GITHUB_CHANNEL = "desktop:disconnect-hosted-github";
 const CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL = "desktop:cancel-hosted-github-connection";
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
-const BASE_DIR = readEnv("RYCO_HOME")?.trim() || Path.join(OS.homedir(), ".ryco");
+const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+const DEFAULT_BASE_DIR = Path.join(OS.homedir(), ".ryco");
+const BASE_DIR =
+  readEnv("RYCO_HOME")?.trim() ||
+  (isDevelopment ? Path.join(DEFAULT_BASE_DIR, "desktop-dev") : DEFAULT_BASE_DIR);
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
@@ -219,7 +224,6 @@ const DESKTOP_SCHEME = "ryco";
 const DESKTOP_BOOT_HOST = "app";
 const DESKTOP_BOOT_PATH = "/desktop-boot.html";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
-const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 // Dev-only SSH launcher override. Set this to an absolute path on the SSH host
 // for a built server entry, for example:
 // "/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs"
@@ -2357,6 +2361,14 @@ function scheduleBackendRestart(reason: string): void {
   }, delayMs);
 }
 
+function resolveDevelopmentBunExecutable(): string {
+  const lifecycleExecutable = readEnv("npm_execpath")?.trim();
+  if (lifecycleExecutable && /^bun(?:\.exe)?$/iu.test(Path.basename(lifecycleExecutable))) {
+    return lifecycleExecutable;
+  }
+  return process.platform === "win32" ? "bun.exe" : "bun";
+}
+
 function startBackend(): void {
   if (isQuitting || backendProcess) return;
 
@@ -2370,14 +2382,21 @@ function startBackend(): void {
   markDesktopStartupPhase("desktop.backend.spawn", `port=${backendPort}`);
   const childControlToken = Crypto.randomBytes(32).toString("base64url");
   backendControlToken = childControlToken;
-  const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
+  const backendExecutable = isDevelopment ? resolveDevelopmentBunExecutable() : process.execPath;
+  const childEnvironment = backendChildEnv();
+  if (isDevelopment) {
+    delete childEnvironment.ELECTRON_RUN_AS_NODE;
+  } else {
+    // In Electron main, process.execPath points to the Electron binary. Run the
+    // packaged child in Node mode so it does not become a GUI app instance.
+    childEnvironment.ELECTRON_RUN_AS_NODE = "1";
+  }
+  const child = ChildProcess.spawn(backendExecutable, [backendEntry, "--bootstrap-fd", "3"], {
     cwd: resolveBackendCwd(),
-    // In Electron main, process.execPath points to the Electron binary.
-    // Run the child in Node mode so this backend process does not become a GUI app instance.
-    env: {
-      ...backendChildEnv(),
-      ELECTRON_RUN_AS_NODE: "1",
-    },
+    // Development intentionally uses the pinned Bun runtime. Besides matching
+    // the repository toolchain, this keeps Bun.secrets keychain custody stable
+    // instead of switching the same dev identity to Electron/keytar at startup.
+    env: childEnvironment,
     stdio: ["ignore", "pipe", "pipe", "pipe"],
   });
   const bootstrapStream = child.stdio[3];
@@ -2952,6 +2971,11 @@ function registerIpcHandlers(): void {
     relaunchDesktopApp("hub-launch-config-changed");
   });
 
+  ipcMain.removeHandler(RESTART_APP_CHANNEL);
+  ipcMain.handle(RESTART_APP_CHANNEL, () => {
+    relaunchDesktopApp("renderer-requested-restart");
+  });
+
   ipcMain.removeHandler(SET_TAILSCALE_SERVE_ENABLED_CHANNEL);
   ipcMain.handle(SET_TAILSCALE_SERVE_ENABLED_CHANNEL, async (_event, rawInput: unknown) => {
     if (typeof rawInput !== "object" || rawInput === null) {
@@ -3457,11 +3481,13 @@ configureAppIdentity();
  * no retry timer, so it never clears on its own.
  *
  * This is a UX guard, not the correctness fix. It coordinates only instances of
- * this Electron application: a headless `ryco serve`, a dev build, or any other
- * process sharing the state directory is unaffected, and the identity writer
- * lock remains the actual arbiter.
+ * this Electron application: a headless `ryco serve` or any other process
+ * sharing the state directory is unaffected, and the identity writer lock
+ * remains the actual arbiter. Desktop Dev also owns this lock so a macOS
+ * `ryco-dev://` callback is delivered to the running broker instead of turning
+ * the raw callback Electron process into a second hidden primary instance.
  */
-if (!isDevelopment && !app.requestSingleInstanceLock()) {
+if (!app.requestSingleInstanceLock()) {
   writeDesktopLogHeader("second instance refused; focusing the existing window");
   app.exit(0);
 }

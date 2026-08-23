@@ -98,7 +98,10 @@ const withRoutes = <A, E, R>(
       Layer.provide(Layer.succeed(HubConnectorService, service(localIntroduction))),
       Layer.provide(Layer.succeed(ServerConfig, config)),
       Layer.provideMerge(
-        NodeHttpServer.layer(NodeHttp.createServer, { host: "127.0.0.1", port: 0 }),
+        NodeHttpServer.layer(NodeHttp.createServer, {
+          host: "127.0.0.1",
+          port: 0,
+        }),
       ),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -268,7 +271,38 @@ it("requires Desktop mode, a loopback listener/source, no browser Origin, and th
   assert.isTrue(desktopLocalControlIsAuthorized(baseline));
   assert.isFalse(desktopLocalControlIsAuthorized({ ...baseline, mode: "web" }));
   assert.isFalse(desktopLocalControlIsAuthorized({ ...baseline, bindHost: "0.0.0.0" }));
-  assert.isFalse(desktopLocalControlIsAuthorized({ ...baseline, remoteAddress: "192.0.2.2" }));
-  assert.isFalse(desktopLocalControlIsAuthorized({ ...baseline, origin: "http://127.0.0.1" }));
-  assert.isFalse(desktopLocalControlIsAuthorized({ ...baseline, presentedToken: OTHER_TOKEN }));
+  assert.isFalse(
+    desktopLocalControlIsAuthorized({
+      ...baseline,
+      remoteAddress: "192.0.2.2",
+    }),
+  );
+  assert.isFalse(
+    desktopLocalControlIsAuthorized({
+      ...baseline,
+      origin: "http://127.0.0.1",
+    }),
+  );
+  assert.isFalse(
+    desktopLocalControlIsAuthorized({
+      ...baseline,
+      presentedToken: OTHER_TOKEN,
+    }),
+  );
+  assert.isFalse(desktopLocalControlIsAuthorized({ ...baseline, remoteAddress: undefined }));
+  assert.isTrue(
+    desktopLocalControlIsAuthorized({
+      ...baseline,
+      remoteAddress: undefined,
+      allowMissingRemoteAddress: true,
+    }),
+  );
+  assert.isFalse(
+    desktopLocalControlIsAuthorized({
+      ...baseline,
+      bindHost: "0.0.0.0",
+      remoteAddress: undefined,
+      allowMissingRemoteAddress: true,
+    }),
+  );
 });
