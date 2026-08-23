@@ -8,6 +8,24 @@ import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
 layer("043_ContextHandoffDeliveryArtifact", (it) => {
+  it.effect("repairs a divergent migration 42 before adding the artifact column", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 41 });
+      yield* sql`
+        INSERT INTO effect_sql_migrations (migration_id, created_at, name)
+        VALUES (42, '2026-07-31T12:05:37.000Z', 'ProjectionThreadsSettled')
+      `;
+
+      yield* runMigrations({ toMigrationInclusive: 43 });
+
+      const columns = yield* sql<{ readonly name: string }>`
+        PRAGMA table_info(provider_context_handoffs)
+      `;
+      assert.ok(columns.some((column) => column.name === "delivery_artifact_json"));
+    }),
+  );
+
   it.effect("adds a nullable immutable delivery-artifact column to legacy rows", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
