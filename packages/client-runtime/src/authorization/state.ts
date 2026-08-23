@@ -1848,7 +1848,12 @@ class HostedHubController {
     const state = hostedHubStore.getState();
     if (state.generation !== generation || state.transportStatus === "terminal-failure") return;
     patchState({
-      effectiveRole: null,
+      // Keep the directory-validated role while this retryable transport gap is
+      // stale. Freshness still denies every mutation, but the shell and other
+      // session-sync streams need the role in order to resubscribe and publish
+      // the snapshot that makes the replacement session ready. Terminal
+      // failures, directory staleness, revocation, and selection teardown all
+      // clear authority through their existing fail-closed paths.
       transportStatus: "reconnecting",
       sessionStatus: state.sessionStatus === "delivery-unknown" ? "delivery-unknown" : "stale",
       sessionRecoveredAfterUnknown: false,

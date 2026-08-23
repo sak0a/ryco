@@ -195,6 +195,41 @@ describe("HostedRelayAttemptFactory", () => {
     ).toBe(false);
   });
 
+  it("retains only session-sync authority across a retryable socket close", async () => {
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: encodeBase64Url(new Uint8Array(32).fill(5)),
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+    const subscribeShell = {
+      tag: ORCHESTRATION_WS_METHODS.subscribeShell,
+      stream: true,
+    } as const;
+    const dispatch = {
+      tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+      stream: false,
+    } as const;
+    factory.createSocket(await factory.nextUrl());
+    hostedHubStore.setState({
+      transportStatus: "online",
+      sessionStatus: "ready",
+      browserStatus: "current",
+    });
+
+    lifecycle.onClose?.({ code: 4000, reason: "network" }, { intentional: false });
+
+    expect(hostedHubStore.getState()).toMatchObject({
+      effectiveRole: "operator",
+      transportStatus: "reconnecting",
+      sessionStatus: "stale",
+    });
+    expect(lifecycle.authorizeRequest?.(subscribeShell)).toBe(true);
+    expect(lifecycle.authorizeRequest?.(dispatch)).toBe(false);
+  });
+
   it("denies RPCs at the transport boundary until browser recovery is complete", () => {
     const lifecycle = new HostedRelayAttemptFactory().lifecycleHandlers();
     const dispatch = {
