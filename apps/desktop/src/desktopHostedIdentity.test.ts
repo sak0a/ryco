@@ -6,12 +6,15 @@ import { DesktopHostedIdentityCoordinator } from "./desktopHostedIdentity.ts";
 import type { DesktopHostedSessionCredentials } from "./hostedCredentials.ts";
 import type { DesktopLocalIntroductionSecurity } from "./localTrustedIntroduction.ts";
 import type { DesktopProtectedRecordStore } from "./protectedRecordStore.ts";
+import type { DesktopE2eeTrustStore } from "./desktopE2eeTrust.ts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 function coordinator(input: {
   readonly api: Partial<HostedHubApi>;
   readonly credentials?: Partial<DesktopHostedSessionCredentials>;
   readonly setup?: ConstructorParameters<typeof DesktopHostedIdentityCoordinator>[0]["setup"];
+  readonly trust?: DesktopE2eeTrustStore;
+  readonly control?: DesktopHubControlClient;
 }) {
   return new DesktopHostedIdentityCoordinator({
     origin: "https://hub.example.test",
@@ -23,9 +26,10 @@ function coordinator(input: {
       clear: vi.fn().mockResolvedValue(undefined),
       ...input.credentials,
     } as DesktopHostedSessionCredentials,
-    control: {} as DesktopHubControlClient,
+    control: input.control ?? ({} as DesktopHubControlClient),
     security: {} as DesktopLocalIntroductionSecurity,
     records: {} as DesktopProtectedRecordStore,
+    ...(input.trust === undefined ? {} : { trust: input.trust }),
     ...(input.setup === undefined ? {} : { setup: input.setup }),
   });
 }
@@ -42,6 +46,37 @@ describe("Desktop hosted identity coordinator", () => {
     await expect(identity.resume()).resolves.toEqual({ status: "signed-out" });
     expect(signIn).not.toHaveBeenCalled();
     expect(setup).not.toHaveBeenCalled();
+  });
+
+  it("resumes the client from retained local trust while the node plane is unavailable", async () => {
+    const list = vi.fn().mockResolvedValue([
+      {
+        hubOrigin: "https://hub.example.test",
+        accountId: "account-1",
+        nodeId: "node-local",
+        environmentId: "env-local",
+        localNodeHandle: "L".repeat(22),
+        verificationMethod: "local-trusted-introduction-v1",
+      },
+    ]);
+    const identity = coordinator({
+      api: {
+        hasSessionMaterial: true,
+        restoreSession: vi.fn().mockResolvedValue({ account: { id: "account-1" } }),
+      },
+      control: {
+        nodeClaimDescriptor: vi.fn().mockRejectedValue(new Error("node connector disabled")),
+      } as unknown as DesktopHubControlClient,
+      trust: { list } as unknown as DesktopE2eeTrustStore,
+    });
+
+    await expect(identity.resume()).resolves.toMatchObject({
+      status: "ready",
+      accountId: "account-1",
+      nodeId: "node-local",
+      localNodeHandle: "L".repeat(22),
+    });
+    expect(list).toHaveBeenCalledWith("https://hub.example.test", "account-1");
   });
 
   it("upgrades a concurrent background resume when the user chooses Connect", async () => {

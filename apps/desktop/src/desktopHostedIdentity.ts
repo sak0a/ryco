@@ -4,13 +4,19 @@ import type {
   DesktopHostedIdentityActionResult,
   DesktopHostedIdentityState,
 } from "@ryco/contracts";
-import { HostedHubApi, HostedHubApiError } from "@ryco/client-runtime/authorization";
+import {
+  HostedHubApi,
+  HostedHubApiError,
+  type HostedHubNode,
+} from "@ryco/client-runtime/authorization";
 import type {
+  DpopSignerService,
   HttpClientService,
   NativeAuthorizationService,
   PasskeyCeremonyService,
 } from "@ryco/client-runtime/platform";
 import { createDpopProofSigner } from "@ryco/client-runtime/relay";
+import type { HostedRelayTicket } from "@ryco/client-runtime/authorization";
 
 import { runDesktopAutomaticNodeClaim } from "./automaticNodeClaim.ts";
 import type { DesktopHubControlClient } from "./desktopHubControl.ts";
@@ -31,6 +37,17 @@ const unavailablePasskeys: PasskeyCeremonyService = {
   },
 };
 
+export async function createDesktopDpopSigner(
+  security: DesktopLocalIntroductionSecurity,
+): Promise<DpopSignerService> {
+  const signingKey = await security.getSigningKey();
+  return createDpopProofSigner(signingKey, {
+    now: Date.now,
+    randomJti: () => Crypto.randomUUID(),
+    sha256: async (bytes) => Uint8Array.from(Crypto.createHash("sha256").update(bytes).digest()),
+  });
+}
+
 export async function createDesktopHostedHubApi(input: {
   readonly origin: string;
   readonly credentials: DesktopHostedSessionCredentials;
@@ -43,12 +60,7 @@ export async function createDesktopHostedHubApi(input: {
     fetch: (url, init) =>
       fetch(url, init === undefined ? undefined : (init as RequestInit)) as Promise<Response>,
   };
-  const signingKey = await input.security.getSigningKey();
-  const dpopSigner = createDpopProofSigner(signingKey, {
-    now: Date.now,
-    randomJti: () => Crypto.randomUUID(),
-    sha256: async (bytes) => Uint8Array.from(Crypto.createHash("sha256").update(bytes).digest()),
-  });
+  const dpopSigner = await createDesktopDpopSigner(input.security);
   return new HostedHubApi({
     endpoint: {
       origin: () => input.origin,
@@ -102,6 +114,7 @@ export class DesktopHostedIdentityCoordinator {
   readonly #records: DesktopProtectedRecordStore;
   readonly #trust: DesktopE2eeTrustStore;
   readonly #setup: DesktopHostedIdentitySetup;
+  readonly #relayDpopSigner: DpopSignerService | undefined;
   #operation: Promise<DesktopHostedIdentityStatus> | undefined;
   #operationInteractive = false;
 
@@ -115,6 +128,7 @@ export class DesktopHostedIdentityCoordinator {
     readonly records: DesktopProtectedRecordStore;
     readonly trust?: DesktopE2eeTrustStore;
     readonly setup?: DesktopHostedIdentitySetup;
+    readonly relayDpopSigner?: DpopSignerService;
   }) {
     this.#origin = input.origin;
     this.#installationId = input.installationId;
@@ -124,30 +138,45 @@ export class DesktopHostedIdentityCoordinator {
     this.#security = input.security;
     this.#records = input.records;
     this.#trust = input.trust ?? new DesktopE2eeTrustStore(input.records);
+    this.#relayDpopSigner = input.relayDpopSigner;
     this.#setup =
       input.setup ??
       (async ({ accountId }) => {
-        const claimed = await runDesktopAutomaticNodeClaim({
-          api: this.#api,
-          control: this.#control,
-          installationId: this.#installationId,
-          expectedHubOrigin: this.#origin,
-          expectedAccountId: accountId,
-        });
-        const pin = await runDesktopLocalTrustedIntroduction({
-          control: this.#control,
-          security: this.#security,
-          records: this.#records,
-          trust: this.#trust,
-          installationId: this.#installationId,
-          expectedHubOrigin: this.#origin,
-          claim: claimed.claim,
-          result: claimed.result,
-        });
-        return {
-          nodeId: claimed.result.node.id,
-          localNodeHandle: pin.localNodeHandle,
-        };
+        try {
+          const claimed = await runDesktopAutomaticNodeClaim({
+            api: this.#api,
+            control: this.#control,
+            installationId: this.#installationId,
+            expectedHubOrigin: this.#origin,
+            expectedAccountId: accountId,
+          });
+          const pin = await runDesktopLocalTrustedIntroduction({
+            control: this.#control,
+            security: this.#security,
+            records: this.#records,
+            trust: this.#trust,
+            installationId: this.#installationId,
+            expectedHubOrigin: this.#origin,
+            claim: claimed.claim,
+            result: claimed.result,
+          });
+          return {
+            nodeId: claimed.result.node.id,
+            localNodeHandle: pin.localNodeHandle,
+          };
+        } catch (cause) {
+          // Client identity is independent of node-connector uptime. A prior
+          // local introduction remains the exact local tie-break when the node
+          // plane is intentionally disabled or temporarily unavailable.
+          const localPins = (await this.#trust.list(this.#origin, accountId)).filter(
+            (pin) => pin.verificationMethod === "local-trusted-introduction-v1",
+          );
+          if (localPins.length !== 1) throw cause;
+          return {
+            nodeId: localPins[0]!.nodeId,
+            localNodeHandle: localPins[0]!.localNodeHandle,
+          };
+        }
       });
   }
 
@@ -163,6 +192,32 @@ export class DesktopHostedIdentityCoordinator {
     await this.#operation?.catch(() => undefined);
     this.#api.clearSessionMaterial();
     await this.#credentials.clear();
+  }
+
+  /** Directory projection for the native Desktop client; credentials stay in main. */
+  async listNodes(): Promise<ReadonlyArray<HostedHubNode>> {
+    await this.#operation?.catch(() => undefined);
+    if (!this.#api.hasSessionMaterial) return [];
+    return this.#api.listNodes();
+  }
+
+  /** Main-process-only relay attempt material. Never return this through preload. */
+  async issueRelayTicket(nodeId: string): Promise<HostedRelayTicket> {
+    await this.#operation?.catch(() => undefined);
+    if (!this.#api.hasSessionMaterial) throw new Error("Desktop Hub session is unavailable.");
+    return this.#api.issueRelayTicket(nodeId);
+  }
+
+  /** Main-process-only DPoP upgrade headers for the origin-pinned relay URL. */
+  async authorizeRelayUpgrade(url: string): Promise<Readonly<Record<string, string>>> {
+    await this.#credentials.hydrate();
+    const relayUrl = new URL("/v1/relay/client", this.#origin);
+    relayUrl.protocol = relayUrl.protocol === "https:" ? "wss:" : "ws:";
+    if (url !== relayUrl.toString()) throw new Error("Desktop relay URL is invalid.");
+    const token = this.#credentials.readBearerToken?.() ?? null;
+    if (!token || !this.#relayDpopSigner) throw new Error("Desktop Hub session is unavailable.");
+    const proof = await this.#relayDpopSigner.sign({ method: "GET", url, token });
+    return { Authorization: `DPoP ${token}`, DPoP: proof };
   }
 
   async connectGitHub(input?: {

@@ -9,6 +9,11 @@ import {
   validateE2eeNodeIdentityPublicKey,
 } from "@ryco/shared/relayE2eeKeys";
 import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
+import {
+  decodeCrossDeviceApprovalQr,
+  decodeCrossDeviceApprovalTbs,
+  verifyCrossDeviceApprovalQr,
+} from "@ryco/shared/relayE2eeCrossDeviceApproval";
 
 import type { DesktopProtectedRecordStore } from "./protectedRecordStore.ts";
 
@@ -45,7 +50,7 @@ export interface DesktopVerifiedE2eePin {
   readonly acceptedPolicyGeneration: number;
   readonly clientIdentityFingerprint: string;
   readonly approvedAt: number;
-  readonly verificationMethod: "local-trusted-introduction-v1";
+  readonly verificationMethod: "local-trusted-introduction-v1" | "cross-device-approval-v1";
 }
 
 interface StoredPin extends Omit<DesktopVerifiedE2eePin, "verifiedIdentityPublicKey"> {
@@ -78,7 +83,8 @@ function parsePin(value: unknown): StoredPin | null {
     !bounded(record.recordedContinuityId) ||
     !bounded(record.clientIdentityFingerprint) ||
     !LOCAL_HANDLE.test(record.localNodeHandle ?? "") ||
-    record.verificationMethod !== "local-trusted-introduction-v1" ||
+    (record.verificationMethod !== "local-trusted-introduction-v1" &&
+      record.verificationMethod !== "cross-device-approval-v1") ||
     !Number.isSafeInteger(record.acceptedPolicyGeneration) ||
     Number(record.acceptedPolicyGeneration) < 0 ||
     !Number.isSafeInteger(record.approvedAt) ||
@@ -189,6 +195,15 @@ export class DesktopE2eeTrustStore {
     return matches.length === 1 ? publicPin(matches[0]!) : null;
   }
 
+  async list(hubOrigin: string, accountId: string): Promise<ReadonlyArray<DesktopVerifiedE2eePin>> {
+    const document = parseDocument(
+      await this.#store.read(TRUST_RECORD).catch(() => fail("trust_unavailable")),
+    );
+    return document.records
+      .filter((record) => record.hubOrigin === hubOrigin && record.accountId === accountId)
+      .map(publicPin);
+  }
+
   async hasVerifiedOrigin(hubOrigin: string): Promise<boolean> {
     const document = parseDocument(
       await this.#store.read(TRUST_RECORD).catch(() => fail("trust_unavailable")),
@@ -267,6 +282,71 @@ export class DesktopE2eeTrustStore {
     readonly approvedAt: number;
     readonly randomHandle?: () => string;
   }): Promise<DesktopVerifiedE2eePin> {
+    return this.#promote({ ...input, verificationMethod: "local-trusted-introduction-v1" });
+  }
+
+  async promoteCrossDeviceApproval(input: {
+    readonly payload: string;
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly nodeId: string;
+    readonly environmentId: string;
+    readonly clientIdentityPublicKey: Uint8Array;
+    readonly now: number;
+    readonly randomHandle?: () => string;
+  }): Promise<DesktopVerifiedE2eePin> {
+    let advertised;
+    try {
+      advertised = decodeCrossDeviceApprovalTbs(decodeCrossDeviceApprovalQr(input.payload).tbs);
+    } catch {
+      return fail("trust_conflict");
+    }
+    const approval = verifyCrossDeviceApprovalQr({
+      payload: input.payload,
+      hubOrigin: input.hubOrigin,
+      accountId: input.accountId,
+      nodeId: input.nodeId,
+      nodeIdentityPublicKey: advertised.nodeIdentityPublicKey,
+      clientIdentityPublicKey: input.clientIdentityPublicKey,
+      nodeContinuityId: advertised.nodeContinuityId,
+      nodePolicyGeneration: advertised.nodePolicyGeneration,
+      now: input.now,
+    });
+    if (
+      approval === undefined ||
+      approval.maxRole !== "owner" ||
+      !approval.capabilitySet.includes("ryco.rpc")
+    ) {
+      return fail("trust_conflict");
+    }
+    return this.#promote({
+      hubOrigin: input.hubOrigin,
+      accountId: input.accountId,
+      nodeId: input.nodeId,
+      environmentId: input.environmentId,
+      nodeIdentityPublicKey: approval.nodeIdentityPublicKey,
+      nodeContinuityId: approval.nodeContinuityId,
+      nodePolicyGeneration: approval.nodePolicyGeneration,
+      clientIdentityPublicKey: input.clientIdentityPublicKey,
+      approvedAt: approval.approvedAt,
+      verificationMethod: "cross-device-approval-v1",
+      ...(input.randomHandle ? { randomHandle: input.randomHandle } : {}),
+    });
+  }
+
+  #promote(input: {
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly nodeId: string;
+    readonly environmentId: string;
+    readonly nodeIdentityPublicKey: Uint8Array;
+    readonly nodeContinuityId: string;
+    readonly nodePolicyGeneration: number;
+    readonly clientIdentityPublicKey: Uint8Array;
+    readonly approvedAt: number;
+    readonly verificationMethod: DesktopVerifiedE2eePin["verificationMethod"];
+    readonly randomHandle?: () => string;
+  }): Promise<DesktopVerifiedE2eePin> {
     return this.#exclusive(async () => {
       const nodeKey = validateE2eeNodeIdentityPublicKey(input.nodeIdentityPublicKey);
       const clientKey = validateE2eeClientIdentityPublicKey(input.clientIdentityPublicKey);
@@ -331,7 +411,7 @@ export class DesktopE2eeTrustStore {
         clientIdentityFingerprint: expectedClientFingerprint,
         approvedAt: input.approvedAt,
         latchedAt: input.approvedAt,
-        verificationMethod: "local-trusted-introduction-v1",
+        verificationMethod: input.verificationMethod,
       };
       const markers = [...new Set([...document.verifiedMarkerOrigins, input.hubOrigin])].toSorted();
       await this.#store

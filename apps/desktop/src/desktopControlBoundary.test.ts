@@ -43,7 +43,9 @@ describe("Desktop-main local control credential boundary", () => {
     const preload = source("preload.ts");
 
     expect(main).toContain("DesktopNativeE2eeHandshakeService");
-    expect(preload).toContain("startNativeE2eeHandshake");
+    expect(preload).toContain("beginDesktopWorkspaceVerification");
+    expect(preload).not.toContain("startNativeE2eeHandshake");
+    expect(preload).not.toContain("finishNativeE2eeHandshake");
     expect(preload).not.toContain("agreementSecretKey");
     expect(preload).not.toContain("withAgreementSecretKey");
   });

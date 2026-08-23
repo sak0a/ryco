@@ -21,19 +21,20 @@ import {
   shell,
 } from "electron";
 import type { MenuItemConstructorOptions, OpenDialogOptions } from "electron";
-import type {
-  ClientSettings,
-  DesktopTheme,
-  DesktopAppBranding,
-  DesktopHostedIdentityActionResult,
-  DesktopHostedIdentityState,
-  DesktopServerExposureMode,
-  DesktopServerExposureState,
-  DesktopUpdateChannel,
-  PersistedSavedEnvironmentRecord,
-  DesktopUpdateActionResult,
-  DesktopUpdateCheckResult,
-  DesktopUpdateState,
+import {
+  EnvironmentId,
+  type ClientSettings,
+  type DesktopTheme,
+  type DesktopAppBranding,
+  type DesktopHostedIdentityActionResult,
+  type DesktopHostedIdentityState,
+  type DesktopServerExposureMode,
+  type DesktopServerExposureState,
+  type DesktopUpdateChannel,
+  type PersistedSavedEnvironmentRecord,
+  type DesktopUpdateActionResult,
+  type DesktopUpdateCheckResult,
+  type DesktopUpdateState,
 } from "@ryco/contracts";
 import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
 
@@ -137,6 +138,7 @@ import {
 } from "./hostedCredentials.ts";
 import { createDesktopHubControlClient } from "./desktopHubControl.ts";
 import {
+  createDesktopDpopSigner,
   createDesktopHostedHubApi,
   DesktopHostedIdentityCoordinator,
   type DesktopHostedGitHubActionResult,
@@ -144,6 +146,20 @@ import {
 } from "./desktopHostedIdentity.ts";
 import { DesktopE2eeTrustStore } from "./desktopE2eeTrust.ts";
 import { DesktopNativeE2eeHandshakeService } from "./desktopNativeE2eeHandshake.ts";
+import { createDesktopWorkspaceMetadataCache } from "./desktopWorkspaceCache.ts";
+import {
+  DesktopWorkspaceClient,
+  type DesktopWorkspaceClientSnapshot,
+} from "./desktopWorkspaceClient.ts";
+import {
+  createDesktopWorkspaceIpcHandlers,
+  projectDesktopWorkspaceState,
+} from "./desktopWorkspaceIpc.ts";
+import { DESKTOP_WORKSPACE_IPC } from "./desktopWorkspaceChannels.ts";
+import {
+  DESKTOP_WORKSPACE_MAX_RPC_FRAME_BYTES,
+  DesktopWorkspaceRelayManager,
+} from "./desktopWorkspaceRelay.ts";
 
 const desktopStartupTiming = createStartupTiming();
 desktopStartupTiming.mark("desktop.launch");
@@ -186,10 +202,6 @@ const DISCONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:disconnect-hosted-identity";
 const CONNECT_HOSTED_GITHUB_CHANNEL = "desktop:connect-hosted-github";
 const DISCONNECT_HOSTED_GITHUB_CHANNEL = "desktop:disconnect-hosted-github";
 const CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL = "desktop:cancel-hosted-github-connection";
-const PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL = "desktop:prepare-native-e2ee-attempt";
-const START_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:start-native-e2ee-handshake";
-const FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:finish-native-e2ee-handshake";
-const DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:destroy-native-e2ee-handshake";
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
 const BASE_DIR = readEnv("RYCO_HOME")?.trim() || Path.join(OS.homedir(), ".ryco");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
@@ -197,6 +209,11 @@ const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
 const SAVED_ENVIRONMENT_REGISTRY_PATH = Path.join(STATE_DIR, "saved-environments.json");
 const SHELL_ENVIRONMENT_CACHE_PATH = Path.join(STATE_DIR, "shell-environment-cache.json");
+const DESKTOP_WORKSPACE_CACHE_PATH = Path.join(
+  STATE_DIR,
+  "desktop-workspace-client",
+  "metadata-v1.json",
+);
 const DESKTOP_SCHEME = "ryco";
 const DESKTOP_BOOT_HOST = "app";
 const DESKTOP_BOOT_PATH = "/desktop-boot.html";
@@ -327,6 +344,9 @@ let desktopNativeIdentityContext: {
   readonly trust: DesktopE2eeTrustStore;
 } | null = null;
 let desktopNativeE2eeHandshakeService: DesktopNativeE2eeHandshakeService | null = null;
+let desktopWorkspaceClient: DesktopWorkspaceClient | null = null;
+let desktopWorkspaceRelayManager: DesktopWorkspaceRelayManager | null = null;
+let disposeDesktopWorkspaceSubscription: (() => void) | null = null;
 // Retain live turn-complete notifications: Electron GCs Notification objects once
 // the creating scope returns, which would drop their `click`/`close` handlers.
 const activeTurnCompleteNotifications = new Set<Notification>();
@@ -637,11 +657,7 @@ async function ensureDesktopNativeIdentityContext(): Promise<
   NonNullable<typeof desktopNativeIdentityContext>
 > {
   if (desktopNativeIdentityContext !== null) return desktopNativeIdentityContext;
-  if (
-    process.platform !== "darwin" ||
-    desktopSettings.hubConnectorEnabled !== true ||
-    desktopSettings.hubOrigin === null
-  ) {
+  if (process.platform !== "darwin" || desktopSettings.hubOrigin === null) {
     throw new Error("Desktop native Hub identity is unavailable.");
   }
   const protection = getDesktopSecretStorage();
@@ -708,6 +724,7 @@ async function ensureDesktopHostedIdentityCoordinator(): Promise<DesktopHostedId
     security: context.security,
     records: context.records,
     trust: context.trust,
+    relayDpopSigner: await createDesktopDpopSigner(context.security),
     control: createDesktopHubControlClient({
       baseUrl: () => backendHttpUrl,
       controlToken: () => backendControlToken,
@@ -715,6 +732,133 @@ async function ensureDesktopHostedIdentityCoordinator(): Promise<DesktopHostedId
   });
   desktopHostedIdentityCoordinator = coordinator;
   return coordinator;
+}
+
+async function ensureDesktopWorkspaceRelayManager(): Promise<DesktopWorkspaceRelayManager> {
+  if (desktopWorkspaceRelayManager !== null) return desktopWorkspaceRelayManager;
+  const context = await ensureDesktopNativeIdentityContext();
+  const coordinator = await ensureDesktopHostedIdentityCoordinator();
+  const manager = new DesktopWorkspaceRelayManager({
+    authority: {
+      resolveTarget: async (environmentId) => {
+        const client = await ensureDesktopWorkspaceClient();
+        const snapshot = client.snapshot();
+        if (snapshot.status !== "ready" || snapshot.accountId === null) return null;
+        const machine = snapshot.catalog.find(
+          (candidate) => candidate.environmentId === environmentId,
+        );
+        if (!machine?.nodeId || !machine.canConnect || machine.nativeTrust !== "verified") {
+          return null;
+        }
+        const relayUrl = new URL("/v1/relay/client", context.origin);
+        relayUrl.protocol = relayUrl.protocol === "https:" ? "wss:" : "ws:";
+        return {
+          accountId: snapshot.accountId,
+          nodeId: machine.nodeId,
+          environmentId,
+          relayUrl: relayUrl.toString(),
+        };
+      },
+      prepareE2ee: async (target) =>
+        (await ensureDesktopNativeE2eeHandshakeService()).prepare({
+          accountId: target.accountId,
+          nodeId: target.nodeId,
+        }),
+      handshake: ensureDesktopNativeE2eeHandshakeService,
+      issueTicket: (target) => coordinator.issueRelayTicket(target.nodeId),
+      authorizeUpgrade: (target) => coordinator.authorizeRelayUpgrade(target.relayUrl),
+    },
+    emit: (event) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.send(DESKTOP_WORKSPACE_IPC.transportEvent, event);
+    },
+  });
+  desktopWorkspaceRelayManager = manager;
+  return manager;
+}
+
+function emitDesktopWorkspaceState(snapshot: DesktopWorkspaceClientSnapshot): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(
+    DESKTOP_WORKSPACE_IPC.stateChanged,
+    projectDesktopWorkspaceState(snapshot),
+  );
+}
+
+async function ensureDesktopWorkspaceClient(): Promise<DesktopWorkspaceClient> {
+  if (desktopWorkspaceClient !== null) return desktopWorkspaceClient;
+  const context = await ensureDesktopNativeIdentityContext();
+  const coordinator = await ensureDesktopHostedIdentityCoordinator();
+  const client = new DesktopWorkspaceClient({
+    hubOrigin: context.origin,
+    identity: {
+      resume: async () => {
+        desktopHostedIdentityStatus = await coordinator.resume();
+        return desktopHostedIdentityStatus;
+      },
+      connect: async () => {
+        desktopHostedIdentityStatus = await coordinator.connect();
+        return desktopHostedIdentityStatus;
+      },
+      disconnect: async () => {
+        desktopWorkspaceRelayManager?.dispose();
+        desktopNativeE2eeHandshakeService?.dispose();
+        await coordinator.disconnect();
+        desktopHostedIdentityStatus = { status: "signed-out" };
+      },
+      listNodes: () => coordinator.listNodes(),
+    },
+    trust: context.trust,
+    cache: createDesktopWorkspaceMetadataCache(DESKTOP_WORKSPACE_CACHE_PATH),
+    connection: {
+      connect: async ({ environmentId, delayMs }) => {
+        mainWindow?.webContents.send(DESKTOP_WORKSPACE_IPC.connectionCommand, {
+          action: "connect",
+          environmentId,
+          delayMs,
+        });
+      },
+      release: async (environmentId) => {
+        mainWindow?.webContents.send(DESKTOP_WORKSPACE_IPC.connectionCommand, {
+          action: "release",
+          environmentId,
+          delayMs: 0,
+        });
+      },
+    },
+    verification: {
+      begin: async ({ accountId, nodeId }) => {
+        const prepared = await (
+          await ensureDesktopNativeE2eeHandshakeService()
+        ).prepare({
+          accountId,
+          nodeId,
+        });
+        if (prepared.kind !== "native") {
+          throw new Error("Desktop workspace verification requires explicit approval.");
+        }
+        return { handle: prepared.attemptHandle };
+      },
+      cancel: async (handle) => {
+        desktopNativeE2eeHandshakeService?.destroy(handle);
+      },
+      verifyApproval: async ({ accountId, nodeId, environmentId, payload }) => {
+        await context.trust.promoteCrossDeviceApproval({
+          payload,
+          hubOrigin: context.origin,
+          accountId,
+          nodeId,
+          environmentId,
+          clientIdentityPublicKey: await context.security.getSigningPublicKey(),
+          now: Date.now(),
+        });
+      },
+    },
+  });
+  disposeDesktopWorkspaceSubscription?.();
+  disposeDesktopWorkspaceSubscription = client.subscribe(emitDesktopWorkspaceState);
+  desktopWorkspaceClient = client;
+  return client;
 }
 
 async function ensureDesktopNativeE2eeHandshakeService(): Promise<DesktopNativeE2eeHandshakeService> {
@@ -741,9 +885,7 @@ async function runDesktopHostedIdentity(
       : await coordinator.resume();
   } catch {
     desktopHostedIdentityStatus =
-      desktopSettings.hubConnectorEnabled && desktopSettings.hubOrigin !== null
-        ? { status: "unavailable" }
-        : { status: "signed-out" };
+      desktopSettings.hubOrigin !== null ? { status: "unavailable" } : { status: "signed-out" };
   }
   writeDesktopLogHeader(`native hosted identity status=${desktopHostedIdentityStatus.status}`);
   return desktopHostedIdentityStatus;
@@ -757,8 +899,11 @@ function resumeDesktopHostedIdentityForBackend(): void {
     return;
   }
   desktopNativeE2eeHandshakeService?.dispose();
+  desktopWorkspaceRelayManager?.dispose();
   desktopHostedIdentityControlGeneration = backendControlToken;
-  void runDesktopHostedIdentity(false);
+  void ensureDesktopWorkspaceClient()
+    .then((client) => client.resume())
+    .catch(() => runDesktopHostedIdentity(false));
 }
 
 function resolveAdvertisedHostOverride(): string | undefined {
@@ -2570,14 +2715,22 @@ function registerIpcHandlers(): void {
   ipcMain.handle(GET_HOSTED_IDENTITY_STATUS_CHANNEL, hostedIdentityView);
   ipcMain.removeHandler(CONNECT_HOSTED_IDENTITY_CHANNEL);
   ipcMain.handle(CONNECT_HOSTED_IDENTITY_CHANNEL, async () => {
-    await runDesktopHostedIdentity(true);
+    try {
+      await (await ensureDesktopWorkspaceClient()).connectIdentity();
+    } catch {
+      await runDesktopHostedIdentity(true);
+    }
     return hostedIdentityView();
   });
   ipcMain.removeHandler(DISCONNECT_HOSTED_IDENTITY_CHANNEL);
   ipcMain.handle(DISCONNECT_HOSTED_IDENTITY_CHANNEL, async () => {
-    desktopNativeE2eeHandshakeService?.dispose();
-    await desktopHostedIdentityCoordinator?.disconnect().catch(() => undefined);
-    desktopHostedIdentityStatus = { status: "signed-out" };
+    if (desktopWorkspaceClient) {
+      await desktopWorkspaceClient.signOut().catch(() => undefined);
+    } else {
+      desktopNativeE2eeHandshakeService?.dispose();
+      await desktopHostedIdentityCoordinator?.disconnect().catch(() => undefined);
+      desktopHostedIdentityStatus = { status: "signed-out" };
+    }
     return hostedIdentityView();
   });
   ipcMain.removeHandler(CONNECT_HOSTED_GITHUB_CHANNEL);
@@ -2597,90 +2750,127 @@ function registerIpcHandlers(): void {
     desktopHostedIdentityCoordinator?.cancelGitHubConnection();
   });
 
-  ipcMain.removeHandler(PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL);
-  ipcMain.handle(PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL, async (_event, rawInput: unknown) => {
-    if (typeof rawInput !== "object" || rawInput === null || Array.isArray(rawInput)) {
-      throw new Error("Desktop native E2EE is unavailable.");
+  const withDesktopWorkspace = async <A>(
+    operation: (handlers: ReturnType<typeof createDesktopWorkspaceIpcHandlers>) => Promise<A>,
+  ): Promise<A> =>
+    operation(createDesktopWorkspaceIpcHandlers(await ensureDesktopWorkspaceClient()));
+  for (const channel of [
+    DESKTOP_WORKSPACE_IPC.getState,
+    DESKTOP_WORKSPACE_IPC.refreshCatalog,
+    DESKTOP_WORKSPACE_IPC.publishSnapshot,
+    DESKTOP_WORKSPACE_IPC.retainScope,
+    DESKTOP_WORKSPACE_IPC.renewScope,
+    DESKTOP_WORKSPACE_IPC.releaseScope,
+    DESKTOP_WORKSPACE_IPC.setBackgrounded,
+    DESKTOP_WORKSPACE_IPC.purgeCache,
+    DESKTOP_WORKSPACE_IPC.beginVerification,
+    DESKTOP_WORKSPACE_IPC.cancelVerification,
+    DESKTOP_WORKSPACE_IPC.verifyApproval,
+  ]) {
+    ipcMain.removeHandler(channel);
+  }
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.getState, () =>
+    withDesktopWorkspace((handlers) => handlers.getState()),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.refreshCatalog, () =>
+    withDesktopWorkspace((handlers) => handlers.refreshCatalog()),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.publishSnapshot, (_event, raw: unknown) =>
+    withDesktopWorkspace((handlers) => handlers.publishSnapshot(raw)),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.retainScope, (_event, raw: unknown) =>
+    withDesktopWorkspace((handlers) => handlers.retainScope(raw)),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.renewScope, (_event, raw: unknown) =>
+    withDesktopWorkspace((handlers) => handlers.renewScope(raw)),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.releaseScope, (_event, raw: unknown) =>
+    withDesktopWorkspace((handlers) => handlers.releaseScope(raw)),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.setBackgrounded, (_event, raw: unknown) =>
+    withDesktopWorkspace((handlers) => handlers.setBackgrounded(raw)),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.purgeCache, (_event, raw?: unknown) =>
+    withDesktopWorkspace((handlers) => handlers.purgeCache(raw)),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.beginVerification, (_event, raw: unknown) =>
+    withDesktopWorkspace((handlers) => handlers.beginVerification(raw)),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.cancelVerification, (_event, raw: unknown) =>
+    withDesktopWorkspace((handlers) => handlers.cancelVerification(raw)),
+  );
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.verifyApproval, (_event, raw: unknown) =>
+    withDesktopWorkspace((handlers) => handlers.verifyApproval(raw)),
+  );
+  for (const channel of [
+    DESKTOP_WORKSPACE_IPC.prepareTransport,
+    DESKTOP_WORKSPACE_IPC.activateTransport,
+    DESKTOP_WORKSPACE_IPC.reportConnection,
+  ]) {
+    ipcMain.removeHandler(channel);
+  }
+  for (const channel of [
+    DESKTOP_WORKSPACE_IPC.sendTransport,
+    DESKTOP_WORKSPACE_IPC.closeTransport,
+  ]) {
+    ipcMain.removeAllListeners(channel);
+  }
+  const workspaceEnvironmentId = (raw: unknown): EnvironmentId => {
+    if (typeof raw !== "string" || raw.length === 0 || raw.length > 2_048) {
+      throw new Error("Desktop workspace environment is invalid.");
     }
-    const input = rawInput as { readonly accountId?: unknown; readonly nodeId?: unknown };
-    if (
-      typeof input.accountId !== "string" ||
-      input.accountId.length === 0 ||
-      input.accountId.length > 2_048 ||
-      typeof input.nodeId !== "string" ||
-      input.nodeId.length === 0 ||
-      input.nodeId.length > 2_048
-    ) {
-      throw new Error("Desktop native E2EE is unavailable.");
+    return EnvironmentId.make(raw);
+  };
+  const workspaceTransportId = (raw: unknown): string => {
+    if (typeof raw !== "string" || !/^[A-Za-z0-9_-]{32}$/u.test(raw)) {
+      throw new Error("Desktop workspace transport is invalid.");
     }
+    return raw;
+  };
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.prepareTransport, async (_event, raw: unknown) => ({
+    transportId: (await ensureDesktopWorkspaceRelayManager()).prepare(workspaceEnvironmentId(raw)),
+  }));
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.activateTransport, async (_event, raw: unknown) =>
+    (await ensureDesktopWorkspaceRelayManager()).activate(workspaceTransportId(raw)),
+  );
+  ipcMain.on(
+    DESKTOP_WORKSPACE_IPC.sendTransport,
+    (_event, rawTransportId: unknown, rawData: unknown) => {
+      if (
+        !(rawData instanceof Uint8Array) ||
+        rawData.byteLength > DESKTOP_WORKSPACE_MAX_RPC_FRAME_BYTES
+      ) {
+        return;
+      }
+      try {
+        desktopWorkspaceRelayManager?.send(
+          workspaceTransportId(rawTransportId),
+          Uint8Array.from(rawData),
+        );
+      } catch {
+        // The transport emits its own bounded close; never surface relay details over IPC.
+      }
+    },
+  );
+  ipcMain.on(DESKTOP_WORKSPACE_IPC.closeTransport, (_event, raw: unknown) => {
     try {
-      return await (
-        await ensureDesktopNativeE2eeHandshakeService()
-      ).prepare({
-        accountId: input.accountId,
-        nodeId: input.nodeId,
-      });
+      desktopWorkspaceRelayManager?.close(workspaceTransportId(raw));
     } catch {
-      return { kind: "strict-unavailable" } as const;
+      // Closing an already-expired opaque handle is idempotent.
     }
   });
-
-  ipcMain.removeHandler(START_NATIVE_E2EE_HANDSHAKE_CHANNEL);
-  ipcMain.handle(
-    START_NATIVE_E2EE_HANDSHAKE_CHANNEL,
-    async (_event, attemptHandle: unknown, rawInput: unknown) => {
-      if (
-        typeof attemptHandle !== "string" ||
-        typeof rawInput !== "object" ||
-        rawInput === null ||
-        Array.isArray(rawInput) ||
-        !(rawInput as { readonly statement?: unknown }).statement ||
-        !(
-          (rawInput as { readonly statement: unknown }).statement instanceof Uint8Array ||
-          Buffer.isBuffer((rawInput as { readonly statement: unknown }).statement)
-        ) ||
-        (rawInput as { readonly statement: Uint8Array }).statement.byteLength > 64 * 1024
-      ) {
-        throw new Error("Desktop native E2EE is unavailable.");
-      }
-      try {
-        return await (
-          await ensureDesktopNativeE2eeHandshakeService()
-        ).start(
-          attemptHandle,
-          rawInput as Parameters<DesktopNativeE2eeHandshakeService["start"]>[1],
-        );
-      } catch {
-        throw new Error("Desktop native E2EE is unavailable.");
-      }
-    },
-  );
-
-  ipcMain.removeHandler(FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL);
-  ipcMain.handle(
-    FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL,
-    async (_event, handle: unknown, payload: unknown) => {
-      if (
-        typeof handle !== "string" ||
-        !(payload instanceof Uint8Array || Buffer.isBuffer(payload)) ||
-        payload.byteLength > 64 * 1024
-      ) {
-        throw new Error("Desktop native E2EE is unavailable.");
-      }
-      try {
-        return (await ensureDesktopNativeE2eeHandshakeService()).finish(
-          handle,
-          Uint8Array.from(payload),
-        );
-      } catch {
-        throw new Error("Desktop native E2EE is unavailable.");
-      }
-    },
-  );
-
-  ipcMain.removeHandler(DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL);
-  ipcMain.handle(DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL, async (_event, handle: unknown) => {
-    if (typeof handle === "string") desktopNativeE2eeHandshakeService?.destroy(handle);
+  ipcMain.handle(DESKTOP_WORKSPACE_IPC.reportConnection, async (_event, raw: unknown) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      throw new Error("Desktop workspace connection report is invalid.");
+    }
+    const report = raw as { readonly environmentId?: unknown; readonly connected?: unknown };
+    if (typeof report.connected !== "boolean") {
+      throw new Error("Desktop workspace connection report is invalid.");
+    }
+    (await ensureDesktopWorkspaceClient()).reportConnection(
+      workspaceEnvironmentId(report.environmentId),
+      report.connected,
+    );
   });
 
   ipcMain.removeHandler(VALIDATE_HUB_ORIGIN_CHANNEL);
@@ -3154,6 +3344,12 @@ function createWindow(): BrowserWindow {
     event.preventDefault();
     window.setTitle(APP_DISPLAY_NAME);
   });
+  window.on("blur", () => {
+    void desktopWorkspaceClient?.setBackgrounded(true);
+  });
+  window.on("focus", () => {
+    void desktopWorkspaceClient?.setBackgrounded(false);
+  });
   window.webContents.on("dom-ready", () => {
     const currentUrl = window.webContents.getURL();
     markDesktopWindowStartupLoad("dom-ready", currentUrl);
@@ -3167,6 +3363,7 @@ function createWindow(): BrowserWindow {
     markDesktopStartupPhase(`desktop.window.${urlKind}.did-finish-load`);
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
+    if (desktopWorkspaceClient) emitDesktopWorkspaceState(desktopWorkspaceClient.snapshot());
     void logDesktopRendererStartupPerformance(window, urlKind);
   });
 
@@ -3357,6 +3554,8 @@ app.on("before-quit", () => {
   stopBackend();
   desktopAuthorizationBroker.cancel();
   desktopNativeE2eeHandshakeService?.dispose();
+  disposeDesktopWorkspaceSubscription?.();
+  disposeDesktopWorkspaceSubscription = null;
   void desktopSshEnvironmentBridge.dispose().catch(() => undefined);
   restoreStdIoCapture?.();
 });

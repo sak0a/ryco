@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { DesktopBridge } from "@ryco/contracts";
+import { DESKTOP_WORKSPACE_IPC } from "./desktopWorkspaceChannels.ts";
 
 const startupTimingEnabled = process.env.RYCO_DESKTOP_STARTUP_TIMING_STDOUT === "1";
 const preloadStartMs = performance.now();
@@ -49,10 +50,6 @@ const DISCONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:disconnect-hosted-identity";
 const CONNECT_HOSTED_GITHUB_CHANNEL = "desktop:connect-hosted-github";
 const DISCONNECT_HOSTED_GITHUB_CHANNEL = "desktop:disconnect-hosted-github";
 const CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL = "desktop:cancel-hosted-github-connection";
-const PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL = "desktop:prepare-native-e2ee-attempt";
-const START_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:start-native-e2ee-handshake";
-const FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:finish-native-e2ee-handshake";
-const DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:destroy-native-e2ee-handshake";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
 const NOTIFY_TURN_COMPLETE_CHANNEL = "desktop:notify-turn-complete";
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
@@ -139,14 +136,61 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   connectHostedGitHub: (input) => ipcRenderer.invoke(CONNECT_HOSTED_GITHUB_CHANNEL, input),
   disconnectHostedGitHub: (input) => ipcRenderer.invoke(DISCONNECT_HOSTED_GITHUB_CHANNEL, input),
   cancelHostedGitHubConnection: () => ipcRenderer.invoke(CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL),
-  prepareNativeE2eeAttempt: (input) =>
-    ipcRenderer.invoke(PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL, input),
-  startNativeE2eeHandshake: (attemptHandle, input) =>
-    ipcRenderer.invoke(START_NATIVE_E2EE_HANDSHAKE_CHANNEL, attemptHandle, input),
-  finishNativeE2eeHandshake: (handle, payload) =>
-    ipcRenderer.invoke(FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL, handle, payload),
-  destroyNativeE2eeHandshake: (handle) =>
-    ipcRenderer.invoke(DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL, handle),
+  getDesktopWorkspaceState: () => ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.getState),
+  refreshDesktopWorkspaceCatalog: () => ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.refreshCatalog),
+  publishDesktopWorkspaceSnapshot: (snapshot) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.publishSnapshot, snapshot),
+  retainDesktopWorkspaceScope: (input) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.retainScope, input),
+  renewDesktopWorkspaceScope: (leaseId) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.renewScope, leaseId),
+  releaseDesktopWorkspaceScope: (leaseId) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.releaseScope, leaseId),
+  setDesktopWorkspaceBackgrounded: (backgrounded) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.setBackgrounded, backgrounded),
+  purgeDesktopWorkspaceCache: (environmentId) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.purgeCache, environmentId),
+  beginDesktopWorkspaceVerification: (input) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.beginVerification, input),
+  cancelDesktopWorkspaceVerification: (handle) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.cancelVerification, handle),
+  verifyDesktopWorkspaceApproval: (input) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.verifyApproval, input),
+  onDesktopWorkspaceState: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      if (typeof state !== "object" || state === null) return;
+      listener(state as Parameters<typeof listener>[0]);
+    };
+    ipcRenderer.on(DESKTOP_WORKSPACE_IPC.stateChanged, wrappedListener);
+    return () => ipcRenderer.removeListener(DESKTOP_WORKSPACE_IPC.stateChanged, wrappedListener);
+  },
+  onDesktopWorkspaceConnectionCommand: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, command: unknown) => {
+      if (typeof command !== "object" || command === null) return;
+      listener(command as Parameters<typeof listener>[0]);
+    };
+    ipcRenderer.on(DESKTOP_WORKSPACE_IPC.connectionCommand, wrappedListener);
+    return () =>
+      ipcRenderer.removeListener(DESKTOP_WORKSPACE_IPC.connectionCommand, wrappedListener);
+  },
+  prepareDesktopWorkspaceTransport: (environmentId) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.prepareTransport, environmentId),
+  activateDesktopWorkspaceTransport: (transportId) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.activateTransport, transportId),
+  sendDesktopWorkspaceTransport: (transportId, data) =>
+    ipcRenderer.send(DESKTOP_WORKSPACE_IPC.sendTransport, transportId, data),
+  closeDesktopWorkspaceTransport: (transportId) =>
+    ipcRenderer.send(DESKTOP_WORKSPACE_IPC.closeTransport, transportId),
+  reportDesktopWorkspaceConnection: (input) =>
+    ipcRenderer.invoke(DESKTOP_WORKSPACE_IPC.reportConnection, input),
+  onDesktopWorkspaceTransportEvent: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, transportEvent: unknown) => {
+      if (typeof transportEvent !== "object" || transportEvent === null) return;
+      listener(transportEvent as Parameters<typeof listener>[0]);
+    };
+    ipcRenderer.on(DESKTOP_WORKSPACE_IPC.transportEvent, wrappedListener);
+    return () => ipcRenderer.removeListener(DESKTOP_WORKSPACE_IPC.transportEvent, wrappedListener);
+  },
   setHubLaunchConfig: (input: {
     readonly enabled?: boolean;
     readonly origin?: string | null;
