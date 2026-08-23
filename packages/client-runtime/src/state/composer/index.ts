@@ -9,6 +9,7 @@ export * from "./modelOrdering.ts";
 export * from "./modelSelection.ts";
 export * from "./providerInstances.ts";
 export * from "./providerModels.ts";
+export * from "./providerSelectionPolicy.ts";
 export * from "./providerState.ts";
 export * from "./promptStash.ts";
 export * from "./sendEngine.ts";

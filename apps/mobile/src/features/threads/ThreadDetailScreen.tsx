@@ -15,8 +15,11 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 import { serverConfigAtom } from "@ryco/client-runtime/rpc";
 import {
+  deriveProviderSelectionPolicy,
   getProviderInteractionModeToggle,
   getProviderSupportsAskMode,
+  normalizeInteractionModeForProviderTarget,
+  selectionAllowedAtSendBoundary,
 } from "@ryco/client-runtime/state/composer";
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { TimelineEntry } from "@ryco/client-runtime/state/session";
@@ -24,7 +27,7 @@ import {
   buildQueuedMessageSteerCommand,
   resolveQueuedMessageSteerEligibility,
 } from "@ryco/client-runtime/state/message-queue";
-import { EnvironmentId, MessageId, ThreadId } from "@ryco/contracts";
+import { EnvironmentId, MessageId, ThreadId, type ModelSelection } from "@ryco/contracts";
 import { IMAGE_ONLY_BOOTSTRAP_PROMPT } from "@ryco/client-runtime/state/composer";
 
 import { AppText as Text } from "../../components/AppText";
@@ -58,6 +61,7 @@ import {
 } from "../../state/threadOutbox";
 import { buildQueuedThreadMessageAttachments } from "../../state/queuedThreadMessageAttachments";
 import type { QueuedThreadMessage } from "../../state/threadOutboxModel";
+import { modelSelectionsEqual } from "../../state/threadOutboxModel";
 import { useThreadTimeline } from "../../state/threadTimeline";
 import {
   selectEnvironmentHydratedFromCacheAt,
@@ -76,7 +80,6 @@ import {
   renameThread,
   setThreadArchived,
   setThreadInteractionMode,
-  setThreadModelSelection,
   setThreadRuntimeMode,
 } from "./sessionActions";
 import { useThreadChecks } from "./useThreadChecks";
@@ -102,6 +105,8 @@ import {
 } from "./threadHeaderModel";
 import { ThreadMessage } from "./ThreadMessage";
 import { proposedPlanPresentation } from "./threadPresentation";
+import { ContextHandoffMarkerRow } from "./ContextHandoffMarkerRow";
+import { derivePendingContextHandoff } from "./contextHandoffModel";
 
 function TimelineRow(props: { readonly entry: TimelineEntry }) {
   const { entry } = props;
@@ -133,6 +138,9 @@ function TimelineRow(props: { readonly entry: TimelineEntry }) {
         <View className="h-px flex-1 bg-border" />
       </View>
     );
+  }
+  if (entry.kind === "context-handoff") {
+    return <ContextHandoffMarkerRow marker={entry.marker} />;
   }
   // Work entries never reach here — buildThreadTimelineRows folds them before
   // the list sees them. This is the remaining unknown-kind fallback.
@@ -220,6 +228,8 @@ export function ThreadDetailScreen(props: {
   const [policyBusy, setPolicyBusy] = useState(false);
   const [modelVisible, setModelVisible] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
+  const [stagedModelSelection, setStagedModelSelection] = useState<ModelSelection | null>(null);
+  const [sendBusy, setSendBusy] = useState(false);
   const [steeringMessageIds, setSteeringMessageIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -366,12 +376,64 @@ export function ThreadDetailScreen(props: {
   // Memoized: `?? []` would allocate a fresh array every render and defeat both
   // memos below, recomputing the policy model on every keystroke in the composer.
   const providers = useMemo(() => serverConfig?.providers ?? [], [serverConfig]);
+  const canonicalModelSelection = thread?.modelSelection ?? project?.defaultModelSelection ?? null;
+  const selectedModelSelection = stagedModelSelection ?? canonicalModelSelection;
+  const threadStarted = Boolean(
+    thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
+  );
+  const canonicalProviderDriver = useMemo(() => {
+    if (thread?.session?.provider) return thread.session.provider;
+    if (!canonicalModelSelection) return null;
+    return (
+      providers.find((provider) => provider.instanceId === canonicalModelSelection.instanceId)
+        ?.driver ?? null
+    );
+  }, [canonicalModelSelection, providers, thread?.session?.provider]);
+  const sessionPhase =
+    thread?.session?.status === "running"
+      ? "running"
+      : thread?.session?.status === "connecting"
+        ? "connecting"
+        : thread?.session?.status === "ready"
+          ? "ready"
+          : "disconnected";
+  const providerSelectionPolicy = deriveProviderSelectionPolicy({
+    threadStarted,
+    canonicalProvider: canonicalProviderDriver,
+    phase: sessionPhase,
+    orchestrationStatus: thread?.session?.orchestrationStatus ?? null,
+    isConnecting: connectionUiState === "connecting",
+    isSendBusy: sendBusy,
+    isPreparingWorktree: false,
+    hasPendingApproval: pendingApprovals.length > 0,
+    hasPendingUserInput: pendingUserInputs.length > 0,
+    hasQueuedMessage: queuedMessages.length > 0,
+    isRevertingCheckpoint: actionBusy,
+    mutationAllowed: !cachedView.actionsDisabled,
+    environmentAvailable: connectionUiState === "connected" && hydratedFromCacheAt === null,
+    // Native mobile is the intended phone surface. Only the frozen web phone
+    // tier is excluded from provider handoff.
+    isPhoneTier: false,
+  });
   const threadProviderDriver = useMemo(() => {
-    const instanceId =
-      thread?.modelSelection?.instanceId ?? project?.defaultModelSelection?.instanceId;
+    const instanceId = selectedModelSelection?.instanceId;
     if (!instanceId) return null;
     return providers.find((provider) => provider.instanceId === instanceId)?.driver ?? null;
-  }, [project?.defaultModelSelection?.instanceId, providers, thread?.modelSelection?.instanceId]);
+  }, [providers, selectedModelSelection?.instanceId]);
+
+  useEffect(() => {
+    setStagedModelSelection(null);
+  }, [environmentId, threadId]);
+
+  useEffect(() => {
+    if (
+      stagedModelSelection &&
+      canonicalModelSelection &&
+      modelSelectionsEqual(stagedModelSelection, canonicalModelSelection)
+    ) {
+      setStagedModelSelection(null);
+    }
+  }, [canonicalModelSelection, stagedModelSelection]);
 
   const policyModel = useMemo(
     () =>
@@ -396,14 +458,34 @@ export function ThreadDetailScreen(props: {
       thread
         ? buildModelPickerModel({
             serverConfig,
-            currentSelection: thread.modelSelection ?? project?.defaultModelSelection ?? null,
-            // A thread with a live session has committed to a provider; the
-            // picker must not offer a way to swap it mid-session.
-            providerLocked: thread.session !== null,
+            currentSelection: selectedModelSelection,
+            lockedProviderKey:
+              providerSelectionPolicy.mode === "continuation-only"
+                ? (canonicalModelSelection?.instanceId ?? null)
+                : null,
             query: modelQuery,
           })
         : null,
-    [modelQuery, project?.defaultModelSelection, serverConfig, thread],
+    [
+      canonicalModelSelection?.instanceId,
+      modelQuery,
+      providerSelectionPolicy.mode,
+      selectedModelSelection,
+      serverConfig,
+      thread,
+    ],
+  );
+  const pendingContextHandoff = useMemo(
+    () =>
+      selectedModelSelection
+        ? derivePendingContextHandoff({
+            threadStarted,
+            canonicalSelection: canonicalModelSelection,
+            targetSelection: selectedModelSelection,
+            serverConfig,
+          })
+        : null,
+    [canonicalModelSelection, selectedModelSelection, serverConfig, threadStarted],
   );
 
   const getSteerEligibility = useCallback(
@@ -482,7 +564,10 @@ export function ThreadDetailScreen(props: {
     const rejected = new Map<string, string>();
     for (const activity of thread.activities) {
       if (activity.kind !== "provider.turn.steer.failed" || !activity.payload) continue;
-      const payload = activity.payload as { messageId?: unknown; error?: unknown };
+      const payload = activity.payload as {
+        messageId?: unknown;
+        error?: unknown;
+      };
       if (typeof payload.messageId === "string") {
         rejected.set(
           payload.messageId,
@@ -523,6 +608,24 @@ export function ThreadDetailScreen(props: {
       setPolicyBusy(false);
     }
   }, []);
+
+  const stageModelSelection = useCallback(
+    (next: ModelSelection) => {
+      setStagedModelSelection(next);
+      if (!thread) return;
+      const targetProvider = providers.find((provider) => provider.instanceId === next.instanceId);
+      const normalizedMode = normalizeInteractionModeForProviderTarget(
+        thread.interactionMode,
+        targetProvider?.supportsAskMode === true,
+      );
+      if (normalizedMode !== thread.interactionMode) {
+        void applyPolicy(() =>
+          setThreadInteractionMode(ensureEnvironmentApi(environmentId), threadId, normalizedMode),
+        );
+      }
+    },
+    [applyPolicy, environmentId, providers, thread, threadId],
+  );
 
   // One lookup for the open thread only. See useThreadChecks for why the inbox
   // deliberately does not do this.
@@ -585,9 +688,28 @@ export function ThreadDetailScreen(props: {
       state,
       scopeProjectRef(environmentId, currentThread.projectId),
     );
-    const modelSelection = currentThread.modelSelection ?? currentProject?.defaultModelSelection;
+    const canonicalSelection =
+      currentThread.modelSelection ?? currentProject?.defaultModelSelection ?? null;
+    const modelSelection = stagedModelSelection ?? canonicalSelection;
     if (!modelSelection) {
       setSendError("No model is configured for this project.");
+      return false;
+    }
+
+    const currentThreadStarted =
+      currentThread.latestTurn !== null ||
+      currentThread.messages.length > 0 ||
+      currentThread.session !== null;
+    if (
+      canonicalSelection &&
+      !selectionAllowedAtSendBoundary({
+        threadStarted: currentThreadStarted,
+        policy: providerSelectionPolicy,
+        canonicalSelection,
+        targetSelection: modelSelection,
+      })
+    ) {
+      setSendError("Wait for this task to become idle before handing context to another provider.");
       return false;
     }
 
@@ -602,69 +724,74 @@ export function ThreadDetailScreen(props: {
       selectEnvironmentHydratedFromCacheAt(useStore.getState(), environmentId) === null;
     const connected = connectionUiState === "connected" && deliveryReconciled;
 
-    return sendThreadTurn(
-      {
-        environmentId,
-        threadId,
-        text,
-        attachments,
-        modelSelection,
-        runtimeMode: currentThread.runtimeMode,
-        interactionMode: currentThread.interactionMode,
-        tokenMode,
-        threadBusy,
-        connected,
-      },
-      {
-        newMessageId,
-        newCommandId,
-        now: () => new Date().toISOString(),
-        enqueue: enqueueThreadOutboxMessage,
-        dispatch: () =>
-          executeSendTurn({
-            api: ensureEnvironmentApi(environmentId),
-            thread: {
-              threadId,
-              isFirstMessage: currentThread.messages.length === 0,
-              isServerThread: true,
-              isLocalDraftThread: false,
-              activeThreadBranch: currentThread.branch,
-              worktreePath: currentThread.worktreePath,
-              createdAt: currentThread.createdAt,
-            },
-            composer: {
-              prompt: text,
-              // The runtime attachment pipeline expects the outgoing data URL,
-              // not the image-picker preview file URI.
-              images: attachments.map((attachment) => ({
-                type: "image",
-                id: attachment.id,
-                name: attachment.name,
-                mimeType: attachment.mimeType,
-                sizeBytes: attachment.sizeBytes,
-                previewUrl: attachment.dataUrl,
-              })),
-              selectedModelSelection: modelSelection,
-              selectedModel: modelSelection.model,
-              hasSelectedModel: true,
-            },
-            project: {
-              projectId: currentThread.projectId,
-              projectCwd: currentProject?.cwd ?? "",
-              defaultModel: currentProject?.defaultModelSelection?.model ?? modelSelection.model,
-            },
-            settings: {
-              runtimeMode: currentThread.runtimeMode,
-              interactionMode: currentThread.interactionMode,
-              tokenMode,
-            },
-            title: currentThread.title,
-            clearDraft: () => {},
-            restoreDraft: () => {},
-            setThreadError: (_id, error) => setSendError(error),
-          }),
-      },
-    );
+    setSendBusy(true);
+    try {
+      return await sendThreadTurn(
+        {
+          environmentId,
+          threadId,
+          text,
+          attachments,
+          modelSelection,
+          runtimeMode: currentThread.runtimeMode,
+          interactionMode: currentThread.interactionMode,
+          tokenMode,
+          threadBusy,
+          connected,
+        },
+        {
+          newMessageId,
+          newCommandId,
+          now: () => new Date().toISOString(),
+          enqueue: enqueueThreadOutboxMessage,
+          dispatch: () =>
+            executeSendTurn({
+              api: ensureEnvironmentApi(environmentId),
+              thread: {
+                threadId,
+                isFirstMessage: currentThread.messages.length === 0,
+                isServerThread: true,
+                isLocalDraftThread: false,
+                activeThreadBranch: currentThread.branch,
+                worktreePath: currentThread.worktreePath,
+                createdAt: currentThread.createdAt,
+              },
+              composer: {
+                prompt: text,
+                // The runtime attachment pipeline expects the outgoing data URL,
+                // not the image-picker preview file URI.
+                images: attachments.map((attachment) => ({
+                  type: "image",
+                  id: attachment.id,
+                  name: attachment.name,
+                  mimeType: attachment.mimeType,
+                  sizeBytes: attachment.sizeBytes,
+                  previewUrl: attachment.dataUrl,
+                })),
+                selectedModelSelection: modelSelection,
+                selectedModel: modelSelection.model,
+                hasSelectedModel: true,
+              },
+              project: {
+                projectId: currentThread.projectId,
+                projectCwd: currentProject?.cwd ?? "",
+                defaultModel: currentProject?.defaultModelSelection?.model ?? modelSelection.model,
+              },
+              settings: {
+                runtimeMode: currentThread.runtimeMode,
+                interactionMode: currentThread.interactionMode,
+                tokenMode,
+              },
+              title: currentThread.title,
+              clearDraft: () => {},
+              restoreDraft: () => {},
+              setThreadError: (_id, error) => setSendError(error),
+            }),
+        },
+      );
+    } finally {
+      setSendBusy(false);
+    }
   };
 
   const runAction = async (action: () => Promise<void>, closeAfter = true) => {
@@ -861,6 +988,7 @@ export function ThreadDetailScreen(props: {
         modelReasoningLabel={modelPicker?.pillReasoningLabel}
         modelFastEnabled={modelPicker?.pillFastEnabled}
         onOpenModel={modelPicker ? () => setModelVisible(true) : undefined}
+        pendingContextHandoff={pendingContextHandoff}
       />
 
       {modelPicker ? (
@@ -876,24 +1004,20 @@ export function ThreadDetailScreen(props: {
           onSelectOption={(optionId, value) => {
             // Options ride on the ModelSelection, so changing reasoning or fast
             // mode is the same write as changing the model itself.
-            const current = thread?.modelSelection ?? project?.defaultModelSelection ?? null;
+            const current = selectedModelSelection;
             if (!current) return;
             const capabilities =
               modelPicker.groups.flatMap((group) => group.entries).find((entry) => entry.selected)
                 ?.capabilities ?? null;
             const next = applyModelOption(current, capabilities, optionId, value);
-            void applyPolicy(() =>
-              setThreadModelSelection(ensureEnvironmentApi(environmentId), threadId, next),
-            );
+            stageModelSelection(next);
           }}
           onSelect={(key) => {
             const next = resolveModelPickerSelection(modelPicker, key);
             if (!next) return;
             setModelVisible(false);
             setModelQuery("");
-            void applyPolicy(() =>
-              setThreadModelSelection(ensureEnvironmentApi(environmentId), threadId, next),
-            );
+            stageModelSelection(next);
           }}
         />
       ) : null}

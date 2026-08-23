@@ -16,12 +16,9 @@ import { buildModelOptions, groupByProvider, type ModelOption } from "../../lib/
 // Two things separate this from the New Task picker, and both are correctness
 // rather than polish:
 //
-// 1. A thread that has already started is LOCKED to its provider instance.
-//    Switching a live session to a different provider mid-thread is not a
-//    supported transition, and `buildModelOptions` has no concept of it — so
-//    offering the other providers here would ship a way to break the session.
-//    Other providers are still listed, but disabled and labelled, because
-//    silently hiding them reads as "the app lost my providers".
+// 1. The caller supplies a locked provider only when shared session policy says
+//    a started thread is not safely idle. At idle, every ready provider remains
+//    selectable and the next message performs a context handoff.
 //
 // 2. `serverConfigAtom` is scoped to the ACTIVE environment and is nulled while
 //    switching nodes. With a null config `buildModelOptions` returns exactly one
@@ -104,15 +101,16 @@ export interface ModelPickerModel {
 export interface ModelPickerInput {
   readonly serverConfig: ServerConfig | null | undefined;
   readonly currentSelection: ModelSelection | null;
-  /**
-   * True once the thread has a real session, i.e. a provider is committed.
-   * New Task passes false.
-   */
-  readonly providerLocked: boolean;
+  /** Exact provider instance retained while the thread is not safely idle. */
+  readonly lockedProviderKey?: string | null;
+  /** Human-readable explanation for the temporary lock. */
+  readonly lockNotice?: string | null;
+  /** @deprecated Compatibility for New Task and older pure-model callers. */
+  readonly providerLocked?: boolean;
   readonly query?: string;
 }
 
-const LOCK_NOTICE = "This task already started on its provider, so its model choices are limited.";
+const LOCK_NOTICE = "Wait for this task to become idle before switching providers.";
 
 function matches(option: ModelOption, query: string): boolean {
   if (!query) return true;
@@ -124,9 +122,10 @@ export function buildModelPickerModel(input: ModelPickerInput): ModelPickerModel
   // A config that has not arrived is different from a config with no providers.
   const loading = input.serverConfig === null || input.serverConfig === undefined;
   const options = buildModelOptions(input.serverConfig, input.currentSelection);
-  const lockedProviderKey = input.providerLocked
-    ? (input.currentSelection?.instanceId ?? null)
-    : null;
+  const lockedProviderKey =
+    input.lockedProviderKey ??
+    (input.providerLocked ? (input.currentSelection?.instanceId ?? null) : null);
+  const lockNotice = input.lockNotice ?? LOCK_NOTICE;
 
   const selectedKey = input.currentSelection
     ? `${input.currentSelection.instanceId}:${input.currentSelection.model}`
@@ -157,7 +156,7 @@ export function buildModelPickerModel(input: ModelPickerInput): ModelPickerModel
             capabilities: option.capabilities,
             selected: option.key === selectedKey,
             disabled: locked,
-            disabledReason: locked ? LOCK_NOTICE : null,
+            disabledReason: locked ? lockNotice : null,
           })),
       };
     })
@@ -193,7 +192,7 @@ export function buildModelPickerModel(input: ModelPickerInput): ModelPickerModel
     groups,
     loading,
     lockedProviderKey,
-    lockNotice: lockedProviderKey !== null ? LOCK_NOTICE : null,
+    lockNotice: lockedProviderKey !== null ? lockNotice : null,
     emptyForQuery: query.length > 0 && groups.length === 0,
   };
 }

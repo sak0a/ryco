@@ -2,6 +2,7 @@ import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { ChangeRequestBadge } from "../../components/ChangeRequestBadge";
+import { ProviderIcon } from "../../components/ProviderIcon";
 import { relativeTime } from "../../lib/time";
 import type { InboxThreadRow as InboxThreadRowModel, InboxThreadState } from "./inboxModel";
 
@@ -52,6 +53,7 @@ export function InboxThreadRow(props: {
     props.row.statusLabel,
     ...(props.row.roleLabel === null ? [] : [props.row.roleLabel]),
     ...(props.row.trustLabel === null ? [] : [props.row.trustLabel]),
+    ...(props.row.providerLabel === null ? [] : [`Provider: ${props.row.providerLabel}`]),
   ].join(", ");
 
   return (
@@ -103,6 +105,12 @@ export function InboxThreadRow(props: {
             </Text>
           )}
           {props.row.changeRequest ? <ChangeRequestBadge badge={props.row.changeRequest} /> : null}
+          <View
+            accessibilityElementsHidden
+            className="ml-auto h-6 w-6 shrink-0 items-center justify-center rounded-full bg-subtle"
+          >
+            <ProviderIcon provider={props.row.providerDriver} size={15} />
+          </View>
         </View>
       </View>
     </Pressable>

@@ -159,6 +159,46 @@ describe("Inbox model", () => {
     expect(sections[0]?.rows[0]?.contextLabel).toBe("Mac Studio · Ryco · feat/mobile");
   });
 
+  it("carries the current provider brand onto every thread row", () => {
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco")],
+      worktrees: [],
+      environments: [{ environmentId: NODE_A, label: "Mac Studio", connectionState: "connected" }],
+      threads: [
+        thread(NODE_A, "thread-a", "project-a", {
+          session: { provider: "claudeAgent" } as SidebarThreadSummary["session"],
+        }),
+      ],
+    });
+
+    expect(sections[0]?.rows[0]).toMatchObject({
+      providerDriver: "claudeAgent",
+      providerLabel: "Claude",
+    });
+  });
+
+  it("retains provider identity for cached rows whose live session was stripped", () => {
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco")],
+      worktrees: [],
+      environments: [
+        { environmentId: NODE_A, label: "Mac Studio", connectionState: "offline", stale: true },
+      ],
+      threads: [
+        thread(NODE_A, "thread-a", "project-a", {
+          session: null,
+          modelSelection: { instanceId: "cursor", model: "cursor-agent" } as never,
+          providerDriver: "cursor" as never,
+        }),
+      ],
+    });
+
+    expect(sections[0]?.rows[0]).toMatchObject({
+      providerDriver: "cursor",
+      providerLabel: "Cursor",
+    });
+  });
+
   it("scopes by node and excludes archived tasks", () => {
     const sections = buildInboxSections({
       projects: [project(NODE_A, "a", "A"), project(NODE_B, "b", "B")],

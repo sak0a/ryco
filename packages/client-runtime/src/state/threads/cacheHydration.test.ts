@@ -114,6 +114,12 @@ describe("cache hydration", () => {
     expect(selectCacheHydratedEnvironmentIds(state)).toEqual([ENV_A, ENV_B]);
     expect(state.environmentStateById[ENV_A]?.bootstrapComplete).toBe(false);
     expect(state.environmentStateById[ENV_A]?.hydratedFromCacheAt).toBe(1_755_000_000_000);
+    expect(
+      state.environmentStateById[ENV_A]?.sidebarThreadSummaryById["thread-1" as never]
+        ?.modelSelection,
+    ).toEqual(
+      state.environmentStateById[ENV_A]?.threadShellById["thread-1" as never]?.modelSelection,
+    );
   });
 
   it("is a no-op when the environment already has state — live data wins the race", () => {

@@ -6,6 +6,10 @@ import type {
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 
 import { buildChangeRequestBadge, type ChangeRequestBadge } from "../../lib/changeRequestBadge";
+import {
+  builtInProviderDriverForInstanceId,
+  providerDisplayLabel,
+} from "../../lib/providerDisplay";
 import { NODE_TRUST_UNVERIFIED_LABEL, type NodeTrust } from "../home/nodeTrustModel";
 
 export type InboxThreadState =
@@ -79,6 +83,9 @@ export interface InboxThreadRow {
    * matches HubNodeSection's `ROLE_LABELS`.
    */
   readonly roleLabel: "Viewer" | null;
+  /** Current provider brand for the task; null renders the neutral mark. */
+  readonly providerDriver: string | null;
+  readonly providerLabel: string | null;
 }
 
 export interface InboxSection {
@@ -206,6 +213,10 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
     }
 
     const state = threadState(thread, environment, deliveryUnknown);
+    const providerDriver =
+      thread.session?.provider ??
+      thread.providerDriver ??
+      builtInProviderDriverForInstanceId(thread.modelSelection?.instanceId);
     rows.push({
       key: scopedKey(thread.environmentId, thread.id),
       environmentId: thread.environmentId,
@@ -222,6 +233,8 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
       changeRequest: buildChangeRequestBadge(worktree),
       trustLabel: environment?.trust === "unverified" ? NODE_TRUST_UNVERIFIED_LABEL : null,
       roleLabel: environment?.role === "viewer" ? "Viewer" : null,
+      providerDriver,
+      providerLabel: providerDisplayLabel(providerDriver),
     });
   }
 

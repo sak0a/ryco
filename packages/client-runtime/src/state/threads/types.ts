@@ -167,6 +167,10 @@ export interface SidebarThreadSummary {
   projectId: ProjectId;
   title: string;
   interactionMode: ProviderInteractionMode;
+  /** Current routing target, retained in cached rows for provider identity. */
+  modelSelection?: ModelSelection | undefined;
+  /** Last projected driver metadata; safe to retain when live session state is stripped. */
+  providerDriver?: ProviderDriverKind | null | undefined;
   tokenMode?: AgentTokenMode;
   session: ThreadSession | null;
   createdAt: string;
