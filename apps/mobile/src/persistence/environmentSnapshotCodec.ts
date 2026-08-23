@@ -1,4 +1,10 @@
-import type { EnvironmentId } from "@ryco/contracts";
+import { WorktreeId, type EnvironmentId } from "@ryco/contracts";
+import {
+  MAX_WORKSPACE_SNAPSHOT_BYTES_PER_ENVIRONMENT,
+  MAX_WORKSPACE_SNAPSHOT_THREADS_PER_ENVIRONMENT,
+  WORKSPACE_METADATA_SNAPSHOT_SCHEMA_VERSION,
+  type WorkspaceMetadataSnapshot,
+} from "@ryco/client-runtime/state/workspace";
 
 import type {
   CachedEnvironmentShellSnapshot,
@@ -40,8 +46,9 @@ export interface StoredEnvironmentSnapshot {
  * budget is enforced separately with the shared eviction policy
  * (`planEvictionsToCapacity`) over the stored rows.
  */
-export const MAX_SNAPSHOT_THREADS_PER_ENVIRONMENT = 400;
-export const MAX_SNAPSHOT_PAYLOAD_BYTES_PER_ENVIRONMENT = 2 * 1024 * 1024;
+export const MAX_SNAPSHOT_THREADS_PER_ENVIRONMENT = MAX_WORKSPACE_SNAPSHOT_THREADS_PER_ENVIRONMENT;
+export const MAX_SNAPSHOT_PAYLOAD_BYTES_PER_ENVIRONMENT =
+  MAX_WORKSPACE_SNAPSHOT_BYTES_PER_ENVIRONMENT;
 
 function threadRecency(summary: SidebarThreadSummary): number {
   const timestamp = Date.parse(
@@ -203,5 +210,57 @@ export function toCachedEnvironmentShellSnapshot(
     projects: record.projects,
     worktrees: record.worktrees,
     threads: record.threads,
+  };
+}
+
+/**
+ * Compatibility projection from the existing v1 Mobile record to the shared
+ * metadata-only domain. The SQLite payload stays byte-compatible in this wave.
+ */
+export function toWorkspaceMetadataSnapshot(
+  record: StoredEnvironmentSnapshot,
+): WorkspaceMetadataSnapshot {
+  return {
+    schemaVersion: WORKSPACE_METADATA_SNAPSHOT_SCHEMA_VERSION,
+    environmentId: record.environmentId,
+    capturedAt: record.capturedAt,
+    projects: record.projects.map((project) => ({
+      environmentId: project.environmentId,
+      id: project.id,
+      name: project.name,
+      cwd: project.cwd,
+      repositoryIdentity: project.repositoryIdentity ?? null,
+      createdAt: project.createdAt ?? null,
+      updatedAt: project.updatedAt ?? null,
+    })),
+    worktrees: record.worktrees.map((worktree) => ({
+      environmentId: worktree.environmentId,
+      id: worktree.id,
+      projectId: worktree.projectId,
+      title: worktree.title ?? null,
+      branch: worktree.branch,
+      worktreePath: worktree.worktreePath,
+      workItemLabel: worktree.workItemKey ?? worktree.workItemTitle ?? null,
+      pullRequestNumber: worktree.prNumber,
+      archivedAt: worktree.archivedAt,
+      updatedAt: worktree.updatedAt,
+    })),
+    threads: record.threads.map(({ shell, summary }) => ({
+      environmentId: shell.environmentId,
+      id: shell.id,
+      projectId: shell.projectId,
+      worktreeId: summary.worktreeId ? WorktreeId.make(summary.worktreeId) : null,
+      title: shell.title,
+      createdAt: shell.createdAt,
+      updatedAt: summary.updatedAt ?? shell.updatedAt ?? null,
+      archivedAt: shell.archivedAt,
+      modelSelection: summary.modelSelection ?? shell.modelSelection,
+      providerDriver: summary.providerDriver ?? null,
+      branch: shell.branch,
+      hasPendingApprovals: summary.hasPendingApprovals,
+      hasPendingUserInput: summary.hasPendingUserInput,
+      hasActionableProposedPlan: summary.hasActionableProposedPlan,
+      deliveryUnknown: false,
+    })),
   };
 }

@@ -1,6 +1,10 @@
 import { hostedHubStore, type HostedHubState } from "@ryco/client-runtime/authorization";
 import { planEvictionsToCapacity } from "@ryco/client-runtime/connection";
 import type { KVService } from "@ryco/client-runtime/platform";
+import {
+  MAX_WORKSPACE_SNAPSHOT_ENVIRONMENTS,
+  MAX_WORKSPACE_SNAPSHOT_TOTAL_BYTES,
+} from "@ryco/client-runtime/state/workspace";
 import type { EnvironmentId } from "@ryco/contracts";
 
 import {
@@ -39,8 +43,8 @@ const ROSTER_WRITE_DEBOUNCE_MS = 1_000;
  * (count cap + byte budget, LRU) from client-runtime. Per-environment bounds
  * are applied at capture in environmentSnapshotCodec.ts.
  */
-const MAX_CACHED_ENVIRONMENT_SNAPSHOTS = 32;
-const MAX_CACHED_ENVIRONMENT_SNAPSHOT_TOTAL_BYTES = 16 * 1024 * 1024;
+const MAX_CACHED_ENVIRONMENT_SNAPSHOTS = MAX_WORKSPACE_SNAPSHOT_ENVIRONMENTS;
+const MAX_CACHED_ENVIRONMENT_SNAPSHOT_TOTAL_BYTES = MAX_WORKSPACE_SNAPSHOT_TOTAL_BYTES;
 
 interface ThreadsStoreLike {
   readonly getState: () => {
