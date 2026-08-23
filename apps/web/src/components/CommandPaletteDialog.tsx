@@ -28,9 +28,11 @@ import {
   CircleAlertIcon,
   CornerLeftUpIcon,
   FolderIcon,
+  FolderTreeIcon,
   FolderPlusIcon,
   FolderSymlinkIcon,
   LinkIcon,
+  InboxIcon,
   MessageSquareIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -130,6 +132,7 @@ import { useComposerHandleContext } from "../composerHandleContext";
 import { useHostedRpcCapability } from "../hostedHub/capabilities";
 import { getPresentationTier } from "../lib/presentationTier";
 import { useSettingsDialogStore } from "../settingsDialogStore";
+import { useThreadSelectionStore } from "../threadSelectionStore";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const BROWSE_STALE_TIME_MS = 30_000;
@@ -1082,6 +1085,35 @@ function OpenCommandPaletteDialog() {
   }, [clearOpenIntent, openAddProjectFlow, openIntent]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+
+  actionItems.push(
+    {
+      kind: "action",
+      value: "action:show-inbox-sidebar",
+      searchTerms: ["sidebar", "inbox", "tasks", "activity"],
+      title: "Show Inbox sidebar",
+      icon: <InboxIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "sidebar.showInbox",
+      run: async () => {
+        useThreadSelectionStore.getState().clearSelection();
+        useUiStateStore.getState().setSidebarMode("inbox");
+        setOpen(false);
+      },
+    },
+    {
+      kind: "action",
+      value: "action:show-projects-sidebar",
+      searchTerms: ["sidebar", "projects", "tree", "folders"],
+      title: "Show Projects sidebar",
+      icon: <FolderTreeIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "sidebar.showProjects",
+      run: async () => {
+        useThreadSelectionStore.getState().clearSelection();
+        useUiStateStore.getState().setSidebarMode("projects");
+        setOpen(false);
+      },
+    },
+  );
 
   if (projects.length > 0) {
     const activeProjectTitle = currentProjectId

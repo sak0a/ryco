@@ -1,4 +1,10 @@
-import { BarChart3Icon, PanelLeftCloseIcon, SettingsIcon } from "lucide-react";
+import {
+  BarChart3Icon,
+  CheckIcon,
+  ChevronDownIcon,
+  PanelLeftCloseIcon,
+  SettingsIcon,
+} from "lucide-react";
 import React, { memo, useCallback } from "react";
 import { Link, useLocation } from "@tanstack/react-router";
 import { WS_METHODS } from "@ryco/contracts";
@@ -11,14 +17,20 @@ import { SidebarUpdatePill } from "./SidebarUpdatePill";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { cn } from "../../lib/utils";
+import type { SidebarMode } from "../../uiStateStore";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
 const SIDEBAR_HEADER_ACTION_CLASS_NAME =
   "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
+  mode,
+  onModeChange,
 }: {
   isElectron: boolean;
+  mode: SidebarMode;
+  onModeChange: (mode: SidebarMode) => void;
 }) {
   const { isMobile, setOpenMobile, toggleSidebar } = useSidebar();
   const openSettings = useSettingsDialogStore((s) => s.openSettings);
@@ -90,6 +102,25 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           {APP_BASE_NAME} {APP_STAGE_LABEL} · Version {APP_VERSION}
         </TooltipPopup>
       </Tooltip>
+      <Menu>
+        <MenuTrigger
+          aria-label={`Sidebar mode: ${mode === "inbox" ? "Inbox" : "Projects"}`}
+          className="inline-flex min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-xs font-semibold text-sidebar-foreground outline-hidden ring-ring transition-colors hover:bg-accent focus-visible:ring-2 [-webkit-app-region:no-drag]"
+        >
+          <span className="truncate">{mode === "inbox" ? "Inbox" : "Projects"}</span>
+          <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
+        </MenuTrigger>
+        <MenuPopup align="start" className="min-w-36">
+          <MenuItem onClick={() => onModeChange("inbox")}>
+            <CheckIcon className={cn("size-3.5", mode !== "inbox" && "opacity-0")} />
+            Inbox
+          </MenuItem>
+          <MenuItem onClick={() => onModeChange("projects")}>
+            <CheckIcon className={cn("size-3.5", mode !== "projects" && "opacity-0")} />
+            Projects
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
       {actionButtons}
     </div>
   );

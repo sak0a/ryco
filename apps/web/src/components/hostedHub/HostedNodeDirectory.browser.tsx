@@ -248,7 +248,9 @@ describe("hosted node directory", () => {
     });
     mounted = await render(<RouterProvider router={router} />);
 
-    await expect.element(page.getByText("Cached workspace")).toBeVisible();
+    await expect
+      .element(page.getByText("Studio · Cached workspace · Local workspace", { exact: true }))
+      .toBeVisible();
     expect(selectNode).not.toHaveBeenCalled();
   });
 

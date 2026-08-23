@@ -1495,6 +1495,22 @@ async function waitForLayout(): Promise<void> {
   await nextFrame();
 }
 
+async function waitForWsRequestsToSettle(): Promise<void> {
+  let previousCount = -1;
+  let stableChecks = 0;
+  for (let index = 0; index < 20; index += 1) {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+    if (wsRequests.length === previousCount) {
+      stableChecks += 1;
+      if (stableChecks >= 3) return;
+    } else {
+      previousCount = wsRequests.length;
+      stableChecks = 0;
+    }
+  }
+  throw new Error("WebSocket requests did not settle before the sidebar mode assertion.");
+}
+
 function findScrollToBottomButton(): HTMLButtonElement | null {
   return (
     Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) =>
@@ -2529,6 +2545,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       environmentStateById: {},
     });
     useUiStateStore.setState({
+      // Existing browser fixtures predate sidebar modes; preserve their
+      // Projects-tree baseline and opt into Inbox in the mode-specific cases.
+      sidebarMode: "projects",
       projectExpandedById: {},
       projectOrder: [],
       threadLastVisitedAtById: {},
@@ -3134,6 +3153,81 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await expect.element(page.getByText("Project", { exact: true })).toBeInTheDocument();
       expect(document.querySelector('[data-testid="thread-row-thread-browser-test"]')).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("replaces the full sidebar body between Projects and Inbox without workspace churn", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-sidebar-modes" as MessageId,
+        targetText: "sidebar modes",
+      }),
+    });
+
+    try {
+      const projectTrigger = document.querySelector<HTMLElement>(
+        '[data-testid="sidebar-add-project-trigger"]',
+      );
+      expect(projectTrigger?.checkVisibility()).toBe(true);
+      const inboxSidebar = document.querySelector<HTMLElement>('[data-testid="inbox-sidebar"]');
+      expect(inboxSidebar?.checkVisibility()).toBe(false);
+      await waitForWsRequestsToSettle();
+      const requestCountBeforeSwitch = wsRequests.length;
+
+      await page.getByRole("button", { name: "Sidebar mode: Projects" }).click();
+      await page.getByRole("menuitem", { name: "Inbox" }).click();
+
+      await expect.element(page.getByTestId("inbox-sidebar")).toBeInTheDocument();
+      expect(inboxSidebar?.checkVisibility()).toBe(true);
+      expect(projectTrigger?.checkVisibility()).toBe(false);
+      expect(wsRequests).toHaveLength(requestCountBeforeSwitch);
+      expect(useUiStateStore.getState().sidebarMode).toBe("inbox");
+
+      await page.getByRole("button", { name: "Sidebar mode: Inbox" }).click();
+      await page.getByRole("menuitem", { name: "Projects" }).click();
+      expect(useUiStateStore.getState().sidebarMode).toBe("projects");
+      expect(projectTrigger?.checkVisibility()).toBe(true);
+      expect(wsRequests).toHaveLength(requestCountBeforeSwitch);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens an Inbox row through its exact scoped route", async () => {
+    useUiStateStore.setState({ sidebarMode: "inbox" });
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-inbox-navigation" as MessageId,
+      targetText: "inbox navigation",
+    });
+    const sourceThread = snapshot.threads[0]!;
+    const inboxThreadId = "thread-inbox-target" as ThreadId;
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: {
+        ...snapshot,
+        threads: [
+          sourceThread,
+          {
+            ...sourceThread,
+            id: inboxThreadId,
+            title: "Inbox exact target",
+            createdAt: "2026-08-23T09:00:00.000Z",
+            updatedAt: "2026-08-23T11:00:00.000Z",
+          },
+        ],
+      },
+    });
+
+    try {
+      await page.getByRole("button", { name: /Inbox exact target/ }).click();
+      await vi.waitFor(() => {
+        expect(mounted.router.state.location.pathname).toBe(
+          `/${LOCAL_ENVIRONMENT_ID}/${inboxThreadId}`,
+        );
+      });
     } finally {
       await mounted.cleanup();
     }
@@ -6064,6 +6158,47 @@ describe("ChatView timeline estimator parity (full app)", () => {
         (path) => UUID_ROUTE_RE.test(path),
         "Route should have changed to a new draft thread UUID from the command palette.",
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("switches sidebar modes from command-palette actions", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-command-palette-sidebar-mode" as MessageId,
+        targetText: "command palette sidebar mode",
+      }),
+    });
+
+    try {
+      await openCommandPaletteFromTrigger();
+      const palette = page.getByTestId("command-palette");
+      await waitForWsRequestsToSettle();
+      const requestCountBeforeInboxSwitch = wsRequests.length;
+      await palette.getByText("Show Inbox sidebar", { exact: true }).click();
+
+      await vi.waitFor(() => expect(useUiStateStore.getState().sidebarMode).toBe("inbox"));
+      await expect.element(page.getByTestId("inbox-sidebar")).toBeInTheDocument();
+      expect(useCommandPaletteStore.getState().open).toBe(false);
+      expect(wsRequests).toHaveLength(requestCountBeforeInboxSwitch);
+
+      useCommandPaletteStore.getState().setOpen(true);
+      await waitForElement(
+        () => document.querySelector('[data-testid="command-palette"]'),
+        "Command palette should have reopened from Inbox mode.",
+      );
+      await waitForWsRequestsToSettle();
+      const requestCountBeforeProjectsSwitch = wsRequests.length;
+      await palette.getByText("Show Projects sidebar", { exact: true }).click();
+      await vi.waitFor(() => expect(useUiStateStore.getState().sidebarMode).toBe("projects"));
+      expect(
+        document
+          .querySelector<HTMLElement>('[data-testid="sidebar-add-project-trigger"]')
+          ?.checkVisibility(),
+      ).toBe(true);
+      expect(wsRequests).toHaveLength(requestCountBeforeProjectsSwitch);
     } finally {
       await mounted.cleanup();
     }

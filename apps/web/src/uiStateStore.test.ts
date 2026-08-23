@@ -19,6 +19,8 @@ import {
   renameProjectFolder,
   reorderProjects,
   reorderProjectTreeItem,
+  readPersistedState,
+  resolveSidebarModeForDocument,
   setAlwaysUseBuildMode,
   setDefaultAdvertisedEndpointKey,
   setProjectFolderExpanded,
@@ -37,6 +39,7 @@ import {
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
+    sidebarMode: "inbox",
     projectExpandedById: {},
     projectOrder: [],
     projectFoldersById: {},
@@ -76,6 +79,27 @@ function createLocalStorageStub(): Storage {
 }
 
 describe("uiStateStore pure functions", () => {
+  it("selects Inbox only for a genuinely fresh state document", () => {
+    expect(resolveSidebarModeForDocument({ documentFound: false, persistedMode: undefined })).toBe(
+      "inbox",
+    );
+  });
+
+  it("migrates an existing pre-feature state document to Projects", () => {
+    expect(resolveSidebarModeForDocument({ documentFound: true, persistedMode: undefined })).toBe(
+      "projects",
+    );
+  });
+
+  it("restores an explicit persisted sidebar mode", () => {
+    expect(resolveSidebarModeForDocument({ documentFound: true, persistedMode: "inbox" })).toBe(
+      "inbox",
+    );
+    expect(resolveSidebarModeForDocument({ documentFound: true, persistedMode: "projects" })).toBe(
+      "projects",
+    );
+  });
+
   it("markThreadVisited stores the provided server timestamp", () => {
     const threadId = ThreadId.make("thread-1");
     const initialState = makeUiState();
@@ -945,6 +969,19 @@ describe("uiStateStore persistence round-trip", () => {
     ) as PersistedUiState;
 
     expect(persisted.pinnedThreadKeys).toEqual([thread1]);
+  });
+
+  it("distinguishes fresh, migrated, and explicitly chosen sidebar modes", () => {
+    expect(readPersistedState().sidebarMode).toBe("inbox");
+
+    localStorageStub.setItem(PERSISTED_STATE_KEY, JSON.stringify({ projectOrderCwds: [] }));
+    expect(readPersistedState().sidebarMode).toBe("projects");
+
+    persistState(makeUiState({ sidebarMode: "inbox" }));
+    expect(readPersistedState().sidebarMode).toBe("inbox");
+
+    persistState(makeUiState({ sidebarMode: "projects" }));
+    expect(readPersistedState().sidebarMode).toBe("projects");
   });
 
   it("respects mixed expand state on rehydrate and defaults new projects to expanded", () => {

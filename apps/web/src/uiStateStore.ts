@@ -20,6 +20,18 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 const DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE = true;
 const DEFAULT_ALWAYS_USE_BUILD_MODE = false;
 
+export type SidebarMode = "inbox" | "projects";
+
+export function resolveSidebarModeForDocument(input: {
+  documentFound: boolean;
+  persistedMode: unknown;
+}): SidebarMode {
+  if (input.persistedMode === "inbox" || input.persistedMode === "projects") {
+    return input.persistedMode;
+  }
+  return input.documentFound ? "projects" : "inbox";
+}
+
 function sanitizeWideComposerControlsAutoCollapse(value: unknown): boolean {
   return typeof value === "boolean" ? value : DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE;
 }
@@ -29,6 +41,7 @@ function sanitizeAlwaysUseBuildMode(value: unknown): boolean {
 }
 
 export interface PersistedUiState {
+  sidebarMode?: SidebarMode;
   collapsedProjectCwds?: string[];
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
@@ -94,6 +107,7 @@ export interface UiEndpointState {
 }
 
 export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {
+  sidebarMode: SidebarMode;
   wideComposerControlsAutoCollapse: boolean;
   alwaysUseBuildMode: boolean;
 }
@@ -112,6 +126,7 @@ export interface SyncThreadInput {
 }
 
 const initialState: UiState = {
+  sidebarMode: "inbox",
   projectExpandedById: {},
   projectOrder: [],
   projectFoldersById: {},
@@ -401,8 +416,8 @@ function removeProjectKeysFromAllFolders(
   return changed ? Object.fromEntries(nextEntries) : foldersById;
 }
 
-function readPersistedState(): UiState {
-  if (typeof window === "undefined" || isHostedHubMode()) {
+export function readPersistedState(): UiState {
+  if (typeof window === "undefined") {
     return initialState;
   }
   try {
@@ -413,12 +428,22 @@ function readPersistedState(): UiState {
         if (!legacyRaw) {
           continue;
         }
-        hydratePersistedProjectState(JSON.parse(legacyRaw) as PersistedUiState);
-        return initialState;
+        const parsed = JSON.parse(legacyRaw) as PersistedUiState;
+        if (!isHostedHubMode()) {
+          hydratePersistedProjectState(parsed);
+        }
+        return { ...initialState, sidebarMode: "projects" };
       }
       return initialState;
     }
     const parsed = JSON.parse(raw) as PersistedUiState;
+    const sidebarMode = resolveSidebarModeForDocument({
+      documentFound: true,
+      persistedMode: parsed.sidebarMode,
+    });
+    if (isHostedHubMode()) {
+      return { ...initialState, sidebarMode };
+    }
     hydratePersistedProjectState(parsed);
     const projectFoldersById = sanitizeProjectFolders(parsed.projectFolders);
     const projectFolderOrder = sanitizeProjectFolderOrder(
@@ -427,6 +452,7 @@ function readPersistedState(): UiState {
     );
     return {
       ...initialState,
+      sidebarMode,
       projectFoldersById,
       projectFolderOrder,
       projectTreeOrder: sanitizeProjectTreeOrder(parsed.projectTreeOrder, projectFoldersById),
@@ -508,10 +534,17 @@ export function hydratePersistedProjectState(parsed: PersistedUiState): void {
 }
 
 export function persistState(state: UiState): void {
-  if (typeof window === "undefined" || isHostedHubMode()) {
+  if (typeof window === "undefined") {
     return;
   }
   try {
+    if (isHostedHubMode()) {
+      window.localStorage.setItem(
+        PERSISTED_STATE_KEY,
+        JSON.stringify({ sidebarMode: state.sidebarMode } satisfies PersistedUiState),
+      );
+      return;
+    }
     // Persist collapsed cwds explicitly so an empty/missing field unambiguously
     // means "first install" rather than "user collapsed everything"; without
     // this, the syncProjects fallback would re-expand all rows on next launch.
@@ -554,6 +587,7 @@ export function persistState(state: UiState): void {
     window.localStorage.setItem(
       PERSISTED_STATE_KEY,
       JSON.stringify({
+        sidebarMode: state.sidebarMode,
         collapsedProjectCwds,
         expandedProjectCwds,
         projectOrderCwds,
@@ -1484,6 +1518,7 @@ export function reorderProjectTreeItem(
 }
 
 interface UiStateStore extends UiState {
+  setSidebarMode: (mode: SidebarMode) => void;
   syncProjects: (projects: readonly SyncProjectInput[]) => void;
   syncThreads: (threads: readonly SyncThreadInput[]) => void;
   markThreadVisited: (threadId: string, visitedAt?: string) => void;
@@ -1528,6 +1563,7 @@ interface UiStateStore extends UiState {
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
   ...readPersistedState(),
+  setSidebarMode: (sidebarMode) => set({ sidebarMode }),
   syncProjects: (projects) => set((state) => syncProjects(state, projects)),
   syncThreads: (threads) => set((state) => syncThreads(state, threads)),
   markThreadVisited: (threadId, visitedAt) =>
