@@ -302,6 +302,27 @@ export const repairContextHandoffRuntimeSessions = Effect.fn("repairContextHando
   },
 );
 
+// Development worktrees can likewise share a database that already recorded
+// different migrations 044 through 047. Re-run these idempotent projection
+// migrations after the ledger pass so startup cannot query a partially migrated
+// read model.
+export const repairProjectionThreadReadModelMigrations = Effect.fn(
+  "repairProjectionThreadReadModelMigrations",
+)(function* (toMigrationInclusive: number) {
+  if (toMigrationInclusive >= 44) {
+    yield* Migration0044;
+  }
+  if (toMigrationInclusive >= 45) {
+    yield* Migration0045;
+  }
+  if (toMigrationInclusive >= 46) {
+    yield* Migration0046;
+  }
+  if (toMigrationInclusive >= 47) {
+    yield* Migration0047;
+  }
+});
+
 /**
  * Run all pending migrations.
  *
@@ -337,6 +358,9 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   }
   if (toMigrationInclusive === undefined || toMigrationInclusive >= 42) {
     yield* repairContextHandoffRuntimeSessions();
+  }
+  if (toMigrationInclusive === undefined || toMigrationInclusive >= 44) {
+    yield* repairProjectionThreadReadModelMigrations(toMigrationInclusive ?? 47);
   }
   yield* Effect.log("Migrations ran successfully").pipe(
     Effect.annotateLogs({
