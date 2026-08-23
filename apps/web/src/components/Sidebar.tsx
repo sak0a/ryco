@@ -25,6 +25,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@ryco/client-runtime/scoped";
+import { getWsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { isWorkspaceMetadataSnapshot } from "@ryco/client-runtime/state/workspace";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { usePrimaryEnvironmentId } from "../environments/primary";
@@ -99,7 +100,10 @@ import { SidebarChromeHeader, SidebarChromeFooter } from "./sidebar/SidebarChrom
 import { SidebarNewThreadButton } from "./sidebar/SidebarNewThreadButton";
 import { resolveNewThreadProjectKey } from "./sidebar/sidebarNewThreadTarget";
 import { InboxSidebar } from "./inboxSidebar/InboxSidebar";
-import type { InboxSidebarEnvironment } from "./inboxSidebar/inboxSidebarModel";
+import {
+  buildPrimaryInboxSidebarEnvironment,
+  type InboxSidebarEnvironment,
+} from "./inboxSidebar/inboxSidebarModel";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { derivePhysicalProjectKey, getProjectOrderKey } from "../logicalProject";
@@ -116,6 +120,7 @@ import {
 import { buildSidebarProjectFolderTree } from "../sidebarProjectFolders";
 import { useDesktopWorkspaceState } from "../platform/desktopWorkspace";
 import { useHostedWorkspaceState } from "../hostedHub/hostedConnectionCoordinator";
+import { useWsConnectionStatus } from "../rpc/wsConnectionState";
 
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
@@ -278,6 +283,8 @@ export default function Sidebar() {
   const shortcutModifiers = useShortcutModifierState();
   const modelPickerOpen = useModelPickerOpen();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryWsConnectionStatus = useWsConnectionStatus();
+  const primaryConnectionState = getWsConnectionUiState(primaryWsConnectionStatus);
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
   const desktopWorkspace = useDesktopWorkspaceState();
@@ -354,6 +361,18 @@ export default function Sidebar() {
 
     for (const environmentId of knownEnvironmentIds) {
       if (byEnvironmentId.has(environmentId)) continue;
+      if (primaryEnvironmentId !== null && environmentId === primaryEnvironmentId) {
+        byEnvironmentId.set(
+          environmentId,
+          buildPrimaryInboxSidebarEnvironment({
+            environmentId,
+            connectionState: primaryConnectionState,
+            hydratedFromCache:
+              environmentStateById[environmentId]?.hydratedFromCacheAt !== undefined,
+          }),
+        );
+        continue;
+      }
       const runtime = savedEnvironmentRuntimeById[environmentId];
       const saved = savedEnvironmentRegistry[environmentId];
       const cached = environmentStateById[environmentId]?.hydratedFromCacheAt !== undefined;
@@ -384,6 +403,8 @@ export default function Sidebar() {
     desktopWorkspace,
     environmentStateById,
     hostedWorkspace,
+    primaryConnectionState,
+    primaryEnvironmentId,
     projects,
     savedEnvironmentRegistry,
     savedEnvironmentRuntimeById,

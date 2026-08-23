@@ -4,6 +4,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@ryco/client-runtime/scoped";
+import type { WsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { PROVIDER_OPTIONS } from "@ryco/client-runtime/state/session";
 import type {
   Project,
@@ -78,6 +79,26 @@ export interface BuildInboxSidebarInput {
   readonly environments: ReadonlyArray<InboxSidebarEnvironment>;
   readonly filters: InboxSidebarFilters;
   readonly deliveryUnknownThreadKeys?: ReadonlySet<string>;
+}
+
+export function buildPrimaryInboxSidebarEnvironment(input: {
+  readonly environmentId: EnvironmentId;
+  readonly connectionState: WsConnectionUiState;
+  readonly hydratedFromCache: boolean;
+}): InboxSidebarEnvironment {
+  const connectionState =
+    input.connectionState === "error" ? "reconnecting" : input.connectionState;
+  const stale = input.hydratedFromCache || connectionState === "offline";
+  return {
+    environmentId: input.environmentId,
+    label: "This device",
+    connectionState,
+    stale,
+    ...(stale ? { staleDetail: "Offline · last known" } : {}),
+    role: "owner",
+    trust: "not-required",
+    deliveryUnknown: false,
+  };
 }
 
 const ACTIVE_PRIORITY: Readonly<
