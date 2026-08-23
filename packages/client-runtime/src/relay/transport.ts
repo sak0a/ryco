@@ -161,7 +161,35 @@ function defaultBinding(): HostedRelayAttemptBinding {
     role: (generation, role) => hostedHubController.role(generation, role),
     failure: (generation, failure) => hostedHubController.failure(generation, failure),
     markDeliveryUnknown: (generation) => hostedHubController.markDeliveryUnknown(generation),
-    connectionClosed: (generation) => hostedHubController.connectionClosed(generation),
+    connectionClosed: (generation) => {
+      hostedHubController.connectionClosed(generation);
+      const state = hostedHubStore.getState();
+      if (
+        state.generation !== generation ||
+        state.accountStatus !== "authenticated" ||
+        state.directoryStatus !== "ready" ||
+        state.browserStatus !== "current" ||
+        state.selectedNode === null ||
+        state.transportStatus === "terminal-failure"
+      ) {
+        return;
+      }
+      // A replacement relay socket is not enough: the RPC subscriptions that
+      // ended with the old channel belong to that client session. Re-enter the
+      // authoritative selected-node lifecycle so it disposes the old client,
+      // advances the generation, and creates every subscription afresh. Its
+      // generation bump also stops this attempt factory's internal retry from
+      // racing the replacement client.
+      getHostedRuntimeConfiguration().timers.queueMicrotask(() => {
+        const current = hostedHubStore.getState();
+        if (
+          current.generation === generation &&
+          current.selectedNode?.id === state.selectedNode?.id
+        ) {
+          void hostedHubController.retrySelectedNode();
+        }
+      });
+    },
   };
 }
 

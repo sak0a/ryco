@@ -230,6 +230,30 @@ describe("HostedRelayAttemptFactory", () => {
     expect(lifecycle.authorizeRequest?.(dispatch)).toBe(false);
   });
 
+  it("re-enters the selected-node lifecycle after a live socket closes", async () => {
+    vi.spyOn(hostedHubApi, "issueRelayTicket").mockResolvedValue({
+      ticket: encodeBase64Url(new Uint8Array(32).fill(10)),
+      expiresAt: Date.now() + 60_000,
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+    const retrySelectedNode = vi
+      .spyOn(hostedHubController, "retrySelectedNode")
+      .mockResolvedValue(undefined);
+    hostedHubStore.setState({
+      nodes: [selectedNode],
+      browserStatus: "current",
+      sessionStatus: "ready",
+      transportStatus: "online",
+    });
+    const factory = new HostedRelayAttemptFactory();
+    const lifecycle = factory.lifecycleHandlers();
+    factory.createSocket(await factory.nextUrl());
+
+    lifecycle.onClose?.({ code: 4000, reason: "network" }, { intentional: false });
+    await vi.waitFor(() => expect(retrySelectedNode).toHaveBeenCalledOnce());
+  });
+
   it("denies RPCs at the transport boundary until browser recovery is complete", () => {
     const lifecycle = new HostedRelayAttemptFactory().lifecycleHandlers();
     const dispatch = {
