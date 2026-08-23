@@ -711,6 +711,10 @@ function createEnvironmentConnectionHandlers(hostedGeneration: number | null = n
   const acceptsEvent = () =>
     hostedGeneration === null || useHostedHubStore.getState().generation === hostedGeneration;
   return {
+    resetShellProjection: (environmentId: EnvironmentId) => {
+      if (!acceptsEvent()) return;
+      getEnvironmentSupervisor().resetShellProjection(environmentId);
+    },
     applyShellEvent: (event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) => {
       if (!acceptsEvent()) return;
       getEnvironmentSupervisor().applyShellEvent(event, environmentId);

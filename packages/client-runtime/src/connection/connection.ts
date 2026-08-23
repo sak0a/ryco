@@ -28,6 +28,12 @@ export interface EnvironmentConnection {
 }
 
 export interface OrchestrationHandlers {
+  /**
+   * Forget the previous stream's sequence baseline before accepting the first
+   * authoritative snapshot from a replacement subscription. Node processes
+   * may restart their in-memory projection sequence at a lower value.
+   */
+  readonly resetShellProjection: (environmentId: EnvironmentId) => void;
   readonly applyShellEvent: (
     event: OrchestrationShellStreamEvent,
     environmentId: EnvironmentId,
@@ -137,6 +143,7 @@ export function createEnvironmentConnection(
       onResubscribe: () => {
         if (disposed) return;
         bootstrapGate.reset();
+        input.resetShellProjection(environmentId);
         input.onResubscribe?.(environmentId);
       },
       onError: () => {

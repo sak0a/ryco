@@ -315,6 +315,7 @@ export function createMobileEnvironmentDriver(
       },
       client,
       pushSequenceMonitor: noopPushSequenceMonitor,
+      resetShellProjection: (environmentId) => getSupervisor().resetShellProjection(environmentId),
       applyShellEvent: (event, environmentId) =>
         getSupervisor().applyShellEvent(event, environmentId),
       syncShellSnapshot: (snapshot, environmentId) =>
@@ -358,6 +359,8 @@ export function createMobileEnvironmentDriver(
     createPrimaryConnection: () =>
       createHostedPrimaryConnection({
         pushSequenceMonitor: noopPushSequenceMonitor,
+        resetShellProjection: (environmentId) =>
+          getSupervisor().resetShellProjection(environmentId),
         applyShellEvent: (event, environmentId) =>
           getSupervisor().applyShellEvent(event, environmentId),
         syncShellSnapshot: (snapshot, environmentId, callbacks) =>

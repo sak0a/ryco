@@ -176,6 +176,7 @@ describe("createEnvironmentConnection", () => {
         environmentId,
       },
       client,
+      resetShellProjection: vi.fn(),
       applyShellEvent: vi.fn(),
       syncShellSnapshot,
       applyTerminalEvent: vi.fn(),
@@ -209,6 +210,7 @@ describe("createEnvironmentConnection", () => {
         environmentId,
       },
       client,
+      resetShellProjection: vi.fn(),
       applyShellEvent: vi.fn(),
       syncShellSnapshot: vi.fn(),
       applyTerminalEvent: vi.fn(),
@@ -243,6 +245,7 @@ describe("createEnvironmentConnection", () => {
         environmentId,
       },
       client,
+      resetShellProjection: vi.fn(),
       applyShellEvent: vi.fn(),
       syncShellSnapshot: vi.fn(),
       applyTerminalEvent: vi.fn(),
@@ -259,6 +262,7 @@ describe("createEnvironmentConnection", () => {
     const environmentId = EnvironmentId.make("env-1");
     const { client, emitShellSnapshot } = createTestClient();
     const syncShellSnapshot = vi.fn();
+    const resetShellProjection = vi.fn();
 
     const connection = createEnvironmentConnection({
       kind: "saved",
@@ -273,6 +277,7 @@ describe("createEnvironmentConnection", () => {
         environmentId,
       },
       client,
+      resetShellProjection,
       applyShellEvent: vi.fn(),
       syncShellSnapshot,
       applyTerminalEvent: vi.fn(),
@@ -283,6 +288,7 @@ describe("createEnvironmentConnection", () => {
     const reconnectPromise = connection.reconnect();
     await Promise.resolve();
     expect(syncShellSnapshot).toHaveBeenCalledTimes(1);
+    expect(resetShellProjection).toHaveBeenCalledWith(environmentId);
 
     emitShellSnapshot(2);
     await reconnectPromise;
@@ -314,6 +320,7 @@ describe("createEnvironmentConnection", () => {
         environmentId,
       },
       client,
+      resetShellProjection: vi.fn(),
       applyShellEvent: vi.fn(),
       syncShellSnapshot: vi.fn(),
       applyTerminalEvent: vi.fn(),
