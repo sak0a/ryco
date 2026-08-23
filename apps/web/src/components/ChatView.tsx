@@ -469,7 +469,7 @@ export default function ChatView(props: ChatViewProps) {
       [routeKind, routeThreadRef],
     ),
   );
-  const setStoreThreadError = useStore((store) => store.setError);
+  const setStoreThreadError = useStore((store) => store.setThreadError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const alwaysUseBuildMode = useUiStateStore((store) => store.alwaysUseBuildMode);
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
@@ -735,7 +735,7 @@ export default function ChatView(props: ChatViewProps) {
         targetThreadId,
       });
       if (isCurrentServerThread) {
-        setStoreThreadError(targetThreadId, nextError);
+        setStoreThreadError(routeThreadRef, nextError);
         return;
       }
       const localDraftErrorKey = draftId ?? targetThreadId;

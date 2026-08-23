@@ -2,10 +2,11 @@
 
 Ryco's web application has an explicit `hosted-hub` mode for interoperating with a compatible Hub.
 It is the same React client, RPC client, stores, and feature UI used by direct-browser and desktop
-sessions. Hub mode changes authentication, node selection, the WebSocket transport, and the payload
-encryption layer carried inside that transport; the selected Ryco node remains authoritative for
-projects, files, terminals, conversations, providers, orchestration, attachments, approvals, and
-relay payloads.
+sessions. Hub mode changes authentication, scoped node acquisition, the WebSocket transport, and the payload
+encryption layer carried inside that transport. The client presents cached work from every eligible
+browser-accessible node as one [unified workspace](./unified-workspace.md); each Ryco node remains
+authoritative for the physical projects, files, terminals, conversations, providers, orchestration,
+attachments, approvals, and relay payloads it owns.
 
 Sameness of client ends at that encryption layer, and this is the one place the difference matters.
 The browser runs the **unsigned ephemeral** tier of
@@ -63,7 +64,7 @@ browser storage. One-time recovery codes are memory-only and are cleared when di
 
 Only the CSRF value is readable by client code, and it is kept in memory. Sign-out uses the existing
 session-bound logout endpoint. A `401` or `session_invalid` result clears account, role, node,
-transport, and Ryco-session state before closing the selected channel. Duplicate or cancelled
+transport, and Ryco-session state before closing every live environment channel. Duplicate or cancelled
 ceremonies abort the earlier browser operation. Denial, malformed options/responses, expired
 challenges, revoked sessions, and network loss surface bounded messages that do not reflect response
 bodies.
@@ -72,14 +73,14 @@ bodies.
 
 Hosted mode deliberately does not expose one ambiguous `connected` flag.
 
-| Model            | States                                                                                                                 |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Account          | signed out, authenticating, authenticated, signing out, session expired, unavailable                                   |
-| Directory        | idle, loading, ready, stale                                                                                            |
-| Selection        | no selection, online, offline, incompatible, revoked, authorization removed                                            |
-| Relay transport  | idle, requesting ticket, connecting, authenticating, opening channel, online, reconnecting, draining, terminal failure |
-| Ryco session     | synchronizing, ready, stale, replaying, delivery unknown, closed                                                       |
-| Relay encryption | no channel, negotiating, browser-encrypted (unsigned ephemeral), legacy plaintext                                      |
+| Model                           | States                                                                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Account                         | signed out, authenticating, authenticated, signing out, session expired, unavailable                                   |
+| Directory                       | idle, loading, ready, stale                                                                                            |
+| Per-machine directory state     | online, offline, incompatible, revoked, authorization removed, native-only locked                                      |
+| Per-environment relay transport | idle, requesting ticket, connecting, authenticating, opening channel, online, reconnecting, draining, terminal failure |
+| Per-environment Ryco session    | synchronizing, ready, stale, replaying, delivery unknown, closed                                                       |
+| Relay encryption                | no channel, negotiating, browser-encrypted (unsigned ephemeral), legacy plaintext                                      |
 
 Relay encryption is a property of one channel and never of a node, an account, or a tab: it is
 republished as negotiating when a channel begins and dropped when that channel ends, so a state one
@@ -92,10 +93,10 @@ report them even by mistake.
 
 Directory refresh runs on a bounded 20-second visible-page cadence. Failures retain the last bounded
 directory as stale, clear role authority, disable selection/actions, and retry with a capped delay.
-Selection is preserved only while both node ID and environment ID match. Authorization removal or an
-identity change clears it.
+Machine-detail focus is preserved only while both node ID and environment ID match. Authorization
+removal or an identity change closes that exact environment's live demand.
 
-## Directory, roles, and switching nodes
+## Directory, roles, and environment demand
 
 The selector renders only the Hub's authorized directory response. It shows online/offline presence
 and the effective Viewer, Operator, or Owner role. Revocation, authorization removal, and version
@@ -114,20 +115,28 @@ and Owner can use owner-only configuration/statistics APIs. Missing or stale rol
 The server remains authoritative, including for legacy RPC aliases and `direct_owner` APIs that are
 never available through Hub relay sessions.
 
-Switching nodes performs an ordered teardown before connecting the replacement:
+Opening mounted work creates an exact-environment scope. Releasing that work removes only its own
+scope; it does not globally tear down another retained environment. When capacity requires an
+environment to close, teardown is ordered:
 
 1. cancel ticket/reconnect work and close the previous relay channel;
 2. unsubscribe shell, thread-detail, lifecycle, config, and terminal listeners;
 3. clear request queues, terminal references, drafts, pending actions, UI selections, query/Atom
    caches, timers, and the previous environment projection;
-4. install the new environment descriptor and start one new connection generation.
+4. start any queued replacement as a new environment generation.
+
+Hosted Web keeps the shared absolute ceiling of three but uses a qualified platform ceiling of one.
+Cached directory, Inbox, Projects, and search hydration acquire no relay connection. A mounted
+thread detail, VCS status, or provider status scope acquires its owner automatically. Excess demand
+waits without evicting retained work or exceeding the bound. Hiding the page releases non-retained
+connections; restoring visibility reconnects retained demand only.
 
 Tabs do not share tickets, sockets, queues, reconnect timers, or store instances. Closing a hosted
 channel cannot close direct clients or another tab.
 
 ## Stable node routes
 
-The selected node is a stable URL segment: hosted browser URLs take the shape
+The owning node is a stable URL segment: hosted browser URLs take the shape
 `/node/<node id>` for the node root and `/node/<node id>/<environmentId>/<threadId>` (plus the
 existing panel search parameters) for nested views. The segment value is the bounded node
 identifier the authorized directory already renders to signed-in users — directory metadata, never
@@ -160,12 +169,12 @@ Absent, revoked, unauthorized, removed, offline, or incompatible routed nodes an
 segments fail closed to the node directory with a bounded explanation. A signed-out or expired
 session shows the normal passkey surface; the routed node resumes only after re-authentication and
 revalidation. Back and Forward navigate between the directory and selected-node views: returning
-to the directory tears down exactly the browser relay session using the switching-nodes order
-above, and Forward re-enters through the restore pipeline with a fresh ticket. Legacy hosted URLs
+to the directory releases exactly that route's scope. A non-retained connection may remain warm as
+LRU state until backgrounding or capacity requires its slot; unrelated retained work is unchanged.
+Forward re-enters through the restore pipeline with a fresh ticket when acquisition is required. Legacy hosted URLs
 without the node segment redirect to the node-scoped shape when the directory can identify the
 node, otherwise to the directory. No session, ticket, credential, challenge, or signature material
-appears in URLs, history state, or browser storage, and node selection is never persisted outside
-the URL itself.
+appears in URLs, history state, or browser storage.
 
 ## Relay transport and ticket custody
 
@@ -404,7 +413,8 @@ it cannot show; on a phone, use the Ryco mobile app.
 
 ## Reconnect, replay, and delivery uncertainty
 
-One selected node has at most one active connection attempt in a tab. Reconnect uses exponential
+Each demanded environment has at most one active connection attempt in a tab, and the hosted Web
+platform ceiling permits only one active environment. Reconnect uses exponential
 backoff from one second to 60 seconds with bounded ±20% jitter and bounded Hub `retryAfterMs` input.
 The delay resets only after a session remains stable for 60 seconds. Every retry obtains a fresh
 ticket.
@@ -429,7 +439,7 @@ authoritative replay finishes, the user can explicitly acknowledge the warning.
 
 ## Browser capability adaptation
 
-Hosted mode keeps the shared feature UI and uses the selected node's RPC capabilities:
+Hosted mode keeps the shared feature UI and uses each routed environment's RPC capabilities:
 
 - terminal input/resize, approvals, remote project/filesystem operations, source control, and
   attachment uploads continue over RPC when allowed by role;
@@ -536,7 +546,8 @@ remain server-enforced.
 
 - **Passkey unavailable or rejected:** verify the page origin is inside the Hub's configured RP ID
   and public-origin policy, then restart the ceremony. Do not relax RP ID or Origin validation.
-- **Session expired:** sign in again. The client intentionally discards the selected node and role.
+- **Session expired:** sign in again. The client intentionally discards live environment demand and
+  role authority.
 - **Directory is stale:** restore Hub HTTP reachability and use Refresh. Actions remain disabled
   until a fresh authorized response arrives.
 - **Node offline:** confirm the node's outbound Hub connector is enrolled and online. The client will

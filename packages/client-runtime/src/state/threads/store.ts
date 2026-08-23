@@ -2750,7 +2750,21 @@ export function selectSidebarThreadsForProjectRefs(
 }
 
 export function selectBootstrapCompleteForActiveEnvironment(state: AppState): boolean {
-  return selectEnvironmentState(state, state.activeEnvironmentId).bootstrapComplete;
+  return selectBootstrapCompleteForEnvironment(state, state.activeEnvironmentId);
+}
+
+/**
+ * Read shell readiness for an exact environment.
+ *
+ * The active-environment selector above remains a presentation compatibility
+ * helper. Delivery and mutation gates must use this scoped form so another
+ * connection becoming active cannot make an unrelated environment look live.
+ */
+export function selectBootstrapCompleteForEnvironment(
+  state: AppState,
+  environmentId: EnvironmentId | null | undefined,
+): boolean {
+  return selectEnvironmentState(state, environmentId).bootstrapComplete;
 }
 
 export function selectProjectByRef(
@@ -2799,20 +2813,20 @@ export function selectThreadIdsByProjectRef(
     : EMPTY_THREAD_IDS;
 }
 
-export function setError(state: AppState, threadId: ThreadId, error: string | null): AppState {
-  if (state.activeEnvironmentId === null) {
-    return state;
-  }
-
+export function setThreadError(
+  state: AppState,
+  threadRef: ScopedThreadRef,
+  error: string | null,
+): AppState {
   const nextEnvironmentState = updateThreadState(
-    getStoredEnvironmentState(state, state.activeEnvironmentId),
-    threadId,
+    getStoredEnvironmentState(state, threadRef.environmentId),
+    threadRef.threadId,
     (thread) => {
       if (thread.error === error) return thread;
       return { ...thread, error };
     },
   );
-  return commitEnvironmentState(state, state.activeEnvironmentId, nextEnvironmentState);
+  return commitEnvironmentState(state, threadRef.environmentId, nextEnvironmentState);
 }
 
 export function applyOrchestrationEvent(
@@ -3178,7 +3192,7 @@ interface AppStore extends AppState {
   ) => void;
   applyShellEvent: (event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) => void;
   removeThread: (threadRef: ScopedThreadRef) => void;
-  setError: (threadId: ThreadId, error: string | null) => void;
+  setThreadError: (threadRef: ScopedThreadRef, error: string | null) => void;
   setThreadBranch: (
     threadRef: ScopedThreadRef,
     branch: string | null,
@@ -3251,9 +3265,9 @@ export const useStore = create<AppStore>((set, get) => {
       shellCoalescer.flush();
       set((state) => removeThreadByRef(state, threadRef));
     },
-    setError: (threadId, error) => {
+    setThreadError: (threadRef, error) => {
       shellCoalescer.flush();
-      set((state) => setError(state, threadId, error));
+      set((state) => setThreadError(state, threadRef, error));
     },
     setThreadBranch: (threadRef, branch, worktreePath) => {
       shellCoalescer.flush();

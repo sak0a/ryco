@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { hostedState } from "../features/home/homeEnvironmentModel";
 import {
+  deriveWorkspaceShellSummary,
   hostedWorkspacePhase,
   mergeWorkspaceEnvironments,
   projectWorkspaceState,
@@ -69,6 +70,22 @@ describe("mergeWorkspaceEnvironments", () => {
     );
     expect(merged).toHaveLength(1);
     expect(merged[0]?.connectionState).toBe("connected");
+  });
+});
+
+describe("deriveWorkspaceShellSummary", () => {
+  it("keeps readiness scoped when another environment is active and settled", () => {
+    const environments = [environment(DIRECT, "connected"), environment(NODE, "connected")];
+    const complete = new Set<EnvironmentId>([NODE]);
+
+    expect(
+      deriveWorkspaceShellSummary(environments, (environmentId) => complete.has(environmentId)),
+    ).toEqual({
+      hasSnapshot: true,
+      hasSynchronizingShell: true,
+      firstError: null,
+      latestSnapshotUpdatedAt: null,
+    });
   });
 });
 
