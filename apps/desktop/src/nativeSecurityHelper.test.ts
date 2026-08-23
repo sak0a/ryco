@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   DesktopNativeSecurityError,
   DesktopNativeSecurityHelper,
+  desktopNativeInstallationNamespace,
   desktopNativeSecurityNamespace,
   resolveDesktopNativeSecurityHelperPath,
   type DesktopNativeSecretStore,
@@ -56,6 +57,18 @@ describe("Desktop native security helper", () => {
         moduleDirectory: "/ignored",
       }),
     ).toBe("/Applications/Ryco.app/Contents/Resources/ryco-desktop-security-helper");
+  });
+
+  it("isolates development and preview records while preserving the production namespace", () => {
+    const legacyProductionNamespace = desktopNativeSecurityNamespace(
+      "ryco.desktop.installation.v1",
+    );
+    expect(desktopNativeInstallationNamespace("production")).toBe(legacyProductionNamespace);
+    expect(desktopNativeInstallationNamespace("development")).not.toBe(legacyProductionNamespace);
+    expect(desktopNativeInstallationNamespace("preview")).not.toBe(legacyProductionNamespace);
+    expect(desktopNativeInstallationNamespace("development")).not.toBe(
+      desktopNativeInstallationNamespace("preview"),
+    );
   });
 
   it("keeps signing hardware-backed and converts the native DER signature", async () => {
