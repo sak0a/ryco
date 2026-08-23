@@ -234,6 +234,32 @@ export function installHostedNodeHistory(win: Window & typeof globalThis = windo
     },
     createHref: (href) => buildHostedNodeHref(href, routedHostedNode.nodeId),
   });
+  // `createBrowserHistory` intentionally keeps PUSH/REPLACE locations logical
+  // in memory and only calls `parseLocation` for native history events. A
+  // normal router navigation can therefore write a correctly node-prefixed
+  // browser URL without publishing that node to the route orchestrator. The
+  // URL looks right, but no thread scope is retained and no relay connection
+  // starts until a reload reparses the physical URL.
+  //
+  // Publish accepted logical navigations from the history notification. This
+  // runs after blockers have allowed the transition, while the authorized
+  // environment resolver still produces the exact physical href queued by
+  // `createBrowserHistory`. POP navigation continues to publish through
+  // `parseLocation` above.
+  const unsubscribeLogicalNavigation = history.subscribe(({ location, action }) => {
+    if (action.type !== "PUSH" && action.type !== "REPLACE") return;
+    const browserHref = buildHostedNodeHref(location.href, routedHostedNode.nodeId);
+    const parsed = parseHostedNodeHref(browserHref);
+    publishRoutedHostedNode({
+      ...parsed.routed,
+      logicalPathname: logicalPathnameOf(parsed.logicalHref),
+    });
+  });
+  const destroyHistory = history.destroy.bind(history);
+  history.destroy = () => {
+    unsubscribeLogicalNavigation();
+    destroyHistory();
+  };
   installedHistory = history;
   return history;
 }

@@ -323,7 +323,7 @@ export default function Sidebar() {
                 ? "reconnecting"
                 : machine.connectionState === "connecting"
                   ? "connecting"
-                  : "offline",
+                  : "idle",
           stale,
           ...(stale ? { staleDetail: "Offline · last known" } : {}),
           role: machine.effectiveRole,
@@ -349,7 +349,7 @@ export default function Sidebar() {
                 ? "reconnecting"
                 : machine.connectionState === "connecting"
                   ? "connecting"
-                  : "offline",
+                  : "idle",
           stale,
           ...(stale ? { staleDetail: "Offline · last known" } : {}),
           role: null,
