@@ -12,7 +12,12 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { type DesktopUpdateState, ProjectId, type ScopedThreadRef } from "@ryco/contracts";
+import {
+  type DesktopUpdateState,
+  type EnvironmentId,
+  ProjectId,
+  type ScopedThreadRef,
+} from "@ryco/contracts";
 import {
   parseScopedThreadKey,
   scopedProjectKey,
@@ -20,6 +25,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@ryco/client-runtime/scoped";
+import { isWorkspaceMetadataSnapshot } from "@ryco/client-runtime/state/workspace";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
@@ -36,6 +42,7 @@ import {
   parseProjectTreeItemId,
   projectFolderTreeItemId,
   projectTreeItemId,
+  type SidebarMode,
   type UiProjectTreeItemId,
   useUiStateStore,
 } from "../uiStateStore";
@@ -91,6 +98,8 @@ import { SidebarProjectDialogProvider } from "./sidebar/SidebarProjectDialogOwne
 import { SidebarChromeHeader, SidebarChromeFooter } from "./sidebar/SidebarChrome";
 import { SidebarNewThreadButton } from "./sidebar/SidebarNewThreadButton";
 import { resolveNewThreadProjectKey } from "./sidebar/sidebarNewThreadTarget";
+import { InboxSidebar } from "./inboxSidebar/InboxSidebar";
+import type { InboxSidebarEnvironment } from "./inboxSidebar/inboxSidebarModel";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { derivePhysicalProjectKey, getProjectOrderKey } from "../logicalProject";
@@ -105,6 +114,9 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { buildSidebarProjectFolderTree } from "../sidebarProjectFolders";
+import { useDesktopWorkspaceState } from "../platform/desktopWorkspace";
+import { useHostedWorkspaceState } from "../hostedHub/hostedConnectionCoordinator";
+
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
@@ -195,6 +207,9 @@ export default function Sidebar() {
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const sidebarThreads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
   const sidebarWorktrees = useStore(useShallow(selectSidebarWorktreesAcrossEnvironments));
+  const environmentStateById = useStore((state) => state.environmentStateById);
+  const sidebarMode = useUiStateStore((store) => store.sidebarMode);
+  const setSidebarMode = useUiStateStore((store) => store.setSidebarMode);
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const projectFoldersById = useUiStateStore((store) => store.projectFoldersById);
@@ -216,7 +231,7 @@ export default function Sidebar() {
   const { updateSettings } = useUpdateSettings();
   const { handleNewThread } = useNewThreadHandler();
   const { archiveThread, deleteThread } = useThreadActions();
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpen, setOpenMobile } = useSidebar();
   const pinnedThreadKeys = useMemo(
     () =>
       new Set(
@@ -265,6 +280,132 @@ export default function Sidebar() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
+  const desktopWorkspace = useDesktopWorkspaceState();
+  const hostedWorkspace = useHostedWorkspaceState();
+  const handleSidebarModeChange = useCallback(
+    (mode: SidebarMode) => {
+      setOpen(true);
+      if (mode === sidebarMode) return;
+      clearSelection();
+      setSidebarMode(mode);
+    },
+    [clearSelection, setOpen, setSidebarMode, sidebarMode],
+  );
+  const inboxEnvironments = useMemo<ReadonlyArray<InboxSidebarEnvironment>>(() => {
+    const knownEnvironmentIds = new Set<EnvironmentId>();
+    for (const project of projects) knownEnvironmentIds.add(project.environmentId);
+    for (const thread of sidebarThreads) knownEnvironmentIds.add(thread.environmentId);
+    for (const environmentId of Object.keys(savedEnvironmentRegistry) as EnvironmentId[]) {
+      knownEnvironmentIds.add(environmentId);
+    }
+    const byEnvironmentId = new Map<EnvironmentId, InboxSidebarEnvironment>();
+
+    if (hostedWorkspace.status !== "signed-out") {
+      for (const machine of hostedWorkspace.machines) {
+        knownEnvironmentIds.add(machine.environmentId);
+        const queued = hostedWorkspace.demand.queuedEnvironmentIds.includes(machine.environmentId);
+        const stale = !machine.presence.online || machine.cacheDisposition !== "available";
+        byEnvironmentId.set(machine.environmentId, {
+          environmentId: machine.environmentId,
+          label: machine.label,
+          connectionState: !machine.presence.online
+            ? "offline"
+            : machine.connectionState === "connected"
+              ? "connected"
+              : queued
+                ? "reconnecting"
+                : machine.connectionState === "connecting"
+                  ? "connecting"
+                  : "offline",
+          stale,
+          ...(stale ? { staleDetail: "Offline · last known" } : {}),
+          role: machine.effectiveRole,
+          trust: machine.nativeTrust,
+          deliveryUnknown: machine.deliveryUnknown,
+        });
+      }
+    } else if (desktopWorkspace.status !== "signed-out") {
+      for (const machine of desktopWorkspace.machines) {
+        knownEnvironmentIds.add(machine.environmentId);
+        const queued = desktopWorkspace.queuedEnvironmentIds.includes(machine.environmentId);
+        const stale =
+          !machine.online ||
+          environmentStateById[machine.environmentId]?.hydratedFromCacheAt !== undefined;
+        byEnvironmentId.set(machine.environmentId, {
+          environmentId: machine.environmentId,
+          label: machine.label,
+          connectionState: !machine.online
+            ? "offline"
+            : machine.connectionState === "connected"
+              ? "connected"
+              : queued
+                ? "reconnecting"
+                : machine.connectionState === "connecting"
+                  ? "connecting"
+                  : "offline",
+          stale,
+          ...(stale ? { staleDetail: "Offline · last known" } : {}),
+          role: null,
+          trust: machine.nativeTrust,
+          deliveryUnknown: false,
+        });
+      }
+    }
+
+    for (const environmentId of knownEnvironmentIds) {
+      if (byEnvironmentId.has(environmentId)) continue;
+      const runtime = savedEnvironmentRuntimeById[environmentId];
+      const saved = savedEnvironmentRegistry[environmentId];
+      const cached = environmentStateById[environmentId]?.hydratedFromCacheAt !== undefined;
+      const connectionState = runtime?.connectionState ?? "disconnected";
+      const stale = cached || connectionState !== "connected";
+      byEnvironmentId.set(environmentId, {
+        environmentId,
+        label: runtime?.descriptor?.label ?? saved?.label ?? environmentId,
+        connectionState:
+          connectionState === "connected"
+            ? "connected"
+            : connectionState === "connecting"
+              ? "connecting"
+              : connectionState === "error"
+                ? "reconnecting"
+                : "offline",
+        stale,
+        ...(stale ? { staleDetail: "Offline · last known" } : {}),
+        role: runtime?.role ?? null,
+        trust: "unknown",
+        deliveryUnknown: false,
+      });
+    }
+    return [...byEnvironmentId.values()].toSorted((left, right) =>
+      left.label.localeCompare(right.label),
+    );
+  }, [
+    desktopWorkspace,
+    environmentStateById,
+    hostedWorkspace,
+    projects,
+    savedEnvironmentRegistry,
+    savedEnvironmentRuntimeById,
+    sidebarThreads,
+  ]);
+  const deliveryUnknownThreadKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const thread of hostedWorkspace.workspace.threads) {
+      if (thread.deliveryUnknown) {
+        keys.add(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)));
+      }
+    }
+    for (const projection of desktopWorkspace.snapshots) {
+      if (!isWorkspaceMetadataSnapshot(projection, projection.environmentId)) continue;
+      for (const thread of projection.threads) {
+        if (thread.deliveryUnknown) {
+          keys.add(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)));
+        }
+      }
+    }
+    return keys;
+  }, [desktopWorkspace.snapshots, hostedWorkspace.workspace.threads]);
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -858,6 +999,12 @@ export default function Sidebar() {
         platform,
         context: shortcutContext,
       });
+      if (command === "sidebar.showInbox" || command === "sidebar.showProjects") {
+        event.preventDefault();
+        event.stopPropagation();
+        handleSidebarModeChange(command === "sidebar.showInbox" ? "inbox" : "projects");
+        return;
+      }
       const traversalDirection = threadTraversalDirectionFromCommand(command);
       if (traversalDirection !== null) {
         const targetThreadKey = resolveAdjacentThreadId({
@@ -905,6 +1052,7 @@ export default function Sidebar() {
     };
   }, [
     getCurrentSidebarShortcutContext,
+    handleSidebarModeChange,
     keybindings,
     navigateToThread,
     orderedSidebarThreadKeys,
@@ -1081,7 +1229,11 @@ export default function Sidebar() {
 
   return (
     <>
-      <SidebarChromeHeader isElectron={isElectron} />
+      <SidebarChromeHeader
+        isElectron={isElectron}
+        mode={sidebarMode}
+        onModeChange={handleSidebarModeChange}
+      />
 
       <SidebarNewThreadButton
         shortcutLabel={newThreadShortcutLabel}
@@ -1089,56 +1241,77 @@ export default function Sidebar() {
         onClick={startNewThreadFromSidebar}
       />
 
-      <SidebarProjectDialogProvider
-        projectGroupingSettings={projectGroupingSettings}
-        updateSettings={updateSettings}
-        navigateToThread={navigateToThread}
+      <div
+        aria-hidden={sidebarMode !== "projects"}
+        className={sidebarMode === "projects" ? "contents" : "hidden"}
+        inert={sidebarMode !== "projects"}
       >
-        <SidebarProjectsContent
-          showArm64IntelBuildWarning={showArm64IntelBuildWarning}
-          arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
-          desktopUpdateButtonAction={desktopUpdateButtonAction}
-          desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
-          handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
-          projectSortOrder={sidebarProjectSortOrder}
-          threadSortOrder={sidebarThreadSortOrder}
-          projectGroupingMode={sidebarProjectGroupingMode}
+        <SidebarProjectDialogProvider
+          projectGroupingSettings={projectGroupingSettings}
           updateSettings={updateSettings}
-          openAddProject={openAddProjectCommandPalette}
-          isManualProjectSorting={isManualProjectSorting}
-          projectDnDSensors={projectDnDSensors}
-          projectCollisionDetection={projectCollisionDetection}
-          handleProjectDragStart={handleProjectDragStart}
-          handleProjectDragEnd={handleProjectDragEnd}
-          handleProjectDragCancel={handleProjectDragCancel}
-          projectTreeRows={projectTreeRows}
-          commandPaletteShortcutLabel={commandPaletteShortcutLabel}
-          attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
-          projectsLength={projects.length}
-          renderProjectRow={(project, dragHandleProps, onNewFolderWithProject) => (
-            <SidebarProjectItem
-              project={project}
-              isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
-              activeRouteThreadKey={
-                activeRouteProjectKey === project.projectKey ? activeRouteThreadKey : null
-              }
-              handleNewThread={handleNewThread}
-              archiveThread={archiveThread}
-              deleteThread={deleteThread}
-              threadJumpLabelByKey={visibleThreadJumpLabelByKey}
-              attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-              expandThreadListForProject={expandThreadListForProject}
-              collapseThreadListForProject={collapseThreadListForProject}
-              onNewFolderWithProject={onNewFolderWithProject}
-              dragInProgressRef={dragInProgressRef}
-              suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-              suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
-              isManualProjectSorting={isManualProjectSorting}
-              dragHandleProps={dragHandleProps}
-            />
-          )}
+          navigateToThread={navigateToThread}
+        >
+          <SidebarProjectsContent
+            showArm64IntelBuildWarning={showArm64IntelBuildWarning}
+            arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
+            desktopUpdateButtonAction={desktopUpdateButtonAction}
+            desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
+            handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
+            projectSortOrder={sidebarProjectSortOrder}
+            threadSortOrder={sidebarThreadSortOrder}
+            projectGroupingMode={sidebarProjectGroupingMode}
+            updateSettings={updateSettings}
+            openAddProject={openAddProjectCommandPalette}
+            isManualProjectSorting={isManualProjectSorting}
+            projectDnDSensors={projectDnDSensors}
+            projectCollisionDetection={projectCollisionDetection}
+            handleProjectDragStart={handleProjectDragStart}
+            handleProjectDragEnd={handleProjectDragEnd}
+            handleProjectDragCancel={handleProjectDragCancel}
+            projectTreeRows={projectTreeRows}
+            commandPaletteShortcutLabel={commandPaletteShortcutLabel}
+            attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
+            projectsLength={projects.length}
+            renderProjectRow={(project, dragHandleProps, onNewFolderWithProject) => (
+              <SidebarProjectItem
+                project={project}
+                isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
+                activeRouteThreadKey={
+                  activeRouteProjectKey === project.projectKey ? activeRouteThreadKey : null
+                }
+                handleNewThread={handleNewThread}
+                archiveThread={archiveThread}
+                deleteThread={deleteThread}
+                threadJumpLabelByKey={visibleThreadJumpLabelByKey}
+                attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+                expandThreadListForProject={expandThreadListForProject}
+                collapseThreadListForProject={collapseThreadListForProject}
+                onNewFolderWithProject={onNewFolderWithProject}
+                dragInProgressRef={dragInProgressRef}
+                suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+                suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+                isManualProjectSorting={isManualProjectSorting}
+                dragHandleProps={dragHandleProps}
+              />
+            )}
+          />
+        </SidebarProjectDialogProvider>
+      </div>
+      <div
+        aria-hidden={sidebarMode !== "inbox"}
+        className={sidebarMode === "inbox" ? "contents" : "hidden"}
+        inert={sidebarMode !== "inbox"}
+      >
+        <InboxSidebar
+          activeThreadKey={activeRouteThreadKey}
+          deliveryUnknownThreadKeys={deliveryUnknownThreadKeys}
+          environments={inboxEnvironments}
+          onOpenThread={navigateToThread}
+          projects={projects}
+          threads={sidebarThreads}
+          worktrees={sidebarWorktrees}
         />
-      </SidebarProjectDialogProvider>
+      </div>
 
       <SidebarSeparator />
       <SidebarChromeFooter />

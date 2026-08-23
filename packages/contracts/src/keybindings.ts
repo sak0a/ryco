@@ -59,6 +59,8 @@ const STATIC_KEYBINDING_COMMANDS = [
   "workspace.simulator",
   "diff.toggle",
   "commandPalette.toggle",
+  "sidebar.showInbox",
+  "sidebar.showProjects",
   "chat.new",
   "chat.newLocal",
   "composer.stash",

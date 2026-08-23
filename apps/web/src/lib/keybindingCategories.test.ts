@@ -20,6 +20,17 @@ describe("keybindingCategories", () => {
     expect(getCommandMeta("chat.newLocal").category).toBe(KEYBINDING_CATEGORIES.chat);
   });
 
+  it("maps sidebar mode commands to the Sidebar category", () => {
+    expect(getCommandMeta("sidebar.showInbox")).toMatchObject({
+      category: KEYBINDING_CATEGORIES.sidebar,
+      title: "Show Inbox sidebar",
+    });
+    expect(getCommandMeta("sidebar.showProjects")).toMatchObject({
+      category: KEYBINDING_CATEGORIES.sidebar,
+      title: "Show Projects sidebar",
+    });
+  });
+
   it("maps stash to the Composer category with a friendly title", () => {
     expect(getCommandMeta("composer.stash").category).toBe(KEYBINDING_CATEGORIES.composer);
     expect(getCommandMeta("composer.stash").title).toBe("Stash prompt or open stash");

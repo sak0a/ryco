@@ -11,12 +11,13 @@ export const KEYBINDING_CATEGORIES: Record<string, KeybindingCategory> = {
   workspace: { id: "workspace", label: "Workspace", sortWeight: 20 },
   diff: { id: "diff", label: "Diff", sortWeight: 30 },
   commandPalette: { id: "commandPalette", label: "Command palette", sortWeight: 40 },
-  chat: { id: "chat", label: "Chat", sortWeight: 50 },
-  composer: { id: "composer", label: "Composer", sortWeight: 60 },
-  editor: { id: "editor", label: "Editor", sortWeight: 70 },
-  modelPicker: { id: "modelPicker", label: "Model picker", sortWeight: 80 },
-  thread: { id: "thread", label: "Threads", sortWeight: 90 },
-  script: { id: "script", label: "Project scripts", sortWeight: 100 },
+  sidebar: { id: "sidebar", label: "Sidebar", sortWeight: 50 },
+  chat: { id: "chat", label: "Chat", sortWeight: 60 },
+  composer: { id: "composer", label: "Composer", sortWeight: 70 },
+  editor: { id: "editor", label: "Editor", sortWeight: 80 },
+  modelPicker: { id: "modelPicker", label: "Model picker", sortWeight: 90 },
+  thread: { id: "thread", label: "Threads", sortWeight: 100 },
+  script: { id: "script", label: "Project scripts", sortWeight: 110 },
 } as const;
 
 export interface KeybindingCommandMeta {
@@ -36,6 +37,8 @@ const STATIC_COMMAND_META: Record<string, Omit<KeybindingCommandMeta, "category"
   "workspace.simulator": { title: "Open iOS Simulator workspace", sortWeight: 4 },
   "diff.toggle": { title: "Toggle diff view", sortWeight: 1 },
   "commandPalette.toggle": { title: "Open command palette", sortWeight: 1 },
+  "sidebar.showInbox": { title: "Show Inbox sidebar", sortWeight: 1 },
+  "sidebar.showProjects": { title: "Show Projects sidebar", sortWeight: 2 },
   "chat.new": { title: "New chat", sortWeight: 1 },
   "chat.newLocal": { title: "New chat (local environment)", sortWeight: 2 },
   "composer.stash": { title: "Stash prompt or open stash", sortWeight: 1 },
