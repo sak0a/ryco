@@ -1,8 +1,4 @@
-import {
-  hostedHubController,
-  hostedHubStore,
-  type HostedHubState,
-} from "@ryco/client-runtime/authorization";
+import { hostedHubStore, type HostedHubState } from "@ryco/client-runtime/authorization";
 import { planEvictionsToCapacity } from "@ryco/client-runtime/connection";
 import type { KVService } from "@ryco/client-runtime/platform";
 import type { EnvironmentId } from "@ryco/contracts";
@@ -353,7 +349,6 @@ export async function initializeMobileSnapshotPersistence(deps: {
   uninstallSelectionPersistence = installHubSelectionPersistence({
     kv: deps.kv,
     store: hostedHubStore,
-    selectNode: (nodeId) => hostedHubController.selectNode(nodeId),
   });
 }
 

@@ -9,7 +9,7 @@ import {
 } from "../hostedHub/nodeRoster";
 import { isMobileHostedModeAvailable } from "../hostedHub/runtime";
 import { createMobileConnectionRegistry } from "../runtime/bootstrap";
-import { getMobileHostedConnectionCoordinator } from "./hostedConnectionCoordinator";
+import { acquireMobileHostedNode } from "../hostedHub/acquireNode";
 
 /**
  * Wave 3a: opening a thread re-targets the hosted connection to the node that
@@ -20,8 +20,8 @@ import { getMobileHostedConnectionCoordinator } from "./hostedConnectionCoordina
  *
  * Two things this module deliberately does NOT do:
  *
- * - It adds no second activation or readiness path. The only way it changes the
- *   selection is `hostedHubController.selectNode`, which runs the existing
+ * - It adds no second activation or readiness path. The one mobile acquisition
+ *   actuator delegates to Wave 3b's coordinator, which drives the existing
  *   fail-closed activation pipeline (ticket → relay channel → state sync →
  *   readiness gates). Readiness is observable only through the hosted store.
  * - It never treats the `selectNode` promise as a success signal.
@@ -493,7 +493,7 @@ export function ensureMobileThreadConnectionRetargetEngine(): ThreadConnectionRe
     store: hostedHubStore,
     // Wave 3b preserves 3a's decision model and replaces only its actuator:
     // the same retarget decision now acquires/touches a bounded connection.
-    selectNode: (nodeId) => getMobileHostedConnectionCoordinator().acquireNode(nodeId),
+    selectNode: acquireMobileHostedNode,
     hasDirectEnvironment: (environmentId) =>
       createMobileConnectionRegistry().catalog.get(environmentId) !== null,
     hasHostedConnection: (environmentId) =>

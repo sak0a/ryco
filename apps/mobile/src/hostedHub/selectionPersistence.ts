@@ -1,6 +1,8 @@
 import type { HostedHubState } from "@ryco/client-runtime/authorization";
 import type { KVService } from "@ryco/client-runtime/platform";
 
+import { acquireMobileHostedNode } from "./acquireNode";
+
 /**
  * Persist the selected Hub node so it survives an app relaunch (wave 2
  * amendment A — selection previously lived only in the in-memory hosted
@@ -93,8 +95,10 @@ interface HostedStoreLike {
 export function installHubSelectionPersistence(deps: {
   readonly kv: Pick<KVService, "getItem" | "setItem" | "removeItem">;
   readonly store: HostedStoreLike;
-  readonly selectNode: (nodeId: string) => Promise<void>;
+  /** Test seam. Production restoration must acquire, not only move the cursor. */
+  readonly selectNode?: (nodeId: string) => Promise<void>;
 }): () => void {
+  const selectNode = deps.selectNode ?? acquireMobileHostedNode;
   let previousSelectedNodeId: string | null = deps.store.getState().selectedNode?.id ?? null;
   let restoreSettled = previousSelectedNodeId !== null;
   let persisted: PersistedHubSelection | null = null;
@@ -138,7 +142,7 @@ export function installHubSelectionPersistence(deps: {
     if (decision.kind === "wait") return;
     restoreSettled = true;
     if (decision.kind === "select") {
-      void deps.selectNode(decision.nodeId).catch(() => undefined);
+      void selectNode(decision.nodeId).catch(() => undefined);
     } else {
       persistSelection(null);
     }
