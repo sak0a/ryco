@@ -3,6 +3,7 @@ import {
   DesktopAuthorizationCallbackBroker,
   desktopAuthorizationCallbackUri,
   findDesktopAuthorizationCallback,
+  resolveDesktopAuthorizationCallback,
 } from "./nativeAuthorization.ts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -20,6 +21,31 @@ describe("Desktop native browser authorization", () => {
     );
     expect(
       findDesktopAuthorizationCallback(["ryco://other/complete"], "ryco://hosted/complete"),
+    ).toBeNull();
+  });
+
+  it("prefers a validated callback relayed by the macOS protocol wrapper", () => {
+    const developmentCallback = callback.replace("ryco://", "ryco-dev://");
+    expect(
+      resolveDesktopAuthorizationCallback({
+        commandLine: ["--flag"],
+        additionalData: { desktopAuthorizationCallback: developmentCallback },
+        callbackUri: "ryco-dev://hosted/complete",
+      }),
+    ).toBe(developmentCallback);
+    expect(
+      resolveDesktopAuthorizationCallback({
+        commandLine: ["--flag", developmentCallback],
+        additionalData: null,
+        callbackUri: "ryco-dev://hosted/complete",
+      }),
+    ).toBe(developmentCallback);
+    expect(
+      resolveDesktopAuthorizationCallback({
+        commandLine: [developmentCallback],
+        additionalData: { desktopAuthorizationCallback: "https://example.test/not-a-callback" },
+        callbackUri: "ryco-dev://hosted/complete",
+      }),
     ).toBeNull();
   });
 
