@@ -17,6 +17,7 @@ import { StatusPill, type StatusTone } from "../../components/StatusPill";
 import { acquireMobileHostedNode } from "../../hostedHub/acquireNode";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useMobileE2eeChannelStatus } from "../e2ee/useMobileE2eeSession";
+import { acquireBeforeNodeSecurity } from "../e2ee/acquireBeforeNodeSecurity";
 import { exactNodeRouteParams } from "../e2ee/exactNodeRouteModel";
 import { useAuthoritativeNodeTrust } from "../home/useAuthoritativeNodeTrust";
 import { NodeRow } from "../nodes/NodeRow";
@@ -393,9 +394,14 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
       refreshDirectory: hostedHubController.refreshDirectory,
       retrySelectedNode: hostedHubController.retrySelectedNode,
       openNodeSecurity: (node) =>
-        navigation.navigate("SettingsSheet", {
-          screen: "SettingsNodeSecurity",
-          params: exactNodeRouteParams(node),
+        acquireBeforeNodeSecurity({
+          nodeId: node.id,
+          acquireNode: acquireMobileHostedNode,
+          openSecurity: () =>
+            navigation.navigate("SettingsSheet", {
+              screen: "SettingsNodeSecurity",
+              params: exactNodeRouteParams(node),
+            }),
         }),
     },
     // Sign-in uses the same full-screen native identity surface as the root gate.

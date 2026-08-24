@@ -2566,6 +2566,33 @@ describe("ChatView timeline estimator parity (full app)", () => {
     document.body.innerHTML = "";
   });
 
+  it("keeps a cached hosted thread visible while its node reconnects", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-cached-cross-node" as MessageId,
+        targetText: "cached cross-node switch target",
+      }),
+    });
+
+    try {
+      const composerEditor = await waitForComposerEditor();
+
+      // Hosted A -> B disposal keeps thread detail in memory but marks the
+      // old environment non-live until its next relay bootstrap.
+      useStore.getState().demoteEnvironmentStateToCachedSnapshot(LOCAL_ENVIRONMENT_ID, Date.now());
+      await waitForLayout();
+
+      expect(useStore.getState().environmentStateById[LOCAL_ENVIRONMENT_ID]).toMatchObject({
+        bootstrapComplete: false,
+      });
+      expect(composerEditor.isConnected).toBe(true);
+      expect(await waitForComposerEditor()).toBe(composerEditor);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("stashes globally, preserves contexts/model state, merges on keyboard restore, and deletes from the picker", async () => {
     const terminalContext = createTerminalContext({
       id: "stash-terminal",
