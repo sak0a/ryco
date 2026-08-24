@@ -102,7 +102,11 @@ export function buildThreadTimelineRows(input: {
 
     const turnId = group.find((entry) => entry.turnId)?.turnId ?? null;
     const running = turnId !== null && turnId === input.runningTurnId;
-    const foldId = `fold:${turnId ?? group[0]?.id ?? rows.length}`;
+    // One turn may contain several non-consecutive activity groups separated by
+    // assistant messages. `turnId` alone therefore collides in LegendList and
+    // makes rows disappear; the first work-entry id keeps each fold unique and
+    // stable as more activity is appended to that group.
+    const foldId = `fold:${turnId ?? "unassigned"}:${group[0]?.id ?? rows.length}`;
     const startedAt = group[0]?.createdAt ?? null;
     const endedAt = group.at(-1)?.createdAt ?? null;
 

@@ -56,6 +56,7 @@ import {
   E2EE_UNEXPECTED_NODE_TITLES,
   E2EE_VERIFICATION_UNAVAILABLE,
   requestE2eeApproval,
+  shouldShowE2eeApprovalScanner,
   type E2eeTrustAction,
   type E2eeVerificationDraft,
 } from "./e2eeTrustUiModel";
@@ -308,6 +309,12 @@ describe("§13.4 safety number rendering", () => {
 });
 
 describe("§13.2 first contact, enrollment-fingerprint first", () => {
+  it("removes the alternative QR path once comparison starts", () => {
+    expect(shouldShowE2eeApprovalScanner("enrollment-fingerprint")).toBe(true);
+    expect(shouldShowE2eeApprovalScanner("compare")).toBe(false);
+    expect(shouldShowE2eeApprovalScanner("no-evidence")).toBe(false);
+  });
+
   it("shows no safety number until the entered fingerprint matches the advertised one", () => {
     const { view } = verificationView(session());
     expect(view.stage).toBe("enrollment-fingerprint");
