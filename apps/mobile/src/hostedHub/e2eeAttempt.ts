@@ -445,6 +445,11 @@ async function runPreparationPass(): Promise<boolean> {
   });
 
   const lifetime = { active: true };
+  // The slot revision may advance once because this channel authenticated and
+  // durably recorded its own statement. Track that exact advance separately
+  // from the immutable preparation slot so unrelated trust mutations still
+  // revoke a late scalar borrow even in runtimes without the selection watcher.
+  let acceptedTrustRevision = slot.trustRevision;
   const attempt: RelayE2eeInitiatorAttempt = {
     hubOrigin: selection.hubOrigin,
     selectionClass: selectionClassOf(guards.classification),
@@ -470,8 +475,15 @@ async function runPreparationPass(): Promise<boolean> {
     // construction/send operation after the carrier and durable trust commit.
     withNativeAgreementSecretKey: (use) =>
       mobileE2eeAgreementKey.withSecretKey((secretKey) => {
-        const live = currentSelection();
-        if (!lifetime.active || live === null || !sameAttemptSlot(attemptSlot(live), slot)) {
+        // `lifetime` is the trust-revision fence. The authenticated statement
+        // this channel just persisted advances the revision too, but its pending
+        // commit deliberately keeps this lifetime alive so K1 can finish. Any
+        // external trust mutation re-prepares the slot and revokes it here.
+        if (
+          !lifetime.active ||
+          !ownsSelection(selection) ||
+          mobileE2eeTrustStore.revision() !== acceptedTrustRevision
+        ) {
           throw new Error("Mobile E2EE selection was superseded.");
         }
         return use(secretKey);
@@ -497,6 +509,10 @@ async function runPreparationPass(): Promise<boolean> {
     accountId: selection.accountId,
     onStatement: async (verification) => {
       if (!ownsSelection(selection)) throw new Error("Mobile E2EE selection was superseded.");
+      const trustRevisionBeforeStatement = mobileE2eeTrustStore.revision();
+      if (trustRevisionBeforeStatement !== acceptedTrustRevision) {
+        throw new Error("Mobile E2EE selection was superseded.");
+      }
       // Establish the per-selection fence before publishing to session
       // listeners. A listener may synchronously open another channel; it must
       // observe the pending mutation and fail closed, never borrow stale trust.
@@ -525,7 +541,10 @@ async function runPreparationPass(): Promise<boolean> {
       // The authenticated old selection may still tighten its own durable
       // record after a deadline or navigation. It cannot resume or project into
       // a lifecycle generation that did not own this callback.
-      if (!ownsSelection(selection)) throw new Error("Mobile E2EE selection was superseded.");
+      if (!lifetime.active || !ownsSelection(selection)) {
+        throw new Error("Mobile E2EE selection was superseded.");
+      }
+      acceptedTrustRevision = mobileE2eeTrustStore.revision();
     },
     onUnexpectedNode: (evidence) =>
       raiseMobileE2eeUnexpectedNode(evidence, selection.environmentId),
