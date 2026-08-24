@@ -142,11 +142,16 @@ export function E2eeNodeSecurityRouteScreen(props: Props) {
             {view.diagnostics.map((row, index) => (
               <View
                 key={row.id}
-                className={`px-4 py-3 ${index > 0 ? "border-t border-border-subtle" : ""}`}
+                className={`flex-row items-start gap-3 px-4 py-3 ${index > 0 ? "border-t border-border-subtle" : ""}`}
               >
-                <Text className="font-sans text-sm leading-relaxed text-foreground-muted">
+                <Text className="min-w-0 flex-1 font-sans text-sm leading-relaxed text-foreground-muted">
                   {row.label}
                 </Text>
+                {row.count > 1 ? (
+                  <Text className="shrink-0 pt-0.5 font-sans text-xs text-foreground-faint">
+                    {row.count} attempts
+                  </Text>
+                ) : null}
               </View>
             ))}
           </View>

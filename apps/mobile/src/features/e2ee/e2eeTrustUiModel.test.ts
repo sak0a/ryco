@@ -700,6 +700,7 @@ describe("§11.4 diagnostics", () => {
     );
     expect(view.diagnostics.length).toBe(4);
     expect(new Set(view.diagnostics.map((row) => row.label)).size).toBe(4);
+    expect(view.diagnostics.every((row) => row.count === 1)).toBe(true);
     expect(view.diagnosticsCaption).toContain("None of it is sent anywhere");
     // And none of them names a cause the node supplied — there is none.
     for (const row of view.diagnostics) {
@@ -726,6 +727,23 @@ describe("§11.4 diagnostics", () => {
     const view = securityView(session({ diagnostics: [{ id: "pre_key_local", row: "K23" }] }));
     expect(view.diagnostics[0]?.label).not.toContain("K23");
     expect(view.diagnostics[0]?.id).toContain("pre_key_local");
+  });
+
+  it("groups repeated diagnostics instead of rendering a wall of duplicate rows", () => {
+    const view = securityView(
+      session({
+        diagnostics: Array.from({ length: 8 }, () => ({
+          id: "pre_key_local" as const,
+          row: "K23",
+        })),
+      }),
+    );
+
+    expect(view.diagnostics).toHaveLength(1);
+    expect(view.diagnostics[0]).toMatchObject({
+      label: "This device ended a connection attempt before any key was agreed.",
+      count: 8,
+    });
   });
 });
 

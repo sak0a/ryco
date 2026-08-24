@@ -228,6 +228,41 @@ describe("createEnvironmentConnection", () => {
     await connection.dispose();
   });
 
+  it("keeps an early shell failure observable without an unhandled rejection", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitShellError } = createTestClient();
+
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      resetShellProjection: vi.fn(),
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+    });
+
+    emitShellError();
+    // React Native reports a rejected promise as an uncaught development
+    // overlay at the end of this turn when no waiter has observed it yet.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(connection.ensureBootstrapped()).rejects.toThrow(
+      "Shell snapshot synchronization failed.",
+    );
+
+    await connection.dispose();
+  });
+
   it("rejects welcome/config identity drift", async () => {
     const environmentId = EnvironmentId.make("env-1");
     const { client, emitWelcome } = createTestClient();

@@ -714,6 +714,7 @@ export type E2eeChannelClaim =
 export interface E2eeDiagnosticRow {
   readonly id: string;
   readonly label: string;
+  readonly count: number;
 }
 
 export interface E2eeSecurityView {
@@ -1019,15 +1020,26 @@ export function deriveE2eeSecurityView(input: E2eeSecurityInput): E2eeSecurityVi
 function diagnosticRows(
   diagnostics: readonly MobileE2eeLocalDiagnostic[],
 ): readonly E2eeDiagnosticRow[] {
-  return diagnostics.map((diagnostic, index) => ({
-    id: `${index}:${diagnostic.id}:${diagnostic.row}`,
+  const grouped = new Map<string, E2eeDiagnosticRow>();
+  for (const [index, diagnostic] of diagnostics.entries()) {
     // Bounded by construction: the label comes from a fixed table keyed on the
     // closed diagnostic set, and an unrecognised id renders the neutral line
     // rather than the id itself.
-    label:
+    const label =
       DIAGNOSTIC_LABELS[diagnostic.id] ??
-      "This device ended a connection attempt before any key was agreed.",
-  }));
+      "This device ended a connection attempt before any key was agreed.";
+    const current = grouped.get(label);
+    if (current) {
+      grouped.set(label, { ...current, count: current.count + 1 });
+      continue;
+    }
+    grouped.set(label, {
+      id: `${index}:${diagnostic.id}:${diagnostic.row}`,
+      label,
+      count: 1,
+    });
+  }
+  return Array.from(grouped.values());
 }
 
 /** §12.1.1's per-selection legacy consent, taken as an explicit owner act. */

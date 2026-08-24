@@ -60,10 +60,20 @@ export interface EnvironmentConnectionInput extends OrchestrationHandlers {
 function createBootstrapGate() {
   let resolve: (() => void) | null = null;
   let reject: ((error: unknown) => void) | null = null;
-  let promise = new Promise<void>((nextResolve, nextReject) => {
-    resolve = nextResolve;
-    reject = nextReject;
-  });
+  const createPendingPromise = () => {
+    const pending = new Promise<void>((nextResolve, nextReject) => {
+      resolve = nextResolve;
+      reject = nextReject;
+    });
+    // A push subscription can fail before a caller starts waiting for the
+    // initial shell snapshot. Mark that early rejection as observed so native
+    // development clients do not surface an uncaught-promise overlay. Returning
+    // the original promise from `wait` still preserves the rejection for every
+    // caller that needs to react to the failed bootstrap.
+    void pending.catch(() => undefined);
+    return pending;
+  };
+  let promise = createPendingPromise();
 
   return {
     wait: () => promise,
@@ -78,10 +88,7 @@ function createBootstrapGate() {
       reject = null;
     },
     reset: () => {
-      promise = new Promise<void>((nextResolve, nextReject) => {
-        resolve = nextResolve;
-        reject = nextReject;
-      });
+      promise = createPendingPromise();
     },
   };
 }
