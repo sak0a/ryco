@@ -49,7 +49,11 @@ export const MVP_ROOT_ROUTES = {
     linking: "projects/new",
     overlay: true,
     headerPreset: "sheet-solid",
-    ios: { presentation: "formSheet", sheetAllowedDetents: [0.7, 0.95], sheetGrabberVisible: true },
+    ios: {
+      presentation: "formSheet",
+      sheetAllowedDetents: [0.7, 0.95],
+      sheetGrabberVisible: true,
+    },
     android: { presentation: "card" },
   },
   Project: {
@@ -125,7 +129,11 @@ export const MVP_ROOT_ROUTES = {
     headerPreset: "none",
     // Widened from [0.55, 0.7]: the sheet now carries two labeled sections —
     // direct saved devices and hosted Hub nodes — rather than one list.
-    ios: { presentation: "formSheet", sheetAllowedDetents: [0.6, 0.95], sheetGrabberVisible: true },
+    ios: {
+      presentation: "formSheet",
+      sheetAllowedDetents: [0.6, 0.95],
+      sheetGrabberVisible: true,
+    },
     android: { presentation: "card", headerShown: false },
   },
   ConnectionsNew: {
@@ -142,11 +150,13 @@ export const MVP_ROOT_ROUTES = {
     // change which thread the workspace is on (see WORKSPACE_OVERLAY_ROUTES).
     overlay: true,
     headerPreset: "none",
-    // A large single-detent sheet rather than a full-screen card, so the name
-    // stops lying and the grabber/swipe dismiss it. Its nested settings stack
-    // supplies the headers inside. Android keeps the card: a nested stack inside
-    // an Android form sheet is unverified, and there is no Android QA yet.
-    ios: { presentation: "formSheet", sheetAllowedDetents: [0.95], sheetGrabberVisible: true },
+    // Settings owns a nested stack, so present it full-screen on iPhone. The
+    // floating form/adaptive modal styles on iOS 26 expose live Inbox controls
+    // around the rounded bottom corners and duplicate the status-bar chrome
+    // behind the nested security header. Its nested settings stack supplies the
+    // headers inside. Android keeps the card: a nested stack inside an Android
+    // modal is unverified, and there is no Android QA yet.
+    ios: { presentation: "fullScreenModal" },
     android: { presentation: "card" },
   },
   NotFound: {
