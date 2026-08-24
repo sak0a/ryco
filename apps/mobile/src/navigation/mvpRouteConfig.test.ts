@@ -114,11 +114,11 @@ describe("MVP route config", () => {
     }
   });
 
-  it("presents Settings as a large iOS form sheet that floats over the workspace", () => {
+  it("presents Settings full-screen on iOS without exposing workspace controls", () => {
     expect(MVP_ROOT_ROUTES.SettingsSheet.overlay).toBe(true);
-    expect(MVP_ROOT_ROUTES.SettingsSheet.ios.presentation).toBe("formSheet");
-    expect(MVP_ROOT_ROUTES.SettingsSheet.ios.sheetAllowedDetents).toEqual([0.95]);
-    expect(MVP_ROOT_ROUTES.SettingsSheet.ios.sheetGrabberVisible).toBe(true);
+    expect(MVP_ROOT_ROUTES.SettingsSheet.ios).toEqual({
+      presentation: "fullScreenModal",
+    });
     // Android keeps the card: a nested stack inside an Android form sheet is
     // unverified and there is no Android QA yet.
     expect(MVP_ROOT_ROUTES.SettingsSheet.android.presentation).toBe("card");
