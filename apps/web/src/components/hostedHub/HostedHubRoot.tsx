@@ -19,6 +19,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -64,6 +65,7 @@ import {
 import { hubPageTitle } from "../../hubBranding";
 import {
   selectHostedNodeRoute,
+  parseHostedScopedThreadPath,
   useHostedNodeRouteNotice,
   useHostedNodeRouteOrchestrator,
   useRoutedHostedNode,
@@ -75,6 +77,7 @@ import {
   startHostedWorkspaceCoordinator,
 } from "../../hostedHub/hostedConnectionCoordinator";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
+import { selectThreadExistsByRef, useStore } from "../../store";
 import { PHONE_ANCHORED_ACTIONS_CLASS_NAME } from "../mobile/phoneAnchoredActions";
 import { GitHubIcon } from "../Icons";
 import {
@@ -185,6 +188,13 @@ export function HostedHubRoot() {
   const errorMessage = useHostedHubStore((state) => state.errorMessage);
   const recoveryCodesLeased = useHostedRecoveryCodeDisplayStore((state) => state.leased);
   const routedNode = useRoutedHostedNode();
+  const routedThreadRef = useMemo(
+    () => parseHostedScopedThreadPath(routedNode.logicalPathname),
+    [routedNode.logicalPathname],
+  );
+  const hasCachedRoutedThread = useStore(
+    useMemo(() => (state) => selectThreadExistsByRef(state, routedThreadRef), [routedThreadRef]),
+  );
   const routeNotice = useHostedNodeRouteNotice();
   useHostedNodeRouteOrchestrator();
   useEffect(() => startHostedWorkspaceCoordinator(), []);
@@ -260,6 +270,13 @@ export function HostedHubRoot() {
     return <HostedNodeFailureSurface node={selectedNode} message={errorMessage} />;
   }
   if (!sessionEstablished) {
+    // The routed target has already passed the fail-closed node/environment
+    // validation above. When its exact thread is cached, keep the workspace
+    // mounted read-only while the fresh relay channel synchronizes instead of
+    // replacing the whole route with the three-second connection surface.
+    if (hasCachedRoutedThread) {
+      return <RootAppShell authGateState={{ status: "hosted-cached" }} />;
+    }
     return <HostedNodeStartingSurface node={selectedNode} />;
   }
 

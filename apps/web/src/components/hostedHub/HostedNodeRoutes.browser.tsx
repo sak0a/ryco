@@ -1,6 +1,6 @@
 import "../../index.css";
 
-import { EnvironmentId } from "@ryco/contracts";
+import { EnvironmentId, ThreadId } from "@ryco/contracts";
 import { page } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
@@ -26,6 +26,12 @@ vi.mock("../../env", async (importOriginal) => ({
   isHostedHubMode: () => true,
 }));
 
+vi.mock("../RootAppShell", () => ({
+  RootAppShell: ({ authGateState }: { authGateState: { status: string } }) => (
+    <div data-testid="root-app-shell">{authGateState.status}</div>
+  ),
+}));
+
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { navigateHub, resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import {
@@ -34,6 +40,7 @@ import {
 } from "../../hostedHub/nodeRoutes";
 import { resetHostedNodeRouteOrchestratorForTests } from "../../hostedHub/nodeRouteOrchestrator";
 import type { HostedHubNode } from "../../hostedHub/types";
+import { type EnvironmentState, useStore } from "../../store";
 import { createFakeHistoryWindow, type FakeHistoryWindow } from "../../../test/fakeHistoryWindow";
 import { HostedHubRoot } from "./HostedHubRoot";
 
@@ -90,6 +97,7 @@ beforeEach(() => {
   resetHostedNodeRouteOrchestratorForTests();
   resetHostedNodeRoutesForTests();
   navigate.mockClear();
+  useStore.setState({ activeEnvironmentId: null, environmentStateById: {} });
 });
 
 afterEach(async () => {
@@ -105,6 +113,46 @@ afterEach(async () => {
 });
 
 describe("hosted node route surfaces", () => {
+  it("keeps the exact cached routed thread mounted while its node reconnects", async () => {
+    const target = node("node_aaaaaaaaaaaaaaaaaaaaaa");
+    const threadId = ThreadId.make("cached-thread");
+    installRoute(`/node/${target.id}/${target.environmentId}/${threadId}`);
+    const selectNode = vi
+      .spyOn(hostedHubController, "selectNode")
+      .mockImplementation(async (nodeId: string) => {
+        const found = useHostedHubStore.getState().nodes.find((entry) => entry.id === nodeId);
+        useHostedHubStore.setState({
+          selectedNode: found ?? null,
+          selectionStatus: "online",
+          sessionStatus: "synchronizing",
+          sessionEstablished: false,
+        });
+      });
+    useStore.setState({
+      activeEnvironmentId: target.environmentId,
+      environmentStateById: {
+        [target.environmentId]: {
+          threadShellById: { [threadId]: {} },
+        } as unknown as EnvironmentState,
+      },
+    });
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      nodes: [target],
+    });
+
+    mounted = await render(<HostedHubRoot />);
+
+    await expect.element(page.getByTestId("root-app-shell")).toHaveTextContent("hosted-cached");
+    await expect
+      .element(page.getByRole("heading", { name: `Connecting to ${target.label}` }))
+      .not.toBeInTheDocument();
+    expect(selectNode).toHaveBeenCalledWith(target.id);
+  });
+
   it("keeps a routed node on the blocked restoring surface instead of the directory", async () => {
     const target = node("node_aaaaaaaaaaaaaaaaaaaaaa");
     installRoute(`/node/${target.id}/${target.environmentId}/t_1?workspaceTab=diff`);

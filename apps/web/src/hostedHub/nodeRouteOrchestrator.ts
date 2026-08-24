@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId } from "@ryco/contracts";
+import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@ryco/contracts";
 import { useEffect, useSyncExternalStore } from "react";
 
 import {
@@ -98,10 +98,7 @@ function readLegacyThreadEnvironmentId(pathname: string): string | null {
   }
 }
 
-function readScopedThreadPath(pathname: string): {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-} | null {
+export function parseHostedScopedThreadPath(pathname: string): ScopedThreadRef | null {
   const match = /^\/([^/]+)\/([^/]+)\/?$/u.exec(pathname);
   if (!match || RESERVED_TOP_SEGMENTS.has(match[1] ?? "")) return null;
   try {
@@ -134,7 +131,7 @@ let reconcilePending = false;
 let routeScopeKey: string | null = null;
 let releaseRouteScope: (() => void) | null = null;
 
-function replaceRouteScope(scopedThread: ReturnType<typeof readScopedThreadPath>): void {
+function replaceRouteScope(scopedThread: ReturnType<typeof parseHostedScopedThreadPath>): void {
   const nextKey = scopedThread
     ? JSON.stringify([scopedThread.environmentId, scopedThread.threadId])
     : null;
@@ -150,7 +147,9 @@ function replaceRouteScope(scopedThread: ReturnType<typeof readScopedThreadPath>
   }
 }
 
-function routeScopeKeyFor(scopedThread: ReturnType<typeof readScopedThreadPath>): string | null {
+function routeScopeKeyFor(
+  scopedThread: ReturnType<typeof parseHostedScopedThreadPath>,
+): string | null {
   return scopedThread ? JSON.stringify([scopedThread.environmentId, scopedThread.threadId]) : null;
 }
 
@@ -250,7 +249,7 @@ function reconcile(): void {
     return;
   }
 
-  const scopedThread = readScopedThreadPath(routed.logicalPathname);
+  const scopedThread = parseHostedScopedThreadPath(routed.logicalPathname);
   if (routeScopeKeyFor(scopedThread) !== routeScopeKey) replaceRouteScope(null);
   const directoryNode = state.nodes.find((candidate) => candidate.id === nodeId) ?? null;
   if (
