@@ -120,3 +120,20 @@ export function findDesktopAuthorizationCallback(
   }
   return null;
 }
+
+export function resolveDesktopAuthorizationCallback(input: {
+  readonly commandLine: readonly string[];
+  readonly additionalData: unknown;
+  readonly callbackUri: string;
+}): string | null {
+  const relayedCallback =
+    typeof input.additionalData === "object" &&
+    input.additionalData !== null &&
+    "desktopAuthorizationCallback" in input.additionalData
+      ? input.additionalData.desktopAuthorizationCallback
+      : undefined;
+  return findDesktopAuthorizationCallback(
+    typeof relayedCallback === "string" ? [relayedCallback] : input.commandLine,
+    input.callbackUri,
+  );
+}

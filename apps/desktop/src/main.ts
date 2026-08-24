@@ -132,6 +132,7 @@ import {
   DesktopAuthorizationCallbackBroker,
   desktopAuthorizationCallbackUri,
   findDesktopAuthorizationCallback,
+  resolveDesktopAuthorizationCallback,
   type DesktopAuthorizationVariant,
 } from "./nativeAuthorization.ts";
 import {
@@ -207,6 +208,8 @@ const DISCONNECT_HOSTED_GITHUB_CHANNEL = "desktop:disconnect-hosted-github";
 const CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL = "desktop:cancel-hosted-github-connection";
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+const isDesktopAuthorizationCallbackRelay =
+  isDevelopment && process.env.RYCO_DESKTOP_CALLBACK_RELAY === "1";
 const DEFAULT_BASE_DIR = Path.join(OS.homedir(), ".ryco");
 const { backendBaseDir: BACKEND_BASE_DIR, desktopBaseDir: DESKTOP_BASE_DIR } =
   resolveDesktopDataHomes({
@@ -3492,21 +3495,35 @@ configureAppIdentity();
  * `ryco-dev://` callback is delivered to the running broker instead of turning
  * the raw callback Electron process into a second hidden primary instance.
  */
-if (!app.requestSingleInstanceLock()) {
+if (!isDesktopAuthorizationCallbackRelay && !app.requestSingleInstanceLock()) {
   writeDesktopLogHeader("second instance refused; focusing the existing window");
   app.exit(0);
 }
 
 app.on("open-url", (event, url) => {
+  if (isDesktopAuthorizationCallbackRelay) {
+    event.preventDefault();
+    const callback = findDesktopAuthorizationCallback(
+      [url],
+      desktopAuthorizationCallbackUri(desktopAuthorizationVariant()),
+    );
+    if (callback !== null) {
+      const acquired = app.requestSingleInstanceLock({ desktopAuthorizationCallback: callback });
+      if (acquired) app.releaseSingleInstanceLock();
+    }
+    app.exit(0);
+    return;
+  }
   if (!handleDesktopAuthorizationCallback(url)) return;
   event.preventDefault();
 });
 
-app.on("second-instance", (_event, commandLine) => {
-  const callback = findDesktopAuthorizationCallback(
+app.on("second-instance", (_event, commandLine, _workingDirectory, additionalData) => {
+  const callback = resolveDesktopAuthorizationCallback({
     commandLine,
-    desktopAuthorizationCallbackUri(desktopAuthorizationVariant()),
-  );
+    additionalData,
+    callbackUri: desktopAuthorizationCallbackUri(desktopAuthorizationVariant()),
+  });
   if (callback !== null) handleDesktopAuthorizationCallback(callback);
   const [existing] = BrowserWindow.getAllWindows();
   if (existing === undefined) return;
@@ -3595,6 +3612,10 @@ app.on("before-quit", () => {
 app
   .whenReady()
   .then(() => {
+    if (isDesktopAuthorizationCallbackRelay) {
+      setTimeout(() => app.exit(0), 5_000).unref();
+      return;
+    }
     markDesktopStartupPhase("desktop.ready");
     configureAppIdentity();
     configureApplicationMenu();
