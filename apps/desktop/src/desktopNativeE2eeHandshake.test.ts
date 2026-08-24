@@ -52,6 +52,66 @@ function memoryStore(): DesktopProtectedRecordStore {
 }
 
 describe("Desktop native E2EE handshake service", () => {
+  it("prepares a pairing-only native attempt for another node on a verified Hub", async () => {
+    const origin = "https://hub.example.test";
+    const accountId = `acct_${"A".repeat(22)}`;
+    const localNodeId = `node_${"B".repeat(22)}`;
+    const remoteNodeId = `node_${"C".repeat(22)}`;
+    const records = memoryStore();
+    const trust = new DesktopE2eeTrustStore(records);
+    const localNodeKeys = generateKeyPairSync("ed25519");
+    const clientKeys = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const clientPublic = rawP256(clientKeys.publicKey);
+    const agreement = generateE2eeAgreementKeyPair();
+    const localPin = await trust.promoteLocal({
+      hubOrigin: origin,
+      accountId,
+      nodeId: localNodeId,
+      environmentId: `env_${"D".repeat(22)}`,
+      nodeIdentityPublicKey: rawEd25519(localNodeKeys.publicKey),
+      nodeContinuityId: `nct_${"E".repeat(22)}`,
+      nodePolicyGeneration: 1,
+      clientIdentityPublicKey: clientPublic,
+      approvedAt: 1_800_000_000_000,
+      randomHandle: () => "F".repeat(22),
+    });
+    const service = new DesktopNativeE2eeHandshakeService({
+      origin,
+      records,
+      trust,
+      identityStatus: () => ({
+        status: "ready",
+        accountId,
+        nodeId: localNodeId,
+        localNodeHandle: localPin.localNodeHandle,
+      }),
+      now: () => 1_800_000_100_000,
+      security: {
+        getSigningPublicKey: async () => clientPublic,
+        getSigningKey: async () => ({
+          algorithm: "ES256",
+          publicJwk: uncompressedPointToJwk(clientPublic),
+          sign: async (message) =>
+            derSignatureToRaw(Uint8Array.from(sign("sha256", message, clientKeys.privateKey))),
+        }),
+        ensureAgreementPublicKey: async () => agreement.publicKey,
+        withAgreementSecretKey: async (use) => use(Uint8Array.from(agreement.secretKey)),
+      },
+    });
+
+    await expect(service.prepare({ accountId, nodeId: remoteNodeId })).resolves.toEqual({
+      kind: "strict-unavailable",
+    });
+    await expect(
+      service.prepare({ accountId, nodeId: remoteNodeId, allowPairing: true }),
+    ).resolves.toMatchObject({
+      kind: "native",
+      pairingOnly: true,
+      credentials: { tier: "native", accountId },
+    });
+    agreement.secretKey.fill(0);
+  });
+
   it("prepares only the exact introduced node and rejects unverified statements", async () => {
     const origin = "https://hub.example.test";
     const accountId = `acct_${"A".repeat(22)}`;
@@ -117,6 +177,7 @@ describe("Desktop native E2EE handshake service", () => {
       credentials: { tier: "native", accountId },
     });
     if (prepared.kind !== "native") throw new Error("Expected a native preparation.");
+    if (prepared.verifiedPin === undefined) throw new Error("Expected a verified native pin.");
     expect(prepared.verifiedPin.identityFingerprint).toEqual(
       e2eeKeyFingerprint("node-identity", rawEd25519(nodeKeys.publicKey)),
     );

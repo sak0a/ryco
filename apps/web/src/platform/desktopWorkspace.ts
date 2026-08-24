@@ -14,7 +14,11 @@ import {
   readEnvironmentConnection,
 } from "../environments/runtime";
 import { useStore } from "../store";
-import { readWorkspaceMetadataSnapshot } from "../workspaceMetadataProjection";
+import {
+  readWorkspaceMetadataSnapshot,
+  workspaceMetadataToCachedShellSnapshot,
+} from "../workspaceMetadataProjection";
+import { reconcileDesktopWorkspaceCacheHydration } from "./desktopWorkspaceCacheHydration";
 
 const SIGNED_OUT: DesktopWorkspaceStateProjection = {
   status: "signed-out",
@@ -28,6 +32,7 @@ const SIGNED_OUT: DesktopWorkspaceStateProjection = {
 
 let current = SIGNED_OUT;
 const listeners = new Set<() => void>();
+let hydratedEnvironmentIds = new Set<EnvironmentId>();
 
 export function readDesktopWorkspaceState(): DesktopWorkspaceStateProjection {
   return current;
@@ -108,6 +113,25 @@ export function retainDesktopWorkspaceProviderScope(
 }
 
 function adopt(state: DesktopWorkspaceStateProjection): void {
+  hydratedEnvironmentIds = new Set(
+    reconcileDesktopWorkspaceCacheHydration({
+      snapshots: state.snapshots,
+      previouslyHydratedEnvironmentIds: hydratedEnvironmentIds,
+      port: {
+        hydrate: (snapshot) =>
+          useStore
+            .getState()
+            .hydrateEnvironmentStateFromCache(
+              workspaceMetadataToCachedShellSnapshot(snapshot),
+              snapshot.environmentId,
+            ),
+        isCacheHydrated: (environmentId) =>
+          useStore.getState().environmentStateById[environmentId]?.hydratedFromCacheAt !==
+          undefined,
+        remove: (environmentId) => useStore.getState().removeEnvironmentState(environmentId),
+      },
+    }),
+  );
   current = state;
   for (const listener of listeners) listener();
 }

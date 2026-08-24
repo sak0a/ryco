@@ -254,7 +254,6 @@ import {
 } from "../environments/runtime/service";
 import {
   retainDesktopWorkspaceProviderScope,
-  retainDesktopWorkspaceThreadScope,
   retainDesktopWorkspaceVcsScope,
   useDesktopWorkspaceState,
 } from "../platform/desktopWorkspace";
@@ -989,10 +988,8 @@ export default function ChatView(props: ChatViewProps) {
       return releaseHostedDemand;
     }
     const releaseSubscription = retainThreadDetailSubscription(environmentId, threadId);
-    const releaseDesktopDemand = retainDesktopWorkspaceThreadScope(environmentId, threadId);
     return () => {
       releaseHostedDemand();
-      releaseDesktopDemand();
       releaseSubscription();
     };
   }, [environmentId, routeKind, threadId]);

@@ -41,6 +41,7 @@ export type DesktopNativeE2eePreparation =
   | { readonly kind: "strict-unavailable" }
   | {
       readonly kind: "native";
+      readonly pairingOnly: boolean;
       readonly attemptHandle: string;
       readonly credentials: {
         readonly tier: "native";
@@ -50,14 +51,14 @@ export type DesktopNativeE2eePreparation =
         readonly prekeyTranscript: Uint8Array;
         readonly prekeySignature: Uint8Array;
       };
-      readonly verifiedPin: NodeE2eeVerifiedPin;
-      readonly acceptedPolicyGeneration: number;
+      readonly verifiedPin?: NodeE2eeVerifiedPin;
+      readonly acceptedPolicyGeneration?: number;
     };
 
 interface PreparedAttempt {
   readonly accountId: string;
   readonly nodeId: string;
-  readonly pin: DesktopVerifiedE2eePin;
+  readonly pin: DesktopVerifiedE2eePin | null;
   readonly certificate: DesktopE2eePrekeyCertificate;
   readonly expiresAt: number;
 }
@@ -130,6 +131,7 @@ function nativePreparation(
 ): Extract<DesktopNativeE2eePreparation, { readonly kind: "native" }> {
   return {
     kind: "native",
+    pairingOnly: attempt.pin === null,
     attemptHandle,
     credentials: {
       tier: "native",
@@ -139,8 +141,12 @@ function nativePreparation(
       prekeyTranscript: attempt.certificate.transcript,
       prekeySignature: attempt.certificate.signature,
     },
-    verifiedPin: pinForAttempt(attempt.pin),
-    acceptedPolicyGeneration: attempt.pin.acceptedPolicyGeneration,
+    ...(attempt.pin === null
+      ? {}
+      : {
+          verifiedPin: pinForAttempt(attempt.pin),
+          acceptedPolicyGeneration: attempt.pin.acceptedPolicyGeneration,
+        }),
   };
 }
 
@@ -193,13 +199,16 @@ export class DesktopNativeE2eeHandshakeService {
   async prepare(input: {
     readonly accountId: string;
     readonly nodeId: string;
+    readonly allowPairing?: boolean;
   }): Promise<DesktopNativeE2eePreparation> {
     this.#prune();
     const [pin, marker] = await Promise.all([
       this.#trust.read(this.#origin, input.accountId, input.nodeId),
       this.#trust.hasVerifiedOrigin(this.#origin),
     ]);
-    if (pin === null) return marker ? { kind: "strict-unavailable" } : { kind: "web-eligible" };
+    if (pin === null && (!marker || input.allowPairing !== true)) {
+      return marker ? { kind: "strict-unavailable" } : { kind: "web-eligible" };
+    }
 
     const identity = this.#identityStatus();
     if (identity.status !== "ready" || identity.accountId !== input.accountId) {
@@ -212,10 +221,11 @@ export class DesktopNativeE2eeHandshakeService {
         certificate.agreementPublicKey,
         await this.#security.ensureAgreementPublicKey(),
       ) ||
-      pin.clientIdentityFingerprint !==
-        formatE2eeKeyFingerprint(
-          e2eeKeyFingerprint("client-identity", certificate.identityPublicKey),
-        )
+      (pin !== null &&
+        pin.clientIdentityFingerprint !==
+          formatE2eeKeyFingerprint(
+            e2eeKeyFingerprint("client-identity", certificate.identityPublicKey),
+          ))
     ) {
       return fail();
     }
@@ -223,7 +233,8 @@ export class DesktopNativeE2eeHandshakeService {
       if (
         prepared.accountId === input.accountId &&
         prepared.nodeId === input.nodeId &&
-        samePin(prepared.pin, pin) &&
+        ((prepared.pin === null && pin === null) ||
+          (prepared.pin !== null && pin !== null && samePin(prepared.pin, pin))) &&
         sameCertificate(prepared.certificate, certificate)
       ) {
         return nativePreparation(attemptHandle, prepared);
@@ -264,7 +275,12 @@ export class DesktopNativeE2eeHandshakeService {
       return fail();
     }
     const livePin = await this.#trust.read(this.#origin, prepared.accountId, prepared.nodeId);
-    if (livePin === null || !samePin(livePin, prepared.pin)) return fail();
+    if (
+      (prepared.pin === null && livePin !== null) ||
+      (prepared.pin !== null && (livePin === null || !samePin(livePin, prepared.pin)))
+    ) {
+      return fail();
+    }
     const verification = verifyNodeE2eeCapabilityStatement({
       statement: input.statement,
       connectedHubOrigin: this.#origin,
@@ -272,24 +288,31 @@ export class DesktopNativeE2eeHandshakeService {
       localSuitePreference: LOCAL_SUITE_PREFERENCE,
       now: this.#now(),
       accountId: prepared.accountId,
-      pin: pinForAttempt(livePin),
-      acceptedPolicyGeneration: livePin.acceptedPolicyGeneration,
+      ...(livePin === null
+        ? {}
+        : {
+            pin: pinForAttempt(livePin),
+            acceptedPolicyGeneration: livePin.acceptedPolicyGeneration,
+          }),
     });
     if (
       verification.kind !== "verified" ||
       verification.statement.nodeId !== prepared.nodeId ||
       verification.selectedSuite !== input.selectedSuite ||
-      verification.anchor === "none"
+      (livePin === null ? verification.anchor !== "none" : verification.anchor === "none")
     ) {
       return fail();
     }
-    const committedPin = await this.#trust.recordAuthenticatedStatement({
-      hubOrigin: this.#origin,
-      accountId: prepared.accountId,
-      nodeId: prepared.nodeId,
-      localNodeHandle: livePin.localNodeHandle,
-      verification,
-    });
+    const committedPin =
+      livePin === null
+        ? null
+        : await this.#trust.recordAuthenticatedStatement({
+            hubOrigin: this.#origin,
+            accountId: prepared.accountId,
+            nodeId: prepared.nodeId,
+            localNodeHandle: livePin.localNodeHandle,
+            verification,
+          });
     const certificate = prepared.certificate;
     let client: E2eeClientHandshake | undefined;
     const result = await this.#security.withAgreementSecretKey((agreementSecretKey) => {
@@ -298,7 +321,7 @@ export class DesktopNativeE2eeHandshakeService {
         advertised: {
           nodeId: verification.statement.nodeId,
           nodeIdentityFingerprint:
-            verification.anchor === "pin-unchanged"
+            committedPin !== null && verification.anchor === "pin-unchanged"
               ? e2eeKeyFingerprint("node-identity", committedPin.verifiedIdentityPublicKey)
               : verification.statement.identityFingerprint,
           prekeyId: verification.statement.prekeyCertificate.prekeyId,
@@ -306,7 +329,7 @@ export class DesktopNativeE2eeHandshakeService {
           continuityChainTranscripts: verification.statement.continuityChain.map(
             (entry) => entry.transcript,
           ),
-          continuityId: committedPin.recordedContinuityId,
+          continuityId: committedPin?.recordedContinuityId ?? verification.statement.continuityId,
         },
         selectedSuite: input.selectedSuite,
         offeredSuites: input.offeredSuites,

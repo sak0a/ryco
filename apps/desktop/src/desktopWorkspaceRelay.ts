@@ -42,9 +42,11 @@ export interface DesktopWorkspaceRelayTarget {
 export interface DesktopWorkspaceRelayAuthority {
   readonly resolveTarget: (
     environmentId: EnvironmentId,
+    pairingOnly: boolean,
   ) => Promise<DesktopWorkspaceRelayTarget | null>;
   readonly prepareE2ee: (
     target: DesktopWorkspaceRelayTarget,
+    pairingOnly: boolean,
   ) => Promise<DesktopNativeE2eePreparation>;
   readonly handshake: () => Promise<DesktopNativeE2eeHandshakeService>;
   readonly issueTicket: (
@@ -57,6 +59,7 @@ export interface DesktopWorkspaceRelayAuthority {
 
 interface PreparedTransport {
   readonly environmentId: EnvironmentId;
+  readonly pairingOnly: boolean;
   readonly expiresAt: number;
   active: DesktopWorkspaceRelaySocket | null;
 }
@@ -91,12 +94,16 @@ function nativeAttempt(input: {
     hubOrigin: new URL(input.target.relayUrl).origin.replace(/^ws/u, "http"),
     selectionClass: "latched",
     legacyPermitted: false,
-    pairingOnly: false,
+    pairingOnly: input.preparation.pairingOnly,
     localSuitePreference: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
     credentials: input.preparation.credentials,
-    verifiedPin: input.preparation.verifiedPin,
+    ...(input.preparation.verifiedPin === undefined
+      ? {}
+      : { verifiedPin: input.preparation.verifiedPin }),
     accountId: input.target.accountId,
-    acceptedPolicyGeneration: input.preparation.acceptedPolicyGeneration,
+    ...(input.preparation.acceptedPolicyGeneration === undefined
+      ? {}
+      : { acceptedPolicyGeneration: input.preparation.acceptedPolicyGeneration }),
     nativeHandshake: {
       start: (startInput) => input.handshake.start(input.preparation.attemptHandle, startInput),
       finish: (handle, payload) => Promise.resolve(input.handshake.finish(handle, payload)),
@@ -212,6 +219,14 @@ export class DesktopWorkspaceRelayManager {
   }
 
   prepare(environmentId: EnvironmentId): string {
+    return this.#prepare(environmentId, false);
+  }
+
+  prepareVerification(environmentId: EnvironmentId): string {
+    return this.#prepare(environmentId, true);
+  }
+
+  #prepare(environmentId: EnvironmentId, pairingOnly: boolean): string {
     this.#prune();
     if (this.#transports.size >= MAX_TRANSPORTS) {
       throw new Error("Desktop workspace transport capacity is unavailable.");
@@ -219,6 +234,7 @@ export class DesktopWorkspaceRelayManager {
     const transportId = opaqueTransportId();
     this.#transports.set(transportId, {
       environmentId,
+      pairingOnly,
       expiresAt: this.#now() + PREPARED_LIFETIME_MS,
       active: null,
     });
@@ -232,18 +248,24 @@ export class DesktopWorkspaceRelayManager {
       throw new Error("Desktop workspace transport is unavailable.");
     }
     try {
-      const target = await this.#authority.resolveTarget(prepared.environmentId);
+      const target = await this.#authority.resolveTarget(
+        prepared.environmentId,
+        prepared.pairingOnly,
+      );
       if (!target || target.environmentId !== prepared.environmentId) {
         throw new Error("Desktop workspace target is unavailable.");
       }
       const [preparation, ticket, headers, handshake] = await Promise.all([
-        this.#authority.prepareE2ee(target),
+        this.#authority.prepareE2ee(target, prepared.pairingOnly),
         this.#authority.issueTicket(target),
         this.#authority.authorizeUpgrade(target),
         this.#authority.handshake(),
       ]);
       if (preparation.kind !== "native") {
         throw new Error("Desktop workspace target is not natively verified.");
+      }
+      if (preparation.pairingOnly !== prepared.pairingOnly) {
+        throw new Error("Desktop workspace target verification state changed.");
       }
       const attempt = nativeAttempt({ target, preparation, handshake });
       const active = new DesktopWorkspaceRelaySocket({

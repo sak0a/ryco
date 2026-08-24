@@ -16,6 +16,7 @@ import { useRightPanelMaximized } from "../../hooks/useRightPanelMaximized";
 import { useThreadRightPanelRouteState } from "../../hooks/useThreadRightPanelRouteState";
 import { useSettings } from "../../hooks/useSettings";
 import { usePerfMark } from "../../perf/tabSwitchInstrumentation";
+import { retainDesktopWorkspaceThreadScope } from "../../platform/desktopWorkspace";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import {
   getRightPanelMode,
@@ -56,6 +57,8 @@ export function ChatThreadRouteView({
   usePerfMark("ChatThreadRouteView");
   const navigate = useNavigate();
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
+  const routeEnvironmentId = threadRef?.environmentId ?? null;
+  const routeThreadId = threadRef?.threadId ?? null;
   const replaceThreadRightPanelSearch = useCallback(
     (nextSearch: RightPanelRouteSearch) => {
       if (!threadRef) {
@@ -132,6 +135,13 @@ export function ChatThreadRouteView({
     hasOpenedAgents: rightPanelMode === "agents",
     openedAgentKeys: activeAgentKey ? [activeAgentKey] : [],
   }));
+  // Cached Desktop rows intentionally are not bootstrap-complete. Acquire the
+  // route's node before the ChatView guard below so opening a last-known thread
+  // can establish its live shell snapshot without a node picker or retry.
+  useEffect(() => {
+    if (!routeEnvironmentId || !routeThreadId) return;
+    return retainDesktopWorkspaceThreadScope(routeEnvironmentId, routeThreadId);
+  }, [routeEnvironmentId, routeThreadId]);
   useEffect(() => {
     if (!threadRef || !pendingDeviceOpenRequest || presentationTier === "phone") return;
     consumeDeviceOpenRequest(threadRef.environmentId, threadRef.threadId);

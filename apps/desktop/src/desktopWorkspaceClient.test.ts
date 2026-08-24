@@ -289,6 +289,7 @@ describe("DesktopWorkspaceClient", () => {
     const begin = vi.fn(async () => ({ handle: "verification-handle-1" }));
     const { client } = fixture({
       nodes,
+      trustedNodeIds: new Set([nodes[0]!.id]),
       verification: {
         begin,
         cancel: vi.fn(async () => undefined),
@@ -310,5 +311,40 @@ describe("DesktopWorkspaceClient", () => {
         environmentId: nodes[1]!.environmentId,
       }),
     ).resolves.toEqual({ handle: "verification-handle-1" });
+  });
+
+  it("starts verification only for an online unverified machine", async () => {
+    const nodes = [node(1), node(2), node(3, { online: false })];
+    const begin = vi.fn(async () => ({ handle: "verification-handle-1" }));
+    const { client } = fixture({
+      nodes,
+      trustedNodeIds: new Set([nodes[0]!.id]),
+      verification: {
+        begin,
+        cancel: vi.fn(async () => undefined),
+        verifyApproval: vi.fn(async () => undefined),
+      },
+    });
+    await client.resume();
+
+    await expect(
+      client.beginVerification({
+        nodeId: nodes[0]!.id,
+        environmentId: nodes[0]!.environmentId,
+      }),
+    ).rejects.toThrow("not eligible");
+    await expect(
+      client.beginVerification({
+        nodeId: nodes[2]!.id,
+        environmentId: nodes[2]!.environmentId,
+      }),
+    ).rejects.toThrow("not eligible");
+    await expect(
+      client.beginVerification({
+        nodeId: nodes[1]!.id,
+        environmentId: nodes[1]!.environmentId,
+      }),
+    ).resolves.toEqual({ handle: "verification-handle-1" });
+    expect(begin).toHaveBeenCalledOnce();
   });
 });
