@@ -5,6 +5,8 @@ import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useHostedHubStore } from "../../hostedHub/state";
+import { acquireMobileHostedNode } from "../../hostedHub/acquireNode";
+import { acquireBeforeNodeSecurity } from "../e2ee/acquireBeforeNodeSecurity";
 import { useAuthoritativeNodeTrust } from "./useAuthoritativeNodeTrust";
 import { buildNeedsVerificationRows } from "./needsVerificationModel";
 
@@ -19,7 +21,7 @@ export function NeedsVerificationSection() {
   if (rows.length === 0) return null;
 
   return (
-    <View className="mx-4 mb-3 rounded-2xl border border-warning-border bg-warning-bg">
+    <View className="mx-4 mb-3 mt-3 rounded-2xl border border-warning-border bg-warning-bg">
       <Text className="px-4 pb-2 pt-3 text-xs font-ryco-bold uppercase tracking-wide text-foreground-muted">
         Needs verification
       </Text>
@@ -28,12 +30,17 @@ export function NeedsVerificationSection() {
           key={row.environmentId}
           accessibilityRole="button"
           accessibilityLabel={`Verify ${row.label}`}
-          onPress={() =>
-            navigation.navigate("SettingsSheet", {
-              screen: "SettingsNodeSecurity",
-              params: row.route,
-            })
-          }
+          onPress={() => {
+            void acquireBeforeNodeSecurity({
+              nodeId: row.nodeId,
+              acquireNode: acquireMobileHostedNode,
+              openSecurity: () =>
+                navigation.navigate("SettingsSheet", {
+                  screen: "SettingsNodeSecurity",
+                  params: row.route,
+                }),
+            });
+          }}
           className={`min-h-14 flex-row items-center gap-3 px-4 py-3 active:opacity-70 ${index > 0 ? "border-t border-warning-border" : ""}`}
         >
           <View className="min-w-0 flex-1">

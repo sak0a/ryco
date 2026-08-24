@@ -103,6 +103,15 @@ export function ChatThreadRouteView({
   const routeThreadExists = threadExists || draftThreadExists;
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
+  // A hosted node switch deliberately demotes the environment to last-known
+  // state while the next relay channel boots. Keep a cached server thread
+  // mounted during that interval: its session/liveness were already stripped
+  // by the demotion boundary, and hosted RPC capability keeps mutations
+  // disabled until the fresh channel is ready. Hiding it behind
+  // `bootstrapComplete` produced a blank ~3s route on every cross-node switch
+  // even when the full thread was still available in memory.
+  const canRenderRouteThread =
+    routeThreadExists && (bootstrapComplete || serverThread !== undefined);
   const diffOpen = threadSearch.diff === "1";
   const previewOpen = threadSearch.preview === "1";
   const rightPanelMode: RightPanelMode | null = getRightPanelMode(threadSearch);
@@ -555,7 +564,7 @@ export function ChatThreadRouteView({
     finalizePromotedDraftThreadByRef(threadRef);
   }, [draftThread?.promotedTo, serverThreadStarted, threadRef]);
 
-  if (!threadRef || !bootstrapComplete || !routeThreadExists) {
+  if (!threadRef || !canRenderRouteThread) {
     return null;
   }
 
