@@ -319,6 +319,12 @@ export class DesktopWorkspaceClient {
       (machine) => machine.nodeId === input.nodeId && machine.environmentId === input.environmentId,
     );
     if (!exact) throw new Error("Desktop workspace machine does not match.");
+    if (
+      !exact.presence.online ||
+      (exact.nativeTrust !== "unverified" && exact.nativeTrust !== "unknown")
+    ) {
+      throw new Error("Desktop workspace machine is not eligible for verification.");
+    }
     return this.#verification.begin({
       accountId: this.#identityStatus.accountId,
       nodeId: input.nodeId,

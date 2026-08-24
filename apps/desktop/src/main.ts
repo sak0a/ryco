@@ -749,14 +749,20 @@ async function ensureDesktopWorkspaceRelayManager(): Promise<DesktopWorkspaceRel
   const coordinator = await ensureDesktopHostedIdentityCoordinator();
   const manager = new DesktopWorkspaceRelayManager({
     authority: {
-      resolveTarget: async (environmentId) => {
+      resolveTarget: async (environmentId, pairingOnly) => {
         const client = await ensureDesktopWorkspaceClient();
         const snapshot = client.snapshot();
         if (snapshot.status !== "ready" || snapshot.accountId === null) return null;
         const machine = snapshot.catalog.find(
           (candidate) => candidate.environmentId === environmentId,
         );
-        if (!machine?.nodeId || !machine.canConnect || machine.nativeTrust !== "verified") {
+        const eligible = pairingOnly
+          ? machine?.presence.online === true &&
+            (machine.nativeTrust === "unverified" || machine.nativeTrust === "unknown") &&
+            machine.revokedAt === null &&
+            !machine.removed
+          : machine?.canConnect === true && machine.nativeTrust === "verified";
+        if (!machine?.nodeId || !eligible) {
           return null;
         }
         const relayUrl = new URL("/v1/relay/client", context.origin);
@@ -768,10 +774,11 @@ async function ensureDesktopWorkspaceRelayManager(): Promise<DesktopWorkspaceRel
           relayUrl: relayUrl.toString(),
         };
       },
-      prepareE2ee: async (target) =>
+      prepareE2ee: async (target, pairingOnly) =>
         (await ensureDesktopNativeE2eeHandshakeService()).prepare({
           accountId: target.accountId,
           nodeId: target.nodeId,
+          allowPairing: pairingOnly,
         }),
       handshake: ensureDesktopNativeE2eeHandshakeService,
       issueTicket: (target) => coordinator.issueRelayTicket(target.nodeId),
@@ -836,20 +843,14 @@ async function ensureDesktopWorkspaceClient(): Promise<DesktopWorkspaceClient> {
       },
     },
     verification: {
-      begin: async ({ accountId, nodeId }) => {
-        const prepared = await (
-          await ensureDesktopNativeE2eeHandshakeService()
-        ).prepare({
-          accountId,
-          nodeId,
-        });
-        if (prepared.kind !== "native") {
-          throw new Error("Desktop workspace verification requires explicit approval.");
-        }
-        return { handle: prepared.attemptHandle };
+      begin: async ({ environmentId }) => {
+        const manager = await ensureDesktopWorkspaceRelayManager();
+        const handle = manager.prepareVerification(environmentId);
+        await manager.activate(handle);
+        return { handle };
       },
       cancel: async (handle) => {
-        desktopNativeE2eeHandshakeService?.destroy(handle);
+        desktopWorkspaceRelayManager?.close(handle);
       },
       verifyApproval: async ({ accountId, nodeId, environmentId, payload }) => {
         await context.trust.promoteCrossDeviceApproval({

@@ -62,7 +62,7 @@ describe("Desktop workspace relay manager", () => {
     await expect(manager.activate(transportId)).rejects.toThrow(
       "Desktop workspace relay activation failed.",
     );
-    expect(authority.resolveTarget).toHaveBeenCalledWith("environment-1");
+    expect(authority.resolveTarget).toHaveBeenCalledWith("environment-1", false);
     expect(authority.issueTicket).not.toHaveBeenCalled();
     expect(events).toEqual([
       { type: "error", transportId },
@@ -71,5 +71,16 @@ describe("Desktop workspace relay manager", () => {
     expect(() => manager.send(transportId, Uint8Array.of(1))).toThrow(
       "Desktop workspace transport is unavailable.",
     );
+  });
+
+  it("marks verification transports as pairing-only at every authority boundary", async () => {
+    const authority = unavailableAuthority();
+    const manager = new DesktopWorkspaceRelayManager({ authority, emit: vi.fn() });
+    const transportId = manager.prepareVerification(EnvironmentId.make("environment-1"));
+
+    await expect(manager.activate(transportId)).rejects.toThrow(
+      "Desktop workspace relay activation failed.",
+    );
+    expect(authority.resolveTarget).toHaveBeenCalledWith("environment-1", true);
   });
 });

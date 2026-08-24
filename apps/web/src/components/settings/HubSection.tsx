@@ -14,7 +14,10 @@ import {
   type VisibilityAwarePoller,
 } from "../../lib/visibilityPolling";
 import { webAppLifecycle } from "../../platform/appLifecycle";
-import { useDesktopWorkspaceState } from "../../platform/desktopWorkspace";
+import {
+  retainDesktopWorkspaceProviderScope,
+  useDesktopWorkspaceState,
+} from "../../platform/desktopWorkspace";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
@@ -73,6 +76,8 @@ const ACTION_LABELS: Record<Exclude<HubAction, "none">, string> = {
   restart: "Restart Ryco",
 };
 
+const VERIFICATION_METADATA_BOOTSTRAP_MS = 10_000;
+
 export function HubSection({
   desktopBridge,
 }: {
@@ -85,6 +90,7 @@ export function HubSection({
   const [verificationTarget, setVerificationTarget] = useState<{
     readonly nodeId: string;
     readonly environmentId: string;
+    readonly handle: string;
   } | null>(null);
   const [verificationPayload, setVerificationPayload] = useState("");
   const [config, setConfig] = useState<DesktopHubLaunchConfig | null>(null);
@@ -241,6 +247,16 @@ export function HubSection({
         environmentId: EnvironmentId.make(verificationTarget.environmentId),
         payload: verificationPayload.trim(),
       });
+      // A new trust record has no cached project/thread snapshot yet. Retain one
+      // bounded provider-status scope to populate it, then return connection
+      // ownership to mounted thread/VCS/provider scopes.
+      const releaseBootstrap = retainDesktopWorkspaceProviderScope(
+        EnvironmentId.make(verificationTarget.environmentId),
+      );
+      globalThis.setTimeout(releaseBootstrap, VERIFICATION_METADATA_BOOTSTRAP_MS);
+      await desktopBridge
+        .cancelDesktopWorkspaceVerification?.(verificationTarget.handle)
+        .catch(() => undefined);
       setVerificationTarget(null);
       setVerificationPayload("");
     } catch {
@@ -249,6 +265,31 @@ export function HubSection({
       );
     }
   }, [desktopBridge, verificationPayload, verificationTarget]);
+
+  const beginDesktopMachineVerification = useCallback(
+    async (input: { readonly nodeId: string; readonly environmentId: string }) => {
+      if (!desktopBridge?.beginDesktopWorkspaceVerification) return;
+      setWorkspaceError(null);
+      try {
+        if (verificationTarget) {
+          await desktopBridge
+            .cancelDesktopWorkspaceVerification?.(verificationTarget.handle)
+            .catch(() => undefined);
+        }
+        const prepared = await desktopBridge.beginDesktopWorkspaceVerification({
+          nodeId: input.nodeId,
+          environmentId: EnvironmentId.make(input.environmentId),
+        });
+        setVerificationTarget({ ...input, handle: prepared.handle });
+        setVerificationPayload("");
+      } catch {
+        setWorkspaceError(
+          "Unable to introduce this Desktop client to that machine. Confirm it is online and retry.",
+        );
+      }
+    },
+    [desktopBridge, verificationTarget],
+  );
 
   const runHostedGitHubAction = useCallback(
     async (action: "connect" | "disconnect", totpCode?: string) => {
@@ -672,11 +713,10 @@ export function HubSection({
                       size="xs"
                       variant="outline"
                       onClick={() => {
-                        setVerificationTarget({
+                        void beginDesktopMachineVerification({
                           nodeId: machine.nodeId!,
                           environmentId: machine.environmentId,
                         });
-                        setVerificationPayload("");
                       }}
                     >
                       Verify this machine
@@ -713,6 +753,9 @@ export function HubSection({
                 size="sm"
                 variant="ghost"
                 onClick={() => {
+                  void desktopBridge
+                    .cancelDesktopWorkspaceVerification?.(verificationTarget.handle)
+                    .catch(() => undefined);
                   setVerificationTarget(null);
                   setVerificationPayload("");
                 }}
