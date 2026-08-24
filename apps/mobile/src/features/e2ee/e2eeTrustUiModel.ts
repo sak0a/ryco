@@ -321,6 +321,16 @@ export type E2eeVerificationStage =
   | "no-evidence";
 
 /**
+ * The cross-device QR path is an alternative to entering the enrollment
+ * fingerprint. Once that anchor matches, leaving the alternative visible both
+ * misstates the current step and can push the comparison action out of the
+ * native sheet's usable viewport.
+ */
+export function shouldShowE2eeApprovalScanner(stage: E2eeVerificationStage): boolean {
+  return stage === "enrollment-fingerprint";
+}
+
+/**
  * The screen's own editing state. Flat and owned by the surface, so the model
  * stays a function of state — and so the comparison acknowledgement is a value
  * the test can assert about rather than a checkbox nobody can reach.

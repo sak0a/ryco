@@ -16,6 +16,7 @@ import {
   E2EE_PRESENTED_COLUMN_TITLE,
   E2EE_PREVIOUSLY_VERIFIED_COLUMN_TITLE,
   requestE2eeApproval,
+  shouldShowE2eeApprovalScanner,
 } from "./e2eeTrustUiModel";
 import { useMobileE2eeSession } from "./useMobileE2eeSession";
 import { getMobileHostedConnectionCoordinator } from "../../connection/hostedConnectionCoordinator";
@@ -172,67 +173,69 @@ export function E2eeNodeVerificationRouteScreen(props: Props) {
         {view.message}
       </Text>
 
-      <View className="mx-5 mt-4 rounded-2xl border border-border bg-card p-4">
-        <Text className="font-ryco-bold text-base text-foreground">Fastest: scan one code</Text>
-        <Text className="mt-1 font-sans text-xs leading-relaxed text-foreground-muted">
-          Request approval here, approve this phone in Ryco Desktop under Node Security, then scan
-          the code Desktop shows. The code works only for this phone.
-        </Text>
-        {!approvalRequested ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Request node approval"
-            disabled={approvalBusy}
-            onPress={() => void requestApproval()}
-            className="mt-3 h-11 items-center justify-center rounded-full border border-border bg-card-alt px-4 active:opacity-70 disabled:opacity-50"
-          >
-            <Text className="font-ryco-bold text-sm text-foreground">
-              {approvalBusy ? "Requesting…" : "Request approval"}
-            </Text>
-          </Pressable>
-        ) : (
-          <Text className="mt-3 font-ryco-bold text-sm text-success">
-            Approval requested — select this phone in Desktop.
+      {shouldShowE2eeApprovalScanner(view.stage) ? (
+        <View className="mx-5 mt-4 rounded-2xl border border-border bg-card p-4">
+          <Text className="font-ryco-bold text-base text-foreground">Fastest: scan one code</Text>
+          <Text className="mt-1 font-sans text-xs leading-relaxed text-foreground-muted">
+            Request approval here, approve this phone in Ryco Desktop under Node Security, then scan
+            the code Desktop shows. The code works only for this phone.
           </Text>
-        )}
-        {scanningApproval ? (
-          <View className="mt-3 overflow-hidden rounded-2xl" style={{ height: 280 }}>
-            <CameraView
-              style={{ flex: 1 }}
-              barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-              onBarcodeScanned={(result) => void scanApproval(result.data)}
-            />
+          {!approvalRequested ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Cancel approval QR scan"
-              onPress={() => {
-                scanHandledRef.current = true;
-                setScanningApproval(false);
-              }}
-              className="absolute bottom-3 h-11 self-center justify-center rounded-full bg-primary px-4 active:opacity-70"
+              accessibilityLabel="Request node approval"
+              disabled={approvalBusy}
+              onPress={() => void requestApproval()}
+              className="mt-3 h-11 items-center justify-center rounded-full border border-border bg-card-alt px-4 active:opacity-70 disabled:opacity-50"
             >
-              <Text className="font-ryco-bold text-sm text-primary-foreground">Cancel scan</Text>
+              <Text className="font-ryco-bold text-sm text-foreground">
+                {approvalBusy ? "Requesting…" : "Request approval"}
+              </Text>
             </Pressable>
-          </View>
-        ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Scan node approval QR code"
-            disabled={approvalBusy || !approvalRequested}
-            onPress={() => void openApprovalScanner()}
-            className="mt-3 h-11 items-center justify-center rounded-full bg-primary px-4 active:opacity-70 disabled:opacity-50"
-          >
-            <Text className="font-ryco-bold text-sm text-primary-foreground">
-              {approvalBusy ? "Verifying…" : "Scan approval QR"}
+          ) : (
+            <Text className="mt-3 font-ryco-bold text-sm text-success">
+              Approval requested — select this phone in Desktop.
             </Text>
-          </Pressable>
-        )}
-        {approvalError ? (
-          <Text className="mt-2 font-sans text-xs leading-relaxed text-danger-foreground">
-            {approvalError}
-          </Text>
-        ) : null}
-      </View>
+          )}
+          {scanningApproval ? (
+            <View className="mt-3 overflow-hidden rounded-2xl" style={{ height: 280 }}>
+              <CameraView
+                style={{ flex: 1 }}
+                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                onBarcodeScanned={(result) => void scanApproval(result.data)}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Cancel approval QR scan"
+                onPress={() => {
+                  scanHandledRef.current = true;
+                  setScanningApproval(false);
+                }}
+                className="absolute bottom-3 h-11 self-center justify-center rounded-full bg-primary px-4 active:opacity-70"
+              >
+                <Text className="font-ryco-bold text-sm text-primary-foreground">Cancel scan</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Scan node approval QR code"
+              disabled={approvalBusy || !approvalRequested}
+              onPress={() => void openApprovalScanner()}
+              className="mt-3 h-11 items-center justify-center rounded-full bg-primary px-4 active:opacity-70 disabled:opacity-50"
+            >
+              <Text className="font-ryco-bold text-sm text-primary-foreground">
+                {approvalBusy ? "Verifying…" : "Scan approval QR"}
+              </Text>
+            </Pressable>
+          )}
+          {approvalError ? (
+            <Text className="mt-2 font-sans text-xs leading-relaxed text-danger-foreground">
+              {approvalError}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* §13.2.1 situation 2 alone: the previously verified pair beside the newly
           presented one, before any pairing step proceeds. */}

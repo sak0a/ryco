@@ -58,6 +58,7 @@ describe("thread activity folds", () => {
   it("splits a fold when a message interrupts the activity", () => {
     const rows = build([work("a"), message("m"), work("b")]);
     expect(rows.map((row) => row.kind)).toEqual(["activity-fold", "entry", "activity-fold"]);
+    expect(folds(rows).map((fold) => fold.id)).toEqual(["fold:turn-1:a", "fold:turn-1:b"]);
   });
 
   it("never emits an empty fold", () => {
