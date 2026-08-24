@@ -933,6 +933,17 @@ describe("the one-operation agreement-scalar borrower", () => {
 });
 
 describe("authenticated statement persistence owns the mobile handshake", () => {
+  it("keeps the owning channel alive across its own authenticated trust revision", async () => {
+    await prepareVerifiedSelection("node_own_statement_revision");
+    const attempt = relayProvider.attempt!;
+
+    await attempt.onStatement!(authenticatedStatement() as never);
+
+    const use = vi.fn(() => "borrowed");
+    await expect(attempt.withNativeAgreementSecretKey!(use)).resolves.toBe("borrowed");
+    expect(use).toHaveBeenCalledOnce();
+  });
+
   it("isolates colliding pending fences and preserves the newer leaf during old cleanup", async () => {
     await prepareVerifiedSelection("c", 21, "a\u0000b");
     let releaseFirst!: () => void;
