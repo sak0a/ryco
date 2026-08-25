@@ -254,6 +254,12 @@ export function validateThreadPriorityRankings(
         ranking.candidateId,
       );
     }
-    return { threadId, ...ranking };
+    return {
+      threadId,
+      candidateId: ranking.candidateId,
+      tier: ranking.tier,
+      confidence: ranking.confidence,
+      reason: ranking.reason,
+    };
   });
 }

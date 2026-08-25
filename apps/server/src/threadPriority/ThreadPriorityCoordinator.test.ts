@@ -162,6 +162,30 @@ it.effect("enforces the 24-hour ceiling even when candidate input is unchanged",
   }),
 );
 
+it.effect("rate-limits changed automatic and manual requests independently", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness({});
+    const coordinator = yield* harness.make();
+    yield* coordinator.ensureCurrent({ force: false });
+
+    harness.setCandidates([{ ...makeCandidate(1), title: "Changed automatically" }]);
+    const automatic = yield* coordinator.ensureCurrent({ force: false }).pipe(Effect.result);
+    assert.isTrue(Result.isFailure(automatic));
+    if (Result.isFailure(automatic)) {
+      assert.equal(automatic.failure.failure.kind, "rate-limited");
+    }
+
+    assert.equal((yield* coordinator.ensureCurrent({ force: true })).disposition, "ranked");
+    harness.setCandidates([{ ...makeCandidate(1), title: "Changed manually" }]);
+    const manual = yield* coordinator.ensureCurrent({ force: true }).pipe(Effect.result);
+    assert.isTrue(Result.isFailure(manual));
+    if (Result.isFailure(manual)) {
+      assert.equal(manual.failure.failure.kind, "rate-limited");
+    }
+    assert.equal(harness.providerCalls(), 2);
+  }),
+);
+
 it.effect("coalesces concurrent forced requests into one inference operation", () =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>();
@@ -230,5 +254,42 @@ it.effect("publishes no partial replacement when a later chunk fails", () =>
     assert.equal(harness.providerCalls(), 2);
     assert.equal(harness.replaceCount(), 0);
     assert.isNull(harness.stored());
+  }),
+);
+
+it.effect("retains the last complete batch when a later refresh fails", () =>
+  Effect.gen(function* () {
+    let shouldFail = false;
+    const harness = makeHarness({
+      rank: (input) =>
+        shouldFail
+          ? Effect.fail(
+              new TextGenerationError({
+                operation: "rankInboxThreads",
+                detail: "Provider transport failed.",
+              }),
+            )
+          : Effect.succeed({
+              rankings: input.chunk.candidates.map((candidate) => ({
+                threadId: input.chunk.threadIdsByCandidateId.get(candidate.candidateId)!,
+                candidateId: candidate.candidateId,
+                tier: "soon" as const,
+                confidence: "high" as const,
+                reason: ThreadPriorityReason.make("Useful work"),
+              })),
+            }),
+    });
+    const coordinator = yield* harness.make();
+    yield* coordinator.ensureCurrent({ force: false });
+    const retained = harness.stored();
+
+    shouldFail = true;
+    harness.advance(THREAD_PRIORITY_AUTOMATIC_MIN_INTERVAL_MS);
+    harness.setCandidates([{ ...makeCandidate(1), title: "Changed before failure" }]);
+    const result = yield* coordinator.ensureCurrent({ force: false }).pipe(Effect.result);
+
+    assert.isTrue(Result.isFailure(result));
+    assert.strictEqual(harness.stored(), retained);
+    assert.equal(harness.replaceCount(), 1);
   }),
 );

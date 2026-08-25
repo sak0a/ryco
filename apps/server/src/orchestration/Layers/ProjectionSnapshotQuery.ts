@@ -2317,38 +2317,39 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   .map(toWorktreeShell),
                 threads: threadRows
                   .filter((row) => row.deletedAt === null)
-                  .map((row): OrchestrationThreadShell => ({
-                    id: row.threadId,
-                    projectId: row.projectId,
-                    title: row.title,
-                    modelSelection: row.modelSelection,
-                    runtimeMode: row.runtimeMode,
-                    interactionMode: row.interactionMode,
-                    tokenMode: row.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
-                    branch: row.branch,
-                    worktreePath: row.worktreePath,
-                    worktreeId: row.worktreeId ?? null,
-                    manualStatusBucket: row.manualStatusBucket ?? null,
-                    manualPosition: row.manualPosition ?? 0,
-                    latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                    goal: row.goal,
-                    createdAt: row.createdAt,
-                    updatedAt: row.updatedAt,
-                    archivedAt: row.archivedAt,
-                    settledOverride: row.settledOverride,
-                    settledAt: row.settledAt,
-                    session: sessionByThread.get(row.threadId) ?? null,
-                    latestUserMessageAt: row.latestUserMessageAt,
-                    hasPendingApprovals: row.pendingApprovalCount > 0,
-                    hasPendingUserInput: row.pendingUserInputCount > 0,
-                    hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
-                    backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
-                      row.threadId,
-                    ),
-                    ...(priorityByThread.has(row.threadId)
-                      ? { priority: priorityByThread.get(row.threadId) }
-                      : {}),
-                  })),
+                  .map((row): OrchestrationThreadShell => {
+                    const shell: OrchestrationThreadShell = {
+                      id: row.threadId,
+                      projectId: row.projectId,
+                      title: row.title,
+                      modelSelection: row.modelSelection,
+                      runtimeMode: row.runtimeMode,
+                      interactionMode: row.interactionMode,
+                      tokenMode: row.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
+                      branch: row.branch,
+                      worktreePath: row.worktreePath,
+                      worktreeId: row.worktreeId ?? null,
+                      manualStatusBucket: row.manualStatusBucket ?? null,
+                      manualPosition: row.manualPosition ?? 0,
+                      latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                      goal: row.goal,
+                      createdAt: row.createdAt,
+                      updatedAt: row.updatedAt,
+                      archivedAt: row.archivedAt,
+                      settledOverride: row.settledOverride,
+                      settledAt: row.settledAt,
+                      session: sessionByThread.get(row.threadId) ?? null,
+                      latestUserMessageAt: row.latestUserMessageAt,
+                      hasPendingApprovals: row.pendingApprovalCount > 0,
+                      hasPendingUserInput: row.pendingUserInputCount > 0,
+                      hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                      backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
+                        row.threadId,
+                      ),
+                    };
+                    const priority = priorityByThread.get(row.threadId);
+                    return priority === undefined ? shell : Object.assign(shell, { priority });
+                  }),
                 updatedAt: updatedAt ?? new Date(0).toISOString(),
               };
 

@@ -107,6 +107,9 @@ describe("thread priority snapshots and freshness RPC", () => {
     const decodeInput = Schema.decodeUnknownSync(ThreadPriorityEnsureCurrentInput);
     expect(decodeInput({}).force).toBe(false);
     expect(decodeInput({ force: true }).force).toBe(true);
+    expect(decodeInput({ force: false, prompt: "client-controlled prompt" })).toEqual({
+      force: false,
+    });
     expect(() => decodeInput({ force: "yes", prompt: "forbidden" })).toThrow();
   });
 
