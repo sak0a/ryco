@@ -12,6 +12,7 @@ import {
   type BranchNameGenerationInput,
   type ThreadTitleGenerationResult,
   type TextGenerationShape,
+  validateRankInboxThreadsResult,
 } from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
@@ -20,6 +21,7 @@ import {
   buildIssueContentTitlePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildThreadPriorityPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -145,7 +147,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "rankInboxThreads";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -415,11 +418,28 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     }
   });
 
+  const rankInboxThreads: TextGenerationShape["rankInboxThreads"] = Effect.fn(
+    "CodexTextGeneration.rankInboxThreads",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildThreadPriorityPrompt({
+      serializedCandidates: input.chunk.serializedCandidates,
+    });
+    const generated = yield* runCodexJson({
+      operation: "rankInboxThreads",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+    return yield* validateRankInboxThreadsResult(input, generated.rankings);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateIssueContent,
+    rankInboxThreads,
   } satisfies TextGenerationShape;
 });

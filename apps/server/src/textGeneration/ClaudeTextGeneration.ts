@@ -14,7 +14,7 @@ import { type ClaudeSettings, type ModelSelection } from "@ryco/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@ryco/shared/git";
 
 import { TextGenerationError } from "@ryco/contracts";
-import { type TextGenerationShape } from "./TextGeneration.ts";
+import { type TextGenerationShape, validateRankInboxThreadsResult } from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
@@ -22,6 +22,7 @@ import {
   buildIssueContentTitlePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildThreadPriorityPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -85,17 +86,20 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     prompt,
     outputSchemaJson,
     modelSelection,
+    toolsEnabled = true,
   }: {
     operation:
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "rankInboxThreads";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
+    toolsEnabled?: boolean;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const jsonSchemaStr = JSON.stringify(toJsonSchemaObject(outputSchemaJson));
     const caps = getClaudeModelCapabilities(modelSelection.model);
@@ -133,7 +137,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           resolveClaudeApiModelId(modelSelection),
           ...(cliEffort ? ["--effort", cliEffort] : []),
           ...(Object.keys(settings).length > 0 ? ["--settings", JSON.stringify(settings)] : []),
-          "--dangerously-skip-permissions",
+          ...(toolsEnabled ? ["--dangerously-skip-permissions"] : ["--tools", ""]),
         ],
         {
           env: claudeEnvironment,
@@ -353,11 +357,29 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     }
   });
 
+  const rankInboxThreads: TextGenerationShape["rankInboxThreads"] = Effect.fn(
+    "ClaudeTextGeneration.rankInboxThreads",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildThreadPriorityPrompt({
+      serializedCandidates: input.chunk.serializedCandidates,
+    });
+    const generated = yield* runClaudeJson({
+      operation: "rankInboxThreads",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+      toolsEnabled: false,
+    });
+    return yield* validateRankInboxThreadsResult(input, generated.rankings);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateIssueContent,
+    rankInboxThreads,
   } satisfies TextGenerationShape;
 });

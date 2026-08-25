@@ -19,8 +19,9 @@ import {
   buildIssueContentTitlePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildThreadPriorityPrompt,
 } from "./TextGenerationPrompts.ts";
-import { type TextGenerationShape } from "./TextGeneration.ts";
+import { type TextGenerationShape, validateRankInboxThreadsResult } from "./TextGeneration.ts";
 import {
   extractJsonObject,
   sanitizeCommitSubject,
@@ -159,7 +160,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "rankInboxThreads";
   }) =>
     sharedServerMutex.withPermit(
       Effect.gen(function* () {
@@ -270,7 +272,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "rankInboxThreads";
     readonly cwd: string;
     readonly prompt: string;
     readonly outputSchemaJson: S;
@@ -504,11 +507,28 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     }
   });
 
+  const rankInboxThreads: TextGenerationShape["rankInboxThreads"] = Effect.fn(
+    "OpenCodeTextGeneration.rankInboxThreads",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildThreadPriorityPrompt({
+      serializedCandidates: input.chunk.serializedCandidates,
+    });
+    const generated = yield* runOpenCodeJson({
+      operation: "rankInboxThreads",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+    return yield* validateRankInboxThreadsResult(input, generated.rankings);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateIssueContent,
+    rankInboxThreads,
   } satisfies TextGenerationShape;
 });

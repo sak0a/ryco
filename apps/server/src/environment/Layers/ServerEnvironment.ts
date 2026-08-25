@@ -81,6 +81,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     capabilities: {
       repositoryIdentity: true,
       threadSettlement: true,
+      threadPriorityRanking: true,
     },
   };
 

@@ -15,8 +15,8 @@ import { Effect, Schema } from "effect";
 
 import { makeCopilotClientOptions } from "../provider/Layers/CopilotAdapter.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
-import type { TextGenerationShape } from "./TextGeneration.ts";
-import { buildThreadTitlePrompt } from "./TextGenerationPrompts.ts";
+import { type TextGenerationShape, validateRankInboxThreadsResult } from "./TextGeneration.ts";
+import { buildThreadPriorityPrompt, buildThreadTitlePrompt } from "./TextGenerationPrompts.ts";
 import { extractJsonObject, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
 
 const COPILOT_THREAD_TITLE_TIMEOUT_MS = 60_000;
@@ -40,6 +40,8 @@ function gitTextGenerationSelection(): ModelSelection {
 export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(function* (
   copilotSettings: CopilotSettings,
   environment: NodeJS.ProcessEnv = process.env,
+  clientFactory: (cwd: string) => CopilotClient = (cwd) =>
+    new CopilotClient(makeCopilotClientOptions(copilotSettings, environment, cwd)),
 ) {
   const codexFallback = yield* makeCodexTextGeneration(
     Schema.decodeSync(CodexSettings)({}),
@@ -59,9 +61,7 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
         message: input.message,
         attachments: input.attachments,
       });
-      const client = new CopilotClient(
-        makeCopilotClientOptions(copilotSettings, environment, input.cwd),
-      );
+      const client = clientFactory(input.cwd);
       const reasoningEffort = getModelSelectionStringOptionValue(
         input.modelSelection,
         "reasoningEffort",
@@ -119,6 +119,66 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
       return { title: sanitizeThreadTitle(parsed.title) };
     });
 
+  const rankInboxThreads: TextGenerationShape["rankInboxThreads"] = (input) =>
+    Effect.gen(function* () {
+      const { prompt, outputSchema } = buildThreadPriorityPrompt({
+        serializedCandidates: input.chunk.serializedCandidates,
+      });
+      const client = clientFactory(input.cwd);
+      const reasoningEffort = getModelSelectionStringOptionValue(
+        input.modelSelection,
+        "reasoningEffort",
+      );
+      const sessionConfig: SessionConfig = {
+        model: input.modelSelection.model,
+        ...(reasoningEffort
+          ? { reasoningEffort: reasoningEffort as "low" | "medium" | "high" | "xhigh" }
+          : {}),
+        workingDirectory: input.cwd,
+        streaming: false,
+        availableTools: [],
+        onPermissionRequest: () => ({ kind: "reject" }),
+      };
+
+      const content = yield* Effect.tryPromise({
+        try: async () => {
+          try {
+            const session = await client.createSession(sessionConfig);
+            const response = await session.sendAndWait(
+              { prompt, mode: "immediate" },
+              COPILOT_THREAD_TITLE_TIMEOUT_MS,
+            );
+            await session.disconnect();
+            return response?.data.content ?? "";
+          } finally {
+            await client.stop();
+          }
+        },
+        catch: (cause) =>
+          new TextGenerationError({
+            operation: "rankInboxThreads",
+            detail:
+              cause instanceof Error
+                ? `GitHub Copilot inbox ranking failed: ${cause.message}`
+                : "GitHub Copilot inbox ranking failed.",
+            cause,
+          }),
+      });
+      const parsed = yield* Schema.decodeEffect(Schema.fromJsonString(outputSchema))(
+        extractJsonObject(content),
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "rankInboxThreads",
+              detail: "GitHub Copilot returned invalid inbox ranking JSON.",
+              cause,
+            }),
+        ),
+      );
+      return yield* validateRankInboxThreadsResult(input, parsed.rankings);
+    });
+
   return {
     generateCommitMessage: (input) =>
       codexFallback.generateCommitMessage(withGitFallbackSelection(input)),
@@ -128,5 +188,6 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
     generateThreadTitle,
     generateIssueContent: (input) =>
       codexFallback.generateIssueContent(withGitFallbackSelection(input)),
+    rankInboxThreads,
   } satisfies TextGenerationShape;
 });

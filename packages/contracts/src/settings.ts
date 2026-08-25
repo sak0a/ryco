@@ -41,7 +41,17 @@ export const SourceControlRefreshMode = Schema.Literals(["automatic", "reduced",
 export type SourceControlRefreshMode = typeof SourceControlRefreshMode.Type;
 export const DEFAULT_SOURCE_CONTROL_REFRESH_MODE: SourceControlRefreshMode = "automatic";
 
+export const AiFocusRefreshIntervalMs = Schema.Literals([
+  0, 300_000, 600_000, 1_800_000, 3_600_000,
+]);
+export type AiFocusRefreshIntervalMs = typeof AiFocusRefreshIntervalMs.Type;
+export const DEFAULT_AI_FOCUS_REFRESH_INTERVAL_MS: AiFocusRefreshIntervalMs = 600_000;
+
 export const ClientSettingsSchema = Schema.Struct({
+  aiFocusEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  aiFocusRefreshIntervalMs: AiFocusRefreshIntervalMs.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_AI_FOCUS_REFRESH_INTERVAL_MS)),
+  ),
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -441,6 +451,9 @@ export const ServerSettings = Schema.Struct({
       }),
     ),
   ),
+  inboxPriorityModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -551,6 +564,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultAgentTokenMode: Schema.optionalKey(AgentTokenMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  inboxPriorityModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),
@@ -581,6 +595,8 @@ export const ServerSettingsPatch = Schema.Struct({
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const ClientSettingsPatch = Schema.Struct({
+  aiFocusEnabled: Schema.optionalKey(Schema.Boolean),
+  aiFocusRefreshIntervalMs: Schema.optionalKey(AiFocusRefreshIntervalMs),
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),

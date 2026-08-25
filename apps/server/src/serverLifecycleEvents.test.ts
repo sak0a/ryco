@@ -15,7 +15,11 @@ it.effect(
         label: "Test environment",
         platform: { os: "darwin" as const, arch: "arm64" as const },
         serverVersion: "0.0.0-test",
-        capabilities: { repositoryIdentity: true, threadSettlement: true },
+        capabilities: {
+          repositoryIdentity: true,
+          threadSettlement: true,
+          threadPriorityRanking: false,
+        },
       };
 
       const welcome = yield* lifecycleEvents

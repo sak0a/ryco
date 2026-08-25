@@ -18,6 +18,13 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas.ts";
+import {
+  ThreadPriorityBatchId,
+  ThreadPriorityConfidence,
+  ThreadPriorityFingerprint,
+  ThreadPriorityReason,
+  ThreadPriorityTier,
+} from "./threadPriorityVocabulary.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ComposerSourceControlContext } from "./sourceControl.ts";
 import { WorkItemProviderKind, WorkItemState } from "./workItems.ts";
@@ -747,6 +754,19 @@ export const OrchestrationProjectShell = Schema.Struct({
 });
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 
+/** Environment-local shell projection used by clients to derive Focus without another data plane. */
+export const ThreadPriorityProjectedRanking = Schema.Struct({
+  tier: ThreadPriorityTier,
+  confidence: ThreadPriorityConfidence,
+  reason: ThreadPriorityReason,
+  inputFingerprint: ThreadPriorityFingerprint,
+  batchId: ThreadPriorityBatchId,
+  modelSelection: ModelSelection,
+  rankedAt: IsoDateTime,
+  usableUntil: IsoDateTime,
+});
+export type ThreadPriorityProjectedRanking = typeof ThreadPriorityProjectedRanking.Type;
+
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -784,6 +804,7 @@ export const OrchestrationThreadShell = Schema.Struct({
    * live work. Optional so old servers/clients interop; absent = none.
    */
   backgroundLiveness: Schema.optional(Schema.NullOr(Schema.Literals(["working", "monitoring"]))),
+  priority: Schema.optional(ThreadPriorityProjectedRanking),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 

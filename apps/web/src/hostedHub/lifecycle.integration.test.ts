@@ -195,7 +195,11 @@ describe("hosted browser lifecycle integration", () => {
       label: selectedNode.label,
       platform: { os: selectedNode.platformOs, arch: selectedNode.platformArch },
       serverVersion: selectedNode.clientVersion,
-      capabilities: { repositoryIdentity: false, threadSettlement: false },
+      capabilities: {
+        repositoryIdentity: false,
+        threadSettlement: false,
+        threadPriorityRanking: false,
+      },
     });
     const localApi = readLocalApi();
 

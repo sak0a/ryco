@@ -121,7 +121,11 @@ function createBaseServerConfig(): ServerConfig {
       label: "Local environment",
       platform: { os: "darwin" as const, arch: "arm64" as const },
       serverVersion: "0.0.0-test",
-      capabilities: { repositoryIdentity: true, threadSettlement: false },
+      capabilities: {
+        repositoryIdentity: true,
+        threadSettlement: false,
+        threadPriorityRanking: false,
+      },
     },
     auth: {
       policy: "loopback-browser",

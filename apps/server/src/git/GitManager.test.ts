@@ -390,6 +390,7 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
             }),
         ),
       ),
+    rankInboxThreads: () => Effect.succeed({ rankings: [] }),
   };
 }
 

@@ -29,6 +29,7 @@ const BASE_ENVIRONMENT = {
   capabilities: {
     repositoryIdentity: true,
     threadSettlement: false,
+    threadPriorityRanking: false,
   },
 };
 
@@ -74,6 +75,7 @@ describe("environmentBootstrap", () => {
       capabilities: {
         repositoryIdentity: true,
         threadSettlement: false,
+        threadPriorityRanking: false,
       },
     });
 

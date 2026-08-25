@@ -139,6 +139,7 @@ describe("remote environment api", () => {
             capabilities: {
               repositoryIdentity: true,
               threadSettlement: false,
+              threadPriorityRanking: false,
             },
           }),
           { status: 200 },
