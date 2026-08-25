@@ -25,6 +25,7 @@ describe("shared RPC access policy", () => {
     expect(rpcAccessFor(AGENT_CONTROL_WS_METHODS.listProposals)).toBe("owner");
     expect(rpcAccessFor(AGENT_CONTROL_WS_METHODS.acceptProposal)).toBe("owner");
     expect(rpcAccessFor(WS_METHODS.sourceControlMergeChangeRequest)).toBe("operator");
+    expect(rpcAccessFor(WS_METHODS.threadPriorityEnsureCurrent)).toBe("operator");
   });
 
   it("fails closed for missing or stale hosted roles", () => {

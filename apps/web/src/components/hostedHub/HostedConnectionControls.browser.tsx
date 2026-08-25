@@ -207,7 +207,11 @@ describe("hosted connection controls", () => {
       label: selectedNode.label,
       platform: { os: "linux", arch: "x64" },
       serverVersion: "0.9.0",
-      capabilities: { repositoryIdentity: false, threadSettlement: false },
+      capabilities: {
+        repositoryIdentity: false,
+        threadSettlement: false,
+        threadPriorityRanking: false,
+      },
     });
 
     mounted = await render(

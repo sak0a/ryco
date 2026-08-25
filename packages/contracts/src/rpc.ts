@@ -191,6 +191,11 @@ import {
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
+  ThreadPriorityEnsureCurrentInput,
+  ThreadPriorityEnsureCurrentResult,
+  ThreadPriorityRpcError,
+} from "./threadPriority.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -298,6 +303,7 @@ export const WS_METHODS = {
 
   // Thread search methods
   searchThreadMessages: "threads.searchMessages",
+  threadPriorityEnsureCurrent: "threadPriority.ensureCurrent",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -1188,6 +1194,12 @@ export const WsSearchThreadMessagesRpc = Rpc.make(WS_METHODS.searchThreadMessage
   payload: SearchThreadMessagesInput,
   success: SearchThreadMessagesResult,
   error: Schema.Union([AuthRpcError]),
+});
+
+export const WsThreadPriorityEnsureCurrentRpc = Rpc.make(WS_METHODS.threadPriorityEnsureCurrent, {
+  payload: ThreadPriorityEnsureCurrentInput,
+  success: ThreadPriorityEnsureCurrentResult,
+  error: Schema.Union([ThreadPriorityRpcError, AuthRpcError]),
 });
 
 export const WsWorktreesSetManualPositionRpc = Rpc.make(WS_METHODS.worktreesSetManualPosition, {

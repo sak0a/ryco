@@ -149,6 +149,7 @@ export const RPC_ACCESS_POLICY = {
   [WS_METHODS.terminalWrite]: "operator",
   [WS_METHODS.textGenerationGenerateBranchName]: "operator",
   [WS_METHODS.textGenerationGenerateIssueContent]: "operator",
+  [WS_METHODS.threadPriorityEnsureCurrent]: "operator",
   [WS_METHODS.searchThreadMessages]: "owner",
   [WS_METHODS.threadsSetManualBucket]: "operator",
   [WS_METHODS.threadsSetManualPosition]: "operator",

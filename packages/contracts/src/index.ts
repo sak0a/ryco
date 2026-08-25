@@ -28,6 +28,7 @@ export * from "./sourceControl.ts";
 export * from "./atlassian.ts";
 export * from "./workItems.ts";
 export * from "./threadGoal.ts";
+export * from "./threadPriority.ts";
 export * from "./orchestration.ts";
 export * from "./agentControl.ts";
 export * from "./editor.ts";

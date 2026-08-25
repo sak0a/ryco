@@ -3,6 +3,7 @@ import { Schema } from "effect";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
+  AiFocusRefreshIntervalMs,
   ClientSettingsPatch,
   ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
@@ -15,6 +16,43 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
+
+describe("AI Focus settings", () => {
+  it("decodes historical client settings as disabled with a ten-minute interval", () => {
+    const decoded = decodeClientSettings({});
+    expect(decoded.aiFocusEnabled).toBe(false);
+    expect(decoded.aiFocusRefreshIntervalMs).toBe(600_000);
+    expect(DEFAULT_CLIENT_SETTINGS.aiFocusEnabled).toBe(false);
+    expect(DEFAULT_CLIENT_SETTINGS.aiFocusRefreshIntervalMs).toBe(600_000);
+  });
+
+  it("accepts manual-only and the approved literal intervals, but rejects arbitrary values", () => {
+    const decodeInterval = Schema.decodeUnknownSync(AiFocusRefreshIntervalMs);
+    for (const interval of [0, 300_000, 600_000, 1_800_000, 3_600_000] as const) {
+      expect(decodeInterval(interval)).toBe(interval);
+      expect(decodeClientSettingsPatch({ aiFocusRefreshIntervalMs: interval })).toMatchObject({
+        aiFocusRefreshIntervalMs: interval,
+      });
+    }
+    expect(() => decodeInterval(60_000)).toThrow();
+  });
+
+  it("decodes historical server settings with no ranking model override", () => {
+    expect(decodeServerSettings({}).inboxPriorityModelSelection).toBeNull();
+    expect(DEFAULT_SERVER_SETTINGS.inboxPriorityModelSelection).toBeNull();
+  });
+
+  it("patches an environment-local model override or resets it to inheritance", () => {
+    expect(
+      decodeServerSettingsPatch({
+        inboxPriorityModelSelection: { instanceId: "claude", model: "claude-sonnet" },
+      }).inboxPriorityModelSelection,
+    ).toMatchObject({ instanceId: "claude", model: "claude-sonnet" });
+    expect(
+      decodeServerSettingsPatch({ inboxPriorityModelSelection: null }).inboxPriorityModelSelection,
+    ).toBeNull();
+  });
+});
 
 describe("ClientSettings.sourceControlRefreshMode", () => {
   it("defaults legacy settings to automatic refresh", () => {

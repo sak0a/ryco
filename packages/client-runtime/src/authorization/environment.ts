@@ -9,7 +9,11 @@ function descriptorForNode(node: HostedHubNode): ExecutionEnvironmentDescriptor 
     label: node.label,
     platform: { os: node.platformOs, arch: node.platformArch },
     serverVersion: node.clientVersion,
-    capabilities: { repositoryIdentity: false, threadSettlement: false },
+    capabilities: {
+      repositoryIdentity: false,
+      threadSettlement: false,
+      threadPriorityRanking: false,
+    },
   };
 }
 
