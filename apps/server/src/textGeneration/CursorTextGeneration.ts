@@ -5,7 +5,11 @@ import { type CursorSettings, type ModelSelection } from "@ryco/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@ryco/shared/git";
 
 import { TextGenerationError } from "@ryco/contracts";
-import { type ThreadTitleGenerationResult, type TextGenerationShape } from "./TextGeneration.ts";
+import {
+  type ThreadTitleGenerationResult,
+  type TextGenerationShape,
+  validateRankInboxThreadsResult,
+} from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
@@ -13,6 +17,7 @@ import {
   buildIssueContentTitlePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildThreadPriorityPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   extractJsonObject,
@@ -33,7 +38,8 @@ function mapCursorAcpError(
     | "generatePrContent"
     | "generateBranchName"
     | "generateThreadTitle"
-    | "generateIssueContent",
+    | "generateIssueContent"
+    | "rankInboxThreads",
   detail: string,
   cause: unknown,
 ): TextGenerationError {
@@ -75,7 +81,8 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "rankInboxThreads";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -303,11 +310,28 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     }
   });
 
+  const rankInboxThreads: TextGenerationShape["rankInboxThreads"] = Effect.fn(
+    "CursorTextGeneration.rankInboxThreads",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildThreadPriorityPrompt({
+      serializedCandidates: input.chunk.serializedCandidates,
+    });
+    const generated = yield* runCursorJson({
+      operation: "rankInboxThreads",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+    return yield* validateRankInboxThreadsResult(input, generated.rankings);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateIssueContent,
+    rankInboxThreads,
   } satisfies TextGenerationShape;
 });
