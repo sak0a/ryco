@@ -239,14 +239,6 @@ function derivePendingUserInputStatesFromActivities(
   return states;
 }
 
-function derivePendingUserInputCountFromActivities(
-  activities: ReadonlyArray<ProjectionThreadActivity>,
-): number {
-  return [...derivePendingUserInputStatesFromActivities(activities).values()].filter(
-    (state) => state.isPending,
-  ).length;
-}
-
 function bucketCount(count: number): string {
   if (count <= 0) return "0";
   if (count < 100) return "1-99";
@@ -1845,7 +1837,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           // rows.  Other activity kinds that happen to carry a requestId
           // (e.g. user-input.requested / user-input.resolved) must not
           // pollute this projection — they have their own accounting via
-          // derivePendingUserInputCountFromActivities.
+          // derivePendingThreadRequestState.
           if (event.payload.activity.kind !== "approval.requested") {
             return;
           }
