@@ -65,6 +65,7 @@ export function HomeScreen() {
         query: home.queryByMode.inbox,
         nodeScope: home.nodeScopeByMode.inbox,
         localQueuedThreadIds,
+        aiFocusEnabled: preferences.aiFocusEnabled ?? false,
         nowMs,
       }),
     [
@@ -73,6 +74,7 @@ export function HomeScreen() {
       home.queryByMode.inbox,
       localQueuedThreadIds,
       nowMs,
+      preferences.aiFocusEnabled,
       projects,
       threads,
       worktrees,

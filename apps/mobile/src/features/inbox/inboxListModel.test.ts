@@ -11,6 +11,7 @@ function rows(count: number): InboxThreadRow[] {
 
 describe("mobile Inbox list", () => {
   const sections: InboxSection[] = [
+    { key: "focus", title: "Focus", rows: rows(1) },
     { key: "active", title: "Active", rows: rows(2) },
     { key: "settled", title: "Settled", rows: rows(45) },
   ];
@@ -21,7 +22,11 @@ describe("mobile Inbox list", () => {
       settledOpen: false,
       settledVisibleCount: MOBILE_SETTLED_PAGE_SIZE,
     });
-    expect(flattened.filter((item) => item.kind === "thread")).toHaveLength(2);
+    expect(flattened.filter((item) => item.kind === "thread")).toHaveLength(3);
+    expect(flattened.find((item) => item.key === "section:focus")).toMatchObject({
+      expanded: true,
+      count: 1,
+    });
     expect(flattened.find((item) => item.key === "section:settled")).toMatchObject({
       expanded: false,
       count: 45,
@@ -34,7 +39,7 @@ describe("mobile Inbox list", () => {
       settledOpen: true,
       settledVisibleCount: MOBILE_SETTLED_PAGE_SIZE,
     });
-    expect(firstPage.filter((item) => item.kind === "thread")).toHaveLength(22);
+    expect(firstPage.filter((item) => item.kind === "thread")).toHaveLength(23);
     expect(firstPage.at(-1)).toMatchObject({ kind: "show-more", remaining: 25 });
   });
 });

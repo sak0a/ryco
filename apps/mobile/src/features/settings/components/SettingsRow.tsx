@@ -7,6 +7,7 @@ import { useThemeColor } from "../../../lib/useThemeColor";
 export function SettingsRow(props: {
   readonly label: string;
   readonly value?: string;
+  readonly detail?: string;
   readonly onPress?: () => void;
   readonly first?: boolean;
   readonly destructive?: boolean;
@@ -18,11 +19,18 @@ export function SettingsRow(props: {
     <View
       className={`flex-row items-center gap-3 px-5 py-3.5 ${props.first ? "" : "border-t border-border-subtle"} ${props.disabled ? "opacity-40" : ""}`}
     >
-      <Text
-        className={`flex-1 font-sans text-[17px] ${props.destructive ? "text-danger-foreground" : "text-foreground"}`}
-      >
-        {props.label}
-      </Text>
+      <View className="min-w-0 flex-1">
+        <Text
+          className={`font-sans text-[17px] ${props.destructive ? "text-danger-foreground" : "text-foreground"}`}
+        >
+          {props.label}
+        </Text>
+        {props.detail ? (
+          <Text className="mt-0.5 font-sans text-xs leading-4 text-foreground-muted">
+            {props.detail}
+          </Text>
+        ) : null}
+      </View>
       {props.value ? (
         <Text className="font-sans text-sm text-foreground-muted" numberOfLines={1}>
           {props.value}

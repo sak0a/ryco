@@ -9,6 +9,7 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  describeThreadPriorityFocus,
   isFreshLatestFailure,
   isUsableThreadPriorityRanking,
   partitionThreadPriorities,
@@ -67,6 +68,19 @@ function failedAt(value: string) {
 }
 
 describe("thread priority partition", () => {
+  it("uses the shared transparent reason vocabulary", () => {
+    expect(describeThreadPriorityFocus({ source: "approval", ranking: null })).toEqual({
+      title: "Approval required",
+      detail: "This thread is waiting for your approval.",
+      aiGenerated: false,
+    });
+    expect(describeThreadPriorityFocus({ source: "ai", ranking: ranking("now") })).toEqual({
+      title: "Now",
+      detail: "Actionable next work",
+      aiGenerated: true,
+    });
+  });
+
   it("returns the exact active ordering when disabled", () => {
     const active = [candidate("env-a:one"), candidate("env-b:two")];
     const partition = partitionThreadPriorities({

@@ -16,6 +16,7 @@ import { useConnectionRegistry } from "../../providers/ConnectionRegistryProvide
 import { RootStack } from "../../Stack";
 import { ServerStateBootstrap } from "../../state/serverStateSync";
 import { deriveAppAccess, isWorkspaceDeepLink } from "./appAccessModel";
+import { ThreadPriorityRefreshBridge } from "../../components/ThreadPriorityRefreshBridge";
 
 const logo = require("../../../../../assets/logo_letter_only.svg");
 
@@ -146,6 +147,7 @@ export function AppAccessGate(props: {
   return (
     <>
       <ServerStateBootstrap />
+      <ThreadPriorityRefreshBridge />
       <WorkspaceNavigation linking={props.linking} theme={props.theme} />
     </>
   );

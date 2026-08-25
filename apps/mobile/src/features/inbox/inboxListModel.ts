@@ -20,7 +20,7 @@ export function flattenInboxSections(input: {
   readonly settledVisibleCount: number;
 }): ReadonlyArray<InboxListItem> {
   return input.sections.flatMap((section): ReadonlyArray<InboxListItem> => {
-    const expanded = section.key === "active" || input.settledOpen;
+    const expanded = section.key !== "settled" || input.settledOpen;
     const visibleRows =
       section.key === "settled" ? section.rows.slice(0, input.settledVisibleCount) : section.rows;
     return [

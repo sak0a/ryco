@@ -7,7 +7,10 @@ import type {
   SidebarWorktreeSummary,
 } from "@ryco/client-runtime/state/threads";
 import { buildThreadInbox, type ThreadInboxEntry } from "@ryco/client-runtime/state/threads";
-import type { ThreadPriorityFocusMetadata } from "@ryco/shared/threadPriority";
+import {
+  describeThreadPriorityFocus,
+  type ThreadPriorityFocusMetadata,
+} from "@ryco/shared/threadPriority";
 import {
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -102,36 +105,7 @@ export interface InboxFocusExplanation {
 }
 
 export function describeInboxFocus(focus: ThreadPriorityFocusMetadata): InboxFocusExplanation {
-  switch (focus.source) {
-    case "pin":
-      return { title: "Pinned", detail: "Pinned by you.", aiGenerated: false };
-    case "approval":
-      return {
-        title: "Approval required",
-        detail: "This thread is waiting for your approval.",
-        aiGenerated: false,
-      };
-    case "input":
-      return {
-        title: "Input required",
-        detail: "This thread is waiting for your response.",
-        aiGenerated: false,
-      };
-    case "failure":
-      return {
-        title: "Recent failure",
-        detail: "The latest turn failed and has not received a newer request.",
-        aiGenerated: false,
-      };
-    case "ai": {
-      const ranking = focus.ranking;
-      return {
-        title: ranking?.tier === "now" ? "Now" : "Soon",
-        detail: ranking?.reason ?? "Selected by the Inbox ranking model.",
-        aiGenerated: true,
-      };
-    }
-  }
+  return describeThreadPriorityFocus(focus);
 }
 
 export function buildPrimaryInboxSidebarEnvironment(input: {
