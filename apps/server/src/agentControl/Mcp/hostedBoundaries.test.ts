@@ -44,7 +44,10 @@ describe("pre-auth server environment descriptor", () => {
       "platform",
       "serverVersion",
     ]);
-    expect(Object.keys(ExecutionEnvironmentCapabilities.fields)).toEqual(["repositoryIdentity"]);
+    expect(Object.keys(ExecutionEnvironmentCapabilities.fields).toSorted()).toEqual([
+      "repositoryIdentity",
+      "threadSettlement",
+    ]);
   });
 });
 
