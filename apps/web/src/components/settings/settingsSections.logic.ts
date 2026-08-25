@@ -31,6 +31,7 @@ const HOSTED_ONLY_SECTIONS: ReadonlySet<SettingsSectionId> = new Set(["account"]
 
 const HOSTED_OWNER_SECTIONS = new Set<SettingsSectionId>([
   "general",
+  "inbox",
   "providers",
   "opinionated-plugins",
   "mcp-servers",

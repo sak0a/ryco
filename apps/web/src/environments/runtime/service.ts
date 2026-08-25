@@ -10,6 +10,7 @@ import {
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
   type ServerConfig,
+  type ServerSettingsPatch,
   type TerminalEvent,
   ThreadId,
 } from "@ryco/contracts";
@@ -64,7 +65,7 @@ import { useStore, selectSidebarThreadSummaryByRef, selectThreadByRef } from "~/
 import { useTerminalStateStore } from "~/terminalStateStore";
 import type { WsProtocolCloseContext } from "@ryco/client-runtime/rpc";
 import { createDeviceRpcClient } from "@ryco/client-runtime/rpc";
-import { getServerConfig } from "../../rpc/serverState";
+import { applySettingsUpdated, getServerConfig } from "../../rpc/serverState";
 import { DeviceWsTransport, HostedWsTransport, WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
 import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
@@ -766,6 +767,7 @@ function createPrimaryEnvironmentClient(
     const transport = new HostedWsTransport(() => attemptFactory.nextUrl(), {
       ...hostedHandlers,
       getConnectionLabel: () => connectionLabel,
+      getEnvironmentId: () => knownEnvironment?.environmentId ?? null,
       onOpen: () => {
         hostedHandlers.onOpen?.();
         markStartupPhase("primary-ws-open");
@@ -787,6 +789,7 @@ function createPrimaryEnvironmentClient(
   return createWsRpcClient(
     new WsTransport(() => authenticatedSocketUrl("/ws"), {
       getConnectionLabel: () => connectionLabel,
+      getEnvironmentId: () => knownEnvironment?.environmentId ?? null,
       getVersionMismatchHint: () =>
         resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
       onOpen: () => {
@@ -842,6 +845,7 @@ function createSavedEnvironmentClient(
   return createWsRpcClient(
     new WsTransport(() => resolveSavedEnvironmentSocketUrl(environmentId, bearerToken, "/ws"), {
       getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
+      getEnvironmentId: () => environmentId,
       getVersionMismatchHint: () =>
         resolveServerConfigVersionMismatch(
           useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
@@ -1007,6 +1011,8 @@ export async function connectDesktopWorkspaceEnvironment(input: {
     webSocketConstructor: (url) => socketFactory.createSocket(url) as unknown as WebSocket,
     retryTransientErrors: false,
     reconnectMaxRetries: 1_000_000,
+    getConnectionLabel: () => input.label,
+    getEnvironmentId: () => input.environmentId,
   });
   const knownEnvironment = createKnownEnvironment({
     id: input.environmentId,
@@ -1022,6 +1028,20 @@ export async function connectDesktopWorkspaceEnvironment(input: {
       kind: "saved",
       knownEnvironment: { ...knownEnvironment, environmentId: input.environmentId },
       client: createWsRpcClient(transport),
+      onConfigSnapshot: (config) => {
+        useSavedEnvironmentRuntimeStore.getState().ensure(input.environmentId);
+        useSavedEnvironmentRuntimeStore.getState().patch(input.environmentId, {
+          descriptor: config.environment,
+          serverConfig: config,
+          connectionState: "connected",
+        });
+      },
+      onWelcome: (payload) => {
+        useSavedEnvironmentRuntimeStore.getState().ensure(input.environmentId);
+        useSavedEnvironmentRuntimeStore.getState().patch(input.environmentId, {
+          descriptor: payload.environment,
+        });
+      },
       ...createEnvironmentConnectionHandlers(),
     }),
   );
@@ -1236,6 +1256,25 @@ export function requireEnvironmentConnection(environmentId: EnvironmentId): Envi
     throw new Error(`No websocket client registered for environment ${environmentId}.`);
   }
   return connection;
+}
+
+/** Persist a node-owned setting through that node's existing live connection. */
+export async function updateEnvironmentServerSettings(
+  environmentId: EnvironmentId,
+  patch: ServerSettingsPatch,
+): Promise<void> {
+  const connection = requireEnvironmentConnection(environmentId);
+  const settings = await connection.client.server.updateSettings(patch);
+  if (getPrimaryKnownEnvironment()?.environmentId === environmentId) {
+    applySettingsUpdated(settings);
+    return;
+  }
+  const current = useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig;
+  if (current) {
+    useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+      serverConfig: { ...current, settings },
+    });
+  }
 }
 
 export function getPrimaryEnvironmentConnection(): EnvironmentConnection {

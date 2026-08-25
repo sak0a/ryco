@@ -350,6 +350,7 @@ describe("PhoneSettingsSurface", () => {
           ? "diagnostics"
           : {
               General: "general",
+              Inbox: "inbox",
               Providers: "providers",
               Plugins: "opinionated-plugins",
               "MCP Servers": "mcp-servers",

@@ -17,6 +17,7 @@ import {
   ShieldIcon,
   UserRoundIcon,
   SearchIcon,
+  SparklesIcon,
 } from "lucide-react";
 
 import { type SettingsSectionId, useSettingsDialogStore } from "../../settingsDialogStore";
@@ -43,6 +44,7 @@ interface NavItem {
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { id: "account", label: "Account", icon: UserRoundIcon },
   { id: "general", label: "General", icon: Settings2Icon },
+  { id: "inbox", label: "Inbox", icon: SparklesIcon },
   { id: "providers", label: "Providers", icon: BlocksIcon },
   { id: "opinionated-plugins", label: "Plugins", icon: PlugZapIcon },
   { id: "mcp-servers", label: "Integrations", icon: ServerIcon },
@@ -106,6 +108,9 @@ const LazyProvidersSettingsPanel = lazy(() =>
   import("./ProvidersSettingsPanel").then((module) => ({
     default: module.ProvidersSettingsPanel,
   })),
+);
+const LazyAiFocusSettings = lazy(() =>
+  import("./AiFocusSettings").then((module) => ({ default: module.AiFocusSettings })),
 );
 const LazyOpinionatedPluginsSettingsPanel = lazy(() =>
   import("./OpinionatedPluginsSettings").then((module) => ({
@@ -177,6 +182,7 @@ function SectionPanel({
     >
       {section === "account" ? <LazyAccountSettingsPanel /> : null}
       {section === "general" ? <GeneralSettingsPanel searchTargetId={searchTargetId} /> : null}
+      {section === "inbox" ? <LazyAiFocusSettings /> : null}
       {section === "providers" ? <LazyProvidersSettingsPanel /> : null}
       {section === "opinionated-plugins" ? <LazyOpinionatedPluginsSettingsPanel /> : null}
       {section === "mcp-servers" ? <LazyIntegrationsSettings /> : null}

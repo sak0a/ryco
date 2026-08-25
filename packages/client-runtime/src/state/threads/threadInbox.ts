@@ -16,6 +16,10 @@ import {
   type ThreadSettlementClassification,
   type ThreadSettlementInput,
 } from "@ryco/shared/threadSettlement";
+import {
+  partitionThreadPriorities,
+  type ThreadPriorityFocusMetadata,
+} from "@ryco/shared/threadPriority";
 
 import { scopeThreadRef, scopedProjectKey, scopedThreadKey } from "../../scoped.ts";
 import type { Project, SidebarThreadSummary, SidebarWorktreeSummary } from "./types.ts";
@@ -78,6 +82,7 @@ export interface ThreadInboxEntry {
   readonly pinned: boolean;
   readonly current: boolean;
   readonly isDraft: boolean;
+  readonly focus: ThreadPriorityFocusMetadata | null;
 }
 
 export interface BuildThreadInboxInput {
@@ -91,10 +96,12 @@ export interface BuildThreadInboxInput {
   readonly drafts?: ReadonlyArray<ThreadInboxDraftSummary> | undefined;
   readonly filters?: ThreadInboxFilters | undefined;
   readonly currentThreadKey?: string | null | undefined;
+  readonly aiFocusEnabled?: boolean | undefined;
   readonly nowMs: number;
 }
 
 export interface ThreadInboxModel {
+  readonly focus: ThreadInboxEntry[];
   readonly active: ThreadInboxEntry[];
   readonly settled: ThreadInboxEntry[];
   readonly excludedCount: number;
@@ -351,6 +358,7 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
       pinned: pinnedKeys.has(key),
       current: input.currentThreadKey === key,
       isDraft: false,
+      focus: null,
     });
   }
 
@@ -396,21 +404,40 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
       pinned: pinnedKeys.has(key),
       current: input.currentThreadKey === key,
       isDraft: true,
+      focus: null,
     });
   }
 
   const visibleEntries = entries.filter(
     (entry) => entry.current || filterEntry(entry, input.filters),
   );
-  return {
-    active: visibleEntries
-      .filter((entry) => entry.lifecycle.classification === "active")
-      .toSorted((left, right) =>
-        compareActiveInboxEntries(
-          { scopedKey: left.key, pinned: left.pinned, createdAt: left.createdAt },
-          { scopedKey: right.key, pinned: right.pinned, createdAt: right.createdAt },
-        ),
+  const active = visibleEntries
+    .filter((entry) => entry.lifecycle.classification === "active")
+    .toSorted((left, right) =>
+      compareActiveInboxEntries(
+        { scopedKey: left.key, pinned: left.pinned, createdAt: left.createdAt },
+        { scopedKey: right.key, pinned: right.pinned, createdAt: right.createdAt },
       ),
+    );
+  const priorityPartition = partitionThreadPriorities({
+    active,
+    enabled: input.aiFocusEnabled ?? false,
+    nowMs: input.nowMs,
+    toCandidate: (entry) => ({
+      scopedKey: entry.key,
+      pinned: entry.pinned,
+      serverOwned: !entry.isDraft,
+      hasPendingApprovals: entry.thread?.hasPendingApprovals ?? false,
+      hasPendingUserInput: entry.thread?.hasPendingUserInput ?? false,
+      latestTurn: entry.thread?.latestTurn ?? null,
+      latestUserMessageAt: entry.thread?.latestUserMessageAt ?? null,
+      priority: entry.thread?.priority,
+    }),
+  });
+
+  return {
+    focus: priorityPartition.focus.map(({ value, focus }) => ({ ...value, focus })),
+    active: [...priorityPartition.active],
     settled: visibleEntries
       .filter((entry) => entry.lifecycle.classification === "settled")
       .toSorted((left, right) =>

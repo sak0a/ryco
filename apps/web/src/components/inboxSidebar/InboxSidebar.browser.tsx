@@ -24,6 +24,7 @@ describe("Inbox sidebar settlement", () => {
 
   it("anchors detail information to the row's right and dispatches scoped settlement", async () => {
     await page.viewport(1_280, 800);
+    const now = Date.now();
     const dispatchCommand = vi.fn(async (_command: unknown) => undefined);
     __setEnvironmentApiOverrideForTests(ENVIRONMENT_ID, {
       orchestration: { dispatchCommand },
@@ -68,6 +69,19 @@ describe("Inbox sidebar settlement", () => {
             hasPendingApprovals: false,
             hasPendingUserInput: false,
             hasActionableProposedPlan: false,
+            priority: {
+              tier: "now",
+              confidence: "high",
+              reason: "A release decision is waiting on this task.",
+              inputFingerprint: "fingerprint" as never,
+              batchId: "batch" as never,
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5.4",
+              },
+              rankedAt: new Date(now - 60_000).toISOString(),
+              usableUntil: new Date(now + 10 * 60_000).toISOString(),
+            },
           },
         ]}
         environments={[
@@ -87,6 +101,8 @@ describe("Inbox sidebar settlement", () => {
         deliveryUnknownThreadKeys={new Set()}
         localQueuedThreadKeys={new Set()}
         activeThreadKey={null}
+        aiFocusEnabled
+        pinnedThreadKeys={new Set()}
         onOpenThread={() => undefined}
       />,
       { container: host },
@@ -94,6 +110,7 @@ describe("Inbox sidebar settlement", () => {
 
     try {
       const row = page.getByTestId("inbox-thread-row");
+      expect(document.body.textContent).toContain("Focus");
       await row.hover();
       await vi.waitFor(() => {
         expect(document.querySelector('[data-slot="tooltip-popup"]')).not.toBeNull();
@@ -109,6 +126,9 @@ describe("Inbox sidebar settlement", () => {
       expect(popup.textContent).toContain("This device");
       expect(popup.textContent).toContain("feat/settle");
       expect(popup.textContent).toContain("Codex · gpt-5.4");
+      expect(popup.textContent).toContain("Why focused? Now.");
+      expect(popup.textContent).toContain("A release decision is waiting on this task.");
+      expect(popup.textContent).toContain("gpt-5.4 · ranked");
       expect(popup.getBoundingClientRect().width).toBeLessThanOrEqual(290);
       expect(popup.getBoundingClientRect().left).toBeGreaterThanOrEqual(
         rowElement.getBoundingClientRect().right,

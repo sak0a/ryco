@@ -24,6 +24,7 @@ import {
   ServerIcon,
   Settings2Icon,
   ShieldIcon,
+  SparklesIcon,
   UserRoundIcon,
   XIcon,
 } from "lucide-react";
@@ -72,6 +73,7 @@ interface PhoneSettingsItem {
 const GENERAL_ITEMS: ReadonlyArray<PhoneSettingsItem> = [
   { id: "account", label: "Account", icon: UserRoundIcon },
   { id: "general", label: "General", icon: Settings2Icon },
+  { id: "inbox", label: "Inbox", icon: SparklesIcon },
   { id: "providers", label: "Providers", icon: BlocksIcon },
   { id: "opinionated-plugins", label: "Plugins", icon: PlugZapIcon },
   { id: "mcp-servers", label: "MCP Servers", icon: ServerIcon },
@@ -117,6 +119,11 @@ const LazyAccountSettingsPanel = lazy(() =>
 const LazyProvidersSettingsPanel = lazy(() =>
   import("../../settings/ProvidersSettingsPanel").then((module) => ({
     default: module.ProvidersSettingsPanel,
+  })),
+);
+const LazyAiFocusSettings = lazy(() =>
+  import("../../settings/AiFocusSettings").then((module) => ({
+    default: module.AiFocusSettings,
   })),
 );
 const LazyOpinionatedPluginsSettingsPanel = lazy(() =>
@@ -176,6 +183,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
     >
       {section === "account" ? <LazyAccountSettingsPanel /> : null}
       {section === "general" ? <GeneralSettingsPanel /> : null}
+      {section === "inbox" ? <LazyAiFocusSettings /> : null}
       {section === "providers" ? <LazyProvidersSettingsPanel /> : null}
       {section === "opinionated-plugins" ? <LazyOpinionatedPluginsSettingsPanel /> : null}
       {section === "mcp-servers" ? <LazyMcpServersSettings /> : null}

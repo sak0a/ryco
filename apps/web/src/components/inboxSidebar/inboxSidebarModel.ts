@@ -7,6 +7,7 @@ import type {
   SidebarWorktreeSummary,
 } from "@ryco/client-runtime/state/threads";
 import { buildThreadInbox, type ThreadInboxEntry } from "@ryco/client-runtime/state/threads";
+import type { ThreadPriorityFocusMetadata } from "@ryco/shared/threadPriority";
 import {
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -24,7 +25,7 @@ export type InboxSidebarThreadState =
   | "offline"
   | "idle";
 
-export type InboxSidebarSectionKey = "active" | "needs-input" | "recent" | "settled";
+export type InboxSidebarSectionKey = "focus" | "active" | "needs-input" | "recent" | "settled";
 export type InboxSidebarStatusFilter = "all" | InboxSidebarSectionKey;
 
 export interface InboxSidebarEnvironment {
@@ -65,11 +66,12 @@ export interface InboxSidebarRow {
   readonly settlementActionEnabled: boolean;
   readonly settlementDisabledReason: string | null;
   readonly effectiveSettlementTimestamp: string | null;
+  readonly focus: ThreadPriorityFocusMetadata | null;
 }
 
 export interface InboxSidebarSection {
   readonly key: InboxSidebarSectionKey;
-  readonly title: "Active now" | "Needs input" | "Recent" | "Settled";
+  readonly title: "Focus" | "Active now" | "Needs input" | "Recent" | "Settled";
   readonly rows: ReadonlyArray<InboxSidebarRow>;
 }
 
@@ -88,7 +90,48 @@ export interface BuildInboxSidebarInput {
   readonly deliveryUnknownThreadKeys?: ReadonlySet<string>;
   readonly localQueuedThreadKeys?: ReadonlySet<string>;
   readonly activeThreadKey?: string | null;
+  readonly aiFocusEnabled?: boolean;
+  readonly pinnedThreadKeys?: ReadonlySet<string>;
   readonly nowMs?: number;
+}
+
+export interface InboxFocusExplanation {
+  readonly title: string;
+  readonly detail: string;
+  readonly aiGenerated: boolean;
+}
+
+export function describeInboxFocus(focus: ThreadPriorityFocusMetadata): InboxFocusExplanation {
+  switch (focus.source) {
+    case "pin":
+      return { title: "Pinned", detail: "Pinned by you.", aiGenerated: false };
+    case "approval":
+      return {
+        title: "Approval required",
+        detail: "This thread is waiting for your approval.",
+        aiGenerated: false,
+      };
+    case "input":
+      return {
+        title: "Input required",
+        detail: "This thread is waiting for your response.",
+        aiGenerated: false,
+      };
+    case "failure":
+      return {
+        title: "Recent failure",
+        detail: "The latest turn failed and has not received a newer request.",
+        aiGenerated: false,
+      };
+    case "ai": {
+      const ranking = focus.ranking;
+      return {
+        title: ranking?.tier === "now" ? "Now" : "Soon",
+        detail: ranking?.reason ?? "Selected by the Inbox ranking model.",
+        aiGenerated: true,
+      };
+    }
+  }
 }
 
 export function buildPrimaryInboxSidebarEnvironment(input: {
@@ -275,16 +318,18 @@ export function buildInboxSidebarSections(
     })),
     localQueuedThreadKeys: input.localQueuedThreadKeys,
     deliveryUnknownThreadKeys,
+    pinnedThreadKeys: input.pinnedThreadKeys,
     filters: {
       ...(input.filters.environmentId ? { environmentIds: [input.filters.environmentId] } : {}),
       text: input.filters.query,
     },
     currentThreadKey: input.activeThreadKey,
+    aiFocusEnabled: input.aiFocusEnabled,
     nowMs: input.nowMs ?? Date.now(),
   });
 
   const rows: InboxSidebarRow[] = [];
-  for (const entry of [...inbox.active, ...inbox.settled]) {
+  for (const entry of [...inbox.focus, ...inbox.active, ...inbox.settled]) {
     const thread = entry.thread;
     if (!thread) continue;
     const environment = environmentById.get(thread.environmentId);
@@ -297,7 +342,7 @@ export function buildInboxSidebarSections(
     const contextLabel = `${machineLabel} · ${projectLabel} · ${workspaceLabel}`;
     const state = resolveThreadState(thread, environment, deliveryUnknownThreadKeys);
     const settled = entry.lifecycle.classification === "settled";
-    const rowSection = settled ? "settled" : sectionKey(state);
+    const rowSection = settled ? "settled" : entry.focus ? "focus" : sectionKey(state);
     if (input.filters.status !== "all" && input.filters.status !== rowSection) continue;
     const providerDriver = resolveProviderDriver(thread);
     rows.push({
@@ -343,18 +388,20 @@ export function buildInboxSidebarSections(
         entry.mutationEnabled && (settled || entry.lifecycle.eligibility.canSettle),
       settlementDisabledReason: settlementDisabledReason(entry),
       effectiveSettlementTimestamp: entry.lifecycle.effectiveSettlementTimestamp,
+      focus: entry.focus,
     });
   }
 
   const unsettledRows = rows.filter((row) => !row.settled);
+  const focus = unsettledRows.filter((row) => row.focus !== null);
   const active = unsettledRows
-    .filter((row) => sectionKey(row.state) === "active")
+    .filter((row) => row.focus === null && sectionKey(row.state) === "active")
     .toSorted(compareActive);
   const needsInput = rows
-    .filter((row) => !row.settled && sectionKey(row.state) === "needs-input")
+    .filter((row) => row.focus === null && !row.settled && sectionKey(row.state) === "needs-input")
     .toSorted(compareRecent);
   const recent = unsettledRows
-    .filter((row) => sectionKey(row.state) === "recent")
+    .filter((row) => row.focus === null && sectionKey(row.state) === "recent")
     .toSorted(compareRecent);
   const settled = rows
     .filter((row) => row.settled)
@@ -365,6 +412,7 @@ export function buildInboxSidebarSections(
     );
 
   return [
+    ...(focus.length > 0 ? [{ key: "focus", title: "Focus", rows: focus } as const] : []),
     ...(active.length > 0 ? [{ key: "active", title: "Active now", rows: active } as const] : []),
     ...(needsInput.length > 0
       ? [{ key: "needs-input", title: "Needs input", rows: needsInput } as const]

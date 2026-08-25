@@ -231,6 +231,7 @@ export default function Sidebar() {
   const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
   const sidebarProjectSortOrder = useSettings((s) => s.sidebarProjectSortOrder);
   const sidebarProjectGroupingMode = useSettings((s) => s.sidebarProjectGroupingMode);
+  const aiFocusEnabled = useSettings((s) => s.aiFocusEnabled);
   const projectGroupingSettings = useSettings((settings) => ({
     sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
     sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
@@ -1349,9 +1350,11 @@ export default function Sidebar() {
       >
         <InboxSidebar
           activeThreadKey={activeRouteThreadKey}
+          aiFocusEnabled={aiFocusEnabled}
           deliveryUnknownThreadKeys={deliveryUnknownThreadKeys}
           environments={inboxEnvironments}
           localQueuedThreadKeys={localQueuedThreadKeys}
+          pinnedThreadKeys={pinnedThreadKeys}
           onOpenThread={navigateToThread}
           projects={projects}
           threads={sidebarThreads}

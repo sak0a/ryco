@@ -274,6 +274,9 @@ export interface WsRpcClient {
       typeof ORCHESTRATION_WS_METHODS.subscribeThreadWindow
     >;
   };
+  readonly threadPriority: {
+    readonly ensureCurrent: RpcUnaryMethod<typeof WS_METHODS.threadPriorityEnsureCurrent>;
+  };
   readonly contextHandoff: {
     readonly getInspectionSummary: RpcUnaryMethod<
       typeof CONTEXT_HANDOFF_WS_METHODS.getInspectionSummary
@@ -637,6 +640,10 @@ export function createWsRpcClient(transport: WsTransport, device?: DeviceRpcClie
           listener,
           { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeThreadWindow },
         ),
+    },
+    threadPriority: {
+      ensureCurrent: (input) =>
+        transport.request((client) => client[WS_METHODS.threadPriorityEnsureCurrent](input)),
     },
     contextHandoff: {
       getInspectionSummary: (input) =>

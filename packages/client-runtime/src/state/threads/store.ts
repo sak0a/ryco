@@ -419,6 +419,7 @@ function mapThreadShell(
     hasPendingUserInput: thread.hasPendingUserInput,
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
     backgroundLiveness: thread.backgroundLiveness ?? null,
+    priority: thread.priority,
   };
   return {
     shell,
@@ -550,7 +551,29 @@ function sidebarThreadSummariesEqual(
     left.hasPendingApprovals === right.hasPendingApprovals &&
     left.hasPendingUserInput === right.hasPendingUserInput &&
     left.hasActionableProposedPlan === right.hasActionableProposedPlan &&
-    (left.backgroundLiveness ?? null) === (right.backgroundLiveness ?? null)
+    (left.backgroundLiveness ?? null) === (right.backgroundLiveness ?? null) &&
+    threadPrioritiesEqual(left.priority, right.priority)
+  );
+}
+
+function threadPrioritiesEqual(
+  left: SidebarThreadSummary["priority"],
+  right: SidebarThreadSummary["priority"],
+): boolean {
+  if (left === right) return true;
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.tier === right.tier &&
+    left.confidence === right.confidence &&
+    left.reason === right.reason &&
+    left.inputFingerprint === right.inputFingerprint &&
+    left.batchId === right.batchId &&
+    left.modelSelection.instanceId === right.modelSelection.instanceId &&
+    left.modelSelection.model === right.modelSelection.model &&
+    JSON.stringify(left.modelSelection.options) === JSON.stringify(right.modelSelection.options) &&
+    left.rankedAt === right.rankedAt &&
+    left.usableUntil === right.usableUntil
   );
 }
 

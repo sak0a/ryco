@@ -195,6 +195,10 @@
     "./threadSettlement": {
       "types": "./src/threadSettlement.ts",
       "import": "./src/threadSettlement.ts"
+    },
+    "./threadPriority": {
+      "types": "./src/threadPriority.ts",
+      "import": "./src/threadPriority.ts"
     }
   },
   "scripts": {

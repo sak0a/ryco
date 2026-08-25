@@ -28,7 +28,9 @@ describe("AI Focus settings", () => {
 
   it("accepts manual-only and the approved literal intervals, but rejects arbitrary values", () => {
     const decodeInterval = Schema.decodeUnknownSync(AiFocusRefreshIntervalMs);
-    for (const interval of [0, 300_000, 600_000, 1_800_000, 3_600_000] as const) {
+    for (const interval of [
+      0, 300_000, 600_000, 1_800_000, 3_600_000, 21_600_000, 86_400_000,
+    ] as const) {
       expect(decodeInterval(interval)).toBe(interval);
       expect(decodeClientSettingsPatch({ aiFocusRefreshIntervalMs: interval })).toMatchObject({
         aiFocusRefreshIntervalMs: interval,

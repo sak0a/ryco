@@ -13,6 +13,7 @@ import {
   GitBranchIcon,
   GitPullRequestIcon,
   LoaderCircleIcon,
+  InfoIcon,
   SearchIcon,
   ServerIcon,
   Undo2Icon,
@@ -29,6 +30,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   buildInboxSidebarSections,
+  describeInboxFocus,
   type InboxSidebarEnvironment,
   type InboxSidebarRow,
   type InboxSidebarStatusFilter,
@@ -42,6 +44,8 @@ export interface InboxSidebarProps {
   readonly deliveryUnknownThreadKeys: ReadonlySet<string>;
   readonly localQueuedThreadKeys: ReadonlySet<string>;
   readonly activeThreadKey: string | null;
+  readonly aiFocusEnabled: boolean;
+  readonly pinnedThreadKeys: ReadonlySet<string>;
   readonly onOpenThread: (threadRef: ScopedThreadRef) => void;
 }
 
@@ -50,6 +54,7 @@ const STATUS_FILTERS: ReadonlyArray<{
   readonly label: string;
 }> = [
   { value: "all", label: "All status" },
+  { value: "focus", label: "Focus" },
   { value: "active", label: "Active now" },
   { value: "needs-input", label: "Needs input" },
   { value: "recent", label: "Recent" },
@@ -92,6 +97,7 @@ function InboxThreadRow(props: {
   const timestamp = props.row.settled
     ? (props.row.effectiveSettlementTimestamp ?? props.row.updatedAt)
     : props.row.updatedAt;
+  const focusExplanation = props.row.focus ? describeInboxFocus(props.row.focus) : null;
   const handleSettlement = async () => {
     if (!actionEnabled) return;
     setPending(true);
@@ -237,6 +243,23 @@ function InboxThreadRow(props: {
                   <span>{props.row.statusLabel}</span>
                 </div>
               ) : null}
+              {focusExplanation ? (
+                <div className="mt-1 border-t border-border/60 pt-1.5">
+                  <div className="flex items-start gap-2 text-popover-foreground/85">
+                    <InfoIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+                    <span className="whitespace-normal">
+                      <span className="font-medium">Why focused? {focusExplanation.title}.</span>{" "}
+                      {focusExplanation.detail}
+                    </span>
+                  </div>
+                  {focusExplanation.aiGenerated && props.row.focus?.ranking ? (
+                    <div className="ml-5 mt-1 whitespace-normal text-[10px] text-muted-foreground/75">
+                      {props.row.focus.ranking.modelSelection.model} · ranked{" "}
+                      {formatRelativeTimeLabel(props.row.focus.ranking.rankedAt)}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
         </TooltipPopup>
@@ -316,13 +339,17 @@ export function InboxSidebar(props: InboxSidebarProps) {
         deliveryUnknownThreadKeys: props.deliveryUnknownThreadKeys,
         localQueuedThreadKeys: props.localQueuedThreadKeys,
         activeThreadKey: props.activeThreadKey,
+        aiFocusEnabled: props.aiFocusEnabled,
+        pinnedThreadKeys: props.pinnedThreadKeys,
       }),
     [
       environmentId,
       props.activeThreadKey,
+      props.aiFocusEnabled,
       props.deliveryUnknownThreadKeys,
       props.environments,
       props.localQueuedThreadKeys,
+      props.pinnedThreadKeys,
       props.projects,
       props.threads,
       props.worktrees,

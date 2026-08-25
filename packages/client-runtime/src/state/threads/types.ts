@@ -23,6 +23,7 @@ import type {
   WorktreeId,
   WorktreeOrigin,
   ThreadGoal,
+  ThreadPriorityProjectedRanking,
 } from "@ryco/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -205,6 +206,8 @@ export interface SidebarThreadSummary {
   backgroundLiveness?: "working" | "monitoring" | null | undefined;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  /** Optional environment-local derived ranking projected by supporting servers. */
+  priority?: ThreadPriorityProjectedRanking | undefined;
 }
 
 export interface SidebarWorktreeSummary {
