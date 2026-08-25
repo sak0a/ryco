@@ -31,4 +31,5 @@ export {
   resetEnvironmentServiceForTests,
   startEnvironmentConnectionService,
   subscribeEnvironmentConnections,
+  updateEnvironmentServerSettings,
 } from "./service";

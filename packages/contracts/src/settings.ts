@@ -42,7 +42,7 @@ export type SourceControlRefreshMode = typeof SourceControlRefreshMode.Type;
 export const DEFAULT_SOURCE_CONTROL_REFRESH_MODE: SourceControlRefreshMode = "automatic";
 
 export const AiFocusRefreshIntervalMs = Schema.Literals([
-  0, 300_000, 600_000, 1_800_000, 3_600_000,
+  0, 300_000, 600_000, 1_800_000, 3_600_000, 21_600_000, 86_400_000,
 ]);
 export type AiFocusRefreshIntervalMs = typeof AiFocusRefreshIntervalMs.Type;
 export const DEFAULT_AI_FOCUS_REFRESH_INTERVAL_MS: AiFocusRefreshIntervalMs = 600_000;

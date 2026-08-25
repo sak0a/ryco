@@ -1,4 +1,5 @@
 import type { EnvironmentId, ThreadPriorityEnsureCurrentResult } from "@ryco/contracts";
+import type { AiFocusRefreshIntervalMs } from "@ryco/contracts/settings";
 
 export const THREAD_PRIORITY_DEFAULT_REFRESH_INTERVAL_MS = 600_000;
 export const THREAD_PRIORITY_CHANGE_QUIET_MS = 1_000;
@@ -30,7 +31,7 @@ export interface ThreadPriorityRefreshDependencies {
 
 export interface ThreadPriorityRefreshConfig {
   readonly enabled: boolean;
-  readonly intervalMs: 0 | 300_000 | 600_000 | 1_800_000 | 3_600_000;
+  readonly intervalMs: AiFocusRefreshIntervalMs;
 }
 
 export interface ThreadPriorityManualRefreshResult {

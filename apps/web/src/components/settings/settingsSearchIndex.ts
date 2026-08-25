@@ -19,6 +19,18 @@ export interface SettingsSearchEntry {
  */
 export const SETTINGS_SEARCH_INDEX: ReadonlyArray<SettingsSearchEntry> = [
   {
+    section: "inbox",
+    title: "AI Focus",
+    description: "Prioritize the Inbox with bounded, environment-local model ranking.",
+    keywords: "priority sort active threads model ranking focus refresh",
+  },
+  {
+    section: "inbox",
+    title: "AI Focus models",
+    description: "Choose or inherit the ranking model for each connected environment.",
+    keywords: "provider node disclosure privacy data",
+  },
+  {
     section: "general",
     title: "Time format",
     description: "System default, 12-hour or 24-hour clock.",
