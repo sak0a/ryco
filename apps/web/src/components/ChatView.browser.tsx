@@ -3092,7 +3092,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("keeps the desktop composer centered at eighty percent while phones remain full width", async () => {
+  it("keeps the active-thread composer on its stable outer width while phones remain full width", async () => {
     const mounted = await mountChatView({
       viewport: WIDE_FOOTER_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -3112,7 +3112,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       const desktopFormRect = composerForm.getBoundingClientRect();
       const desktopContainerRect = composerContainer!.getBoundingClientRect();
-      expect(desktopFormRect.width / desktopContainerRect.width).toBeCloseTo(0.8, 2);
+      expect(desktopFormRect.width).toBeCloseTo(52 * 16, 1);
       expect(desktopFormRect.left - desktopContainerRect.left).toBeCloseTo(
         (desktopContainerRect.width - desktopFormRect.width) / 2,
         1,
@@ -3129,6 +3129,59 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(phoneFormRect.width / phoneContainerRect.width).toBeCloseTo(1, 2);
     } finally {
       await mounted.cleanup();
+    }
+  });
+
+  it("keeps the new-thread composer on the same stable content width", async () => {
+    const draftId = DraftId.make("draft-composer-timeline-width");
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [draftId]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: draftId,
+      },
+    });
+
+    const newThreadMounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      initialPath: `/draft/${draftId}`,
+    });
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="new-thread-hero"]'),
+        "Unable to find the new-thread hero.",
+      );
+      const composerForm = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
+        "Unable to find the new-thread composer form.",
+      );
+      const composerContainer = composerForm.parentElement;
+      expect(composerContainer).toBeTruthy();
+      await waitForLayout();
+
+      const formRect = composerForm.getBoundingClientRect();
+      const containerRect = composerContainer!.getBoundingClientRect();
+      expect(formRect.width).toBeCloseTo(52 * 16, 1);
+      expect(formRect.left - containerRect.left).toBeCloseTo(
+        (containerRect.width - formRect.width) / 2,
+        1,
+      );
+    } finally {
+      await newThreadMounted.cleanup();
     }
   });
 
