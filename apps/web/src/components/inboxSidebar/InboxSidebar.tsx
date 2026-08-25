@@ -109,10 +109,6 @@ function InboxThreadRow(props: {
       data-testid="inbox-thread-row"
       onClick={props.onOpen}
     >
-      <span
-        aria-hidden
-        className={`absolute inset-y-2 left-0 w-0.5 origin-center rounded-full bg-sidebar-foreground/25 transition-[scale,opacity] duration-200 group-hover/row:scale-y-100 group-hover/row:opacity-100 group-focus-visible/row:scale-y-100 group-focus-visible/row:opacity-100 motion-reduce:transition-none ${props.active ? "scale-y-100 opacity-100" : "scale-y-0 opacity-0"}`}
-      />
       {props.row.settled ? (
         <>
           <FolderIcon aria-hidden className="size-3.5 shrink-0 opacity-60" />

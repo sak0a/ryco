@@ -100,6 +100,11 @@ describe("Inbox sidebar settlement", () => {
       });
       const rowElement = document.querySelector<HTMLElement>('[data-testid="inbox-thread-row"]')!;
       const popup = document.querySelector<HTMLElement>('[data-slot="tooltip-popup"]')!;
+      expect(
+        [...rowElement.children].some(
+          (child) => child.classList.contains("absolute") && child.classList.contains("left-0"),
+        ),
+      ).toBe(false);
       expect(popup.textContent).toContain("Hover target");
       expect(popup.textContent).toContain("This device");
       expect(popup.textContent).toContain("feat/settle");
