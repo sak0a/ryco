@@ -50,6 +50,7 @@ import {
   usePrimaryEnvironmentId,
 } from "../environments/primary";
 import { ServerStateBootstrap } from "./ServerStateBootstrap";
+import { ThreadPriorityRefreshBridge } from "./ThreadPriorityRefreshBridge";
 
 export interface RootAppShellProps {
   readonly authGateState: {
@@ -78,6 +79,7 @@ export function RootAppShell({ authGateState }: RootAppShellProps) {
         {localTracingAllowed ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
+        {primaryEnvironmentAuthenticated ? <ThreadPriorityRefreshBridge /> : null}
         <ContextMenuActionSheetHost />
         <SshPasswordPromptDialog />
         {authGateState.status === "hosted-static" ? <HostedStaticEnvironmentBootstrap /> : null}

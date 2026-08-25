@@ -1,9 +1,4 @@
-import {
-  EnvironmentId,
-  type ModelSelection,
-  type ServerConfig,
-  type ServerProvider,
-} from "@ryco/contracts";
+import { EnvironmentId, type ModelSelection, type ServerConfig } from "@ryco/contracts";
 import { getWsConnectionStatusForEnvironment } from "@ryco/client-runtime/rpc";
 import { createModelSelection } from "@ryco/shared/model";
 import { DEFAULT_CLIENT_SETTINGS } from "@ryco/contracts/settings";
