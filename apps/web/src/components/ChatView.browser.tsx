@@ -3267,13 +3267,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const rowLocator = page.getByRole("button", { name: /Inbox exact target/ });
-      const row = Array.from(
+      const rows = Array.from(
         document.querySelectorAll<HTMLButtonElement>('[data-testid="inbox-thread-row"]'),
-      ).find((candidate) => candidate.textContent?.includes("Inbox exact target"));
-      const siblingRow = Array.from(
-        document.querySelectorAll<HTMLButtonElement>('[data-testid="inbox-thread-row"]'),
-      ).find((candidate) => candidate.textContent?.includes("Inbox motion sibling"));
+      );
+      const rowIndex = rows.findIndex((candidate) =>
+        candidate.textContent?.includes("Inbox exact target"),
+      );
+      const row = rows[rowIndex];
+      const rowLocator = page.getByTestId("inbox-thread-row").nth(rowIndex);
+      const siblingRow = rows.find((candidate) =>
+        candidate.textContent?.includes("Inbox motion sibling"),
+      );
       expect(row).toBeDefined();
       expect(siblingRow).toBeDefined();
       expect(row?.textContent).toContain("This device");
