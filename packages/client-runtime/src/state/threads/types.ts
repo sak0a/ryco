@@ -19,6 +19,7 @@ import type {
   RuntimeMode,
   AgentTokenMode,
   StatusBucket,
+  ThreadSettlementOverride,
   WorktreeId,
   WorktreeOrigin,
   ThreadGoal,
@@ -121,6 +122,10 @@ export interface Thread {
   error: string | null;
   createdAt: string;
   archivedAt: string | null;
+  /** Absent only for an object retained from a pre-settlement client snapshot. */
+  settledOverride?: ThreadSettlementOverride | null | undefined;
+  /** Absent only for an object retained from a pre-settlement client snapshot. */
+  settledAt?: string | null | undefined;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
   goal?: ThreadGoal | null;
@@ -147,6 +152,10 @@ export interface ThreadShell {
   error: string | null;
   createdAt: string;
   archivedAt: string | null;
+  /** Optional at the runtime boundary for mixed-version shell snapshots. */
+  settledOverride?: ThreadSettlementOverride | null | undefined;
+  /** Optional at the runtime boundary for mixed-version shell snapshots. */
+  settledAt?: string | null | undefined;
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
@@ -175,6 +184,10 @@ export interface SidebarThreadSummary {
   session: ThreadSession | null;
   createdAt: string;
   archivedAt: string | null;
+  /** Optional at the runtime boundary for mixed-version shell snapshots. */
+  settledOverride?: ThreadSettlementOverride | null | undefined;
+  /** Optional at the runtime boundary for mixed-version shell snapshots. */
+  settledAt?: string | null | undefined;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
   branch: string | null;

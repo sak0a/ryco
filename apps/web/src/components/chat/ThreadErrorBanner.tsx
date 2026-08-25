@@ -1,35 +1,45 @@
-import { memo } from "react";
-import { Alert, AlertAction, AlertDescription } from "../ui/alert";
-import { CircleAlertIcon, XIcon } from "lucide-react";
+import type { ScopedThreadRef } from "@ryco/contracts";
+import { memo, useEffect, useRef } from "react";
+
+import { toastManager } from "../ui/toast";
 
 export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
+  threadRef,
   onDismiss,
 }: {
   error: string | null;
+  threadRef: ScopedThreadRef | null;
   onDismiss?: () => void;
 }) {
-  if (!error) return null;
-  return (
-    <div className="pt-3 mx-auto max-w-3xl">
-      <Alert variant="error">
-        <CircleAlertIcon />
-        <AlertDescription className="line-clamp-3" title={error}>
-          {error}
-        </AlertDescription>
-        {onDismiss && (
-          <AlertAction>
-            <button
-              type="button"
-              aria-label="Dismiss error"
-              className="inline-flex size-6 items-center justify-center rounded-md text-destructive/60 transition-colors hover:text-destructive"
-              onClick={onDismiss}
-            >
-              <XIcon className="size-3.5" />
-            </button>
-          </AlertAction>
-        )}
-      </Alert>
-    </div>
-  );
+  const environmentId = threadRef?.environmentId ?? null;
+  const threadId = threadRef?.threadId ?? null;
+  const onDismissRef = useRef(onDismiss);
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
+  useEffect(() => {
+    if (!error) return;
+    let live = true;
+    const toastId = toastManager.add({
+      type: "error",
+      title: "Thread error",
+      description: error,
+      priority: "high",
+      timeout: 0,
+      onClose: () => {
+        if (live) onDismissRef.current?.();
+      },
+      data: {
+        threadRef: environmentId !== null && threadId !== null ? { environmentId, threadId } : null,
+      },
+    });
+    return () => {
+      live = false;
+      toastManager.close(toastId);
+    };
+  }, [environmentId, error, threadId]);
+
+  return null;
 });

@@ -1,9 +1,4 @@
-import {
-  scopedProjectKey,
-  scopedThreadKey,
-  scopeProjectRef,
-  scopeThreadRef,
-} from "@ryco/client-runtime/scoped";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { WsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { PROVIDER_OPTIONS } from "@ryco/client-runtime/state/session";
 import type {
@@ -11,6 +6,7 @@ import type {
   SidebarThreadSummary,
   SidebarWorktreeSummary,
 } from "@ryco/client-runtime/state/threads";
+import { buildThreadInbox, type ThreadInboxEntry } from "@ryco/client-runtime/state/threads";
 import {
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -28,7 +24,7 @@ export type InboxSidebarThreadState =
   | "offline"
   | "idle";
 
-export type InboxSidebarSectionKey = "active" | "needs-input" | "recent";
+export type InboxSidebarSectionKey = "active" | "needs-input" | "recent" | "settled";
 export type InboxSidebarStatusFilter = "all" | InboxSidebarSectionKey;
 
 export interface InboxSidebarEnvironment {
@@ -40,6 +36,9 @@ export interface InboxSidebarEnvironment {
   readonly role: "viewer" | "operator" | "owner" | "client" | null;
   readonly trust: "not-required" | "unknown" | "unverified" | "verified" | "identity-conflict";
   readonly deliveryUnknown: boolean;
+  readonly threadSettlementSupported: boolean;
+  readonly mutationReady: boolean;
+  readonly shellCurrent: boolean;
 }
 
 export interface InboxSidebarRow {
@@ -56,13 +55,21 @@ export interface InboxSidebarRow {
   readonly updatedAt: string;
   readonly providerDriver: ProviderDriverKind | null;
   readonly providerLabel: string | null;
+  readonly modelLabel: string | null;
+  readonly branchLabel: string | null;
+  readonly changeRequestLabel: string | null;
+  readonly changeRequestStateLabel: string | null;
   readonly trustLabel: "Not verified" | "Identity conflict" | null;
   readonly roleLabel: "Viewer" | null;
+  readonly settled: boolean;
+  readonly settlementActionEnabled: boolean;
+  readonly settlementDisabledReason: string | null;
+  readonly effectiveSettlementTimestamp: string | null;
 }
 
 export interface InboxSidebarSection {
   readonly key: InboxSidebarSectionKey;
-  readonly title: "Active now" | "Needs input" | "Recent";
+  readonly title: "Active now" | "Needs input" | "Recent" | "Settled";
   readonly rows: ReadonlyArray<InboxSidebarRow>;
 }
 
@@ -79,12 +86,16 @@ export interface BuildInboxSidebarInput {
   readonly environments: ReadonlyArray<InboxSidebarEnvironment>;
   readonly filters: InboxSidebarFilters;
   readonly deliveryUnknownThreadKeys?: ReadonlySet<string>;
+  readonly localQueuedThreadKeys?: ReadonlySet<string>;
+  readonly activeThreadKey?: string | null;
+  readonly nowMs?: number;
 }
 
 export function buildPrimaryInboxSidebarEnvironment(input: {
   readonly environmentId: EnvironmentId;
   readonly connectionState: WsConnectionUiState;
   readonly hydratedFromCache: boolean;
+  readonly threadSettlementSupported: boolean;
 }): InboxSidebarEnvironment {
   const connectionState =
     input.connectionState === "error" ? "reconnecting" : input.connectionState;
@@ -98,6 +109,9 @@ export function buildPrimaryInboxSidebarEnvironment(input: {
     role: "owner",
     trust: "not-required",
     deliveryUnknown: false,
+    threadSettlementSupported: input.threadSettlementSupported,
+    mutationReady: connectionState === "connected" && !stale,
+    shellCurrent: !stale,
   };
 }
 
@@ -198,52 +212,92 @@ function compareActive(left: InboxSidebarRow, right: InboxSidebarRow): number {
   return leftPriority - rightPriority || compareRecent(left, right);
 }
 
+function settlementDisabledReason(entry: ThreadInboxEntry): string | null {
+  switch (entry.mutationBlocker) {
+    case "client-draft":
+      return "Drafts cannot be settled yet.";
+    case "unsupported":
+      return "Update this machine to use Settle.";
+    case "disconnected":
+      return "Reconnect this machine to change settlement.";
+    case "read-only":
+      return "Your role cannot change this thread.";
+    case "shell-stale":
+      return "Wait for current thread data before changing settlement.";
+    case null:
+      break;
+  }
+
+  switch (entry.lifecycle.settlementBlocker) {
+    case "pending-approval":
+      return "Resolve the pending approval first.";
+    case "pending-user-input":
+      return "Answer the pending request first.";
+    case "session-starting":
+    case "session-running":
+      return "Wait for the running work to finish.";
+    case "queued-turn":
+    case "local-queue":
+      return "Wait for queued work to be delivered.";
+    case "delivery-unknown":
+      return "Confirm message delivery before settling.";
+    case "thread-archived":
+    case "thread-deleted":
+    case "worktree-archived":
+      return "Archived work cannot be settled.";
+    case "unsupported":
+      return "Update this machine to use Settle.";
+    case null:
+      return null;
+  }
+
+  return null;
+}
+
 export function buildInboxSidebarSections(
   input: BuildInboxSidebarInput,
 ): ReadonlyArray<InboxSidebarSection> {
   const environmentById = new Map(
     input.environments.map((environment) => [environment.environmentId, environment] as const),
   );
-  const projectByKey = new Map(
-    input.projects.map(
-      (project) =>
-        [scopedProjectKey(scopeProjectRef(project.environmentId, project.id)), project] as const,
-    ),
-  );
-  const worktreeByKey = new Map<string, SidebarWorktreeSummary>(
-    input.worktrees.map(
-      (worktree) => [`${worktree.environmentId}:${worktree.id}`, worktree] as const,
-    ),
-  );
   const deliveryUnknownThreadKeys = input.deliveryUnknownThreadKeys ?? new Set<string>();
-  const normalizedQuery = input.filters.query.trim().toLocaleLowerCase();
+  const inbox = buildThreadInbox({
+    projects: input.projects,
+    worktrees: input.worktrees,
+    threads: input.threads,
+    environments: input.environments.map((environment) => ({
+      environmentId: environment.environmentId,
+      label: environment.label,
+      threadSettlementSupported: environment.threadSettlementSupported,
+      connected: environment.connectionState === "connected",
+      mutationReady: environment.mutationReady,
+      shellCurrent: environment.shellCurrent,
+    })),
+    localQueuedThreadKeys: input.localQueuedThreadKeys,
+    deliveryUnknownThreadKeys,
+    filters: {
+      ...(input.filters.environmentId ? { environmentIds: [input.filters.environmentId] } : {}),
+      text: input.filters.query,
+    },
+    currentThreadKey: input.activeThreadKey,
+    nowMs: input.nowMs ?? Date.now(),
+  });
 
   const rows: InboxSidebarRow[] = [];
-  for (const thread of input.threads) {
-    if (thread.archivedAt !== null) continue;
-    if (input.filters.environmentId && thread.environmentId !== input.filters.environmentId) {
-      continue;
-    }
+  for (const entry of [...inbox.active, ...inbox.settled]) {
+    const thread = entry.thread;
+    if (!thread) continue;
     const environment = environmentById.get(thread.environmentId);
-    const project = projectByKey.get(
-      scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
-    );
-    const worktree = thread.worktreeId
-      ? worktreeByKey.get(`${thread.environmentId}:${thread.worktreeId}`)
-      : undefined;
+    const project = entry.project;
+    const worktree = entry.worktree;
     const machineLabel = environment?.label ?? "Unknown machine";
     const projectLabel = project?.name ?? "Unknown project";
     const workspaceLabel =
       worktree?.title ?? worktree?.branch ?? thread.branch ?? "Local workspace";
     const contextLabel = `${machineLabel} · ${projectLabel} · ${workspaceLabel}`;
-    if (
-      normalizedQuery &&
-      !`${thread.title} ${contextLabel}`.toLocaleLowerCase().includes(normalizedQuery)
-    ) {
-      continue;
-    }
     const state = resolveThreadState(thread, environment, deliveryUnknownThreadKeys);
-    const rowSection = sectionKey(state);
+    const settled = entry.lifecycle.classification === "settled";
+    const rowSection = settled ? "settled" : sectionKey(state);
     if (input.filters.status !== "all" && input.filters.status !== rowSection) continue;
     const providerDriver = resolveProviderDriver(thread);
     rows.push({
@@ -263,6 +317,20 @@ export function buildInboxSidebarSections(
         PROVIDER_OPTIONS.find((option) => option.value === providerDriver)?.label ??
         providerDriver ??
         null,
+      modelLabel: thread.modelSelection?.model ?? null,
+      branchLabel: worktree?.branch ?? thread.branch ?? null,
+      changeRequestLabel:
+        worktree?.prNumber != null
+          ? `#${worktree.prNumber}`
+          : worktree?.issueNumber != null
+            ? `#${worktree.issueNumber}`
+            : (worktree?.workItemKey ?? null),
+      changeRequestStateLabel:
+        worktree?.prState ??
+        worktree?.issueState ??
+        worktree?.workItemStateName ??
+        worktree?.workItemState ??
+        null,
       trustLabel:
         environment?.trust === "unverified"
           ? "Not verified"
@@ -270,14 +338,31 @@ export function buildInboxSidebarSections(
             ? "Identity conflict"
             : null,
       roleLabel: environment?.role === "viewer" ? "Viewer" : null,
+      settled,
+      settlementActionEnabled:
+        entry.mutationEnabled && (settled || entry.lifecycle.eligibility.canSettle),
+      settlementDisabledReason: settlementDisabledReason(entry),
+      effectiveSettlementTimestamp: entry.lifecycle.effectiveSettlementTimestamp,
     });
   }
 
-  const active = rows.filter((row) => sectionKey(row.state) === "active").toSorted(compareActive);
+  const unsettledRows = rows.filter((row) => !row.settled);
+  const active = unsettledRows
+    .filter((row) => sectionKey(row.state) === "active")
+    .toSorted(compareActive);
   const needsInput = rows
-    .filter((row) => sectionKey(row.state) === "needs-input")
+    .filter((row) => !row.settled && sectionKey(row.state) === "needs-input")
     .toSorted(compareRecent);
-  const recent = rows.filter((row) => sectionKey(row.state) === "recent").toSorted(compareRecent);
+  const recent = unsettledRows
+    .filter((row) => sectionKey(row.state) === "recent")
+    .toSorted(compareRecent);
+  const settled = rows
+    .filter((row) => row.settled)
+    .toSorted((left, right) =>
+      (right.effectiveSettlementTimestamp ?? right.updatedAt).localeCompare(
+        left.effectiveSettlementTimestamp ?? left.updatedAt,
+      ),
+    );
 
   return [
     ...(active.length > 0 ? [{ key: "active", title: "Active now", rows: active } as const] : []),
@@ -285,5 +370,6 @@ export function buildInboxSidebarSections(
       ? [{ key: "needs-input", title: "Needs input", rows: needsInput } as const]
       : []),
     ...(recent.length > 0 ? [{ key: "recent", title: "Recent", rows: recent } as const] : []),
+    ...(settled.length > 0 ? [{ key: "settled", title: "Settled", rows: settled } as const] : []),
   ];
 }

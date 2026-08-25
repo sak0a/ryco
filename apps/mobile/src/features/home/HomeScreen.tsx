@@ -1,6 +1,7 @@
 import { useNavigation } from "@react-navigation/native";
 import { useHeaderHeight } from "@react-navigation/elements";
-import { useLayoutEffect, useMemo, useReducer, useState } from "react";
+import { getQueuedThreadKeys } from "@ryco/client-runtime/state/message-queue";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useState } from "react";
 import { Pressable, TextInput, View } from "react-native";
 
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
@@ -12,6 +13,7 @@ import { RycoWordmark } from "../../components/RycoWordmark";
 import { SymbolView } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useHomeWorkspaceData } from "../../state/homeData";
+import { useMessageQueueStore } from "../../state/messageQueueStore";
 import { resolveHomeGroupingMode } from "../../state/homeGrouping";
 import { usePreferences } from "../../state/preferencesStore";
 import { useStore } from "../../state/threadsRuntime";
@@ -38,6 +40,16 @@ export function HomeScreen() {
     [environments],
   );
   const { projects, worktrees, threads } = useHomeWorkspaceData(eligibleEnvironmentIds);
+  const queuesByThreadKey = useMessageQueueStore((state) => state.queuesByThreadKey);
+  const localQueuedThreadIds = useMemo(
+    () => getQueuedThreadKeys(queuesByThreadKey),
+    [queuesByThreadKey],
+  );
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   const preferences = usePreferences();
   const groupingMode = resolveHomeGroupingMode(preferences.projectGroupingEnabled);
 
@@ -52,11 +64,15 @@ export function HomeScreen() {
         environments,
         query: home.queryByMode.inbox,
         nodeScope: home.nodeScopeByMode.inbox,
+        localQueuedThreadIds,
+        nowMs,
       }),
     [
       environments,
       home.nodeScopeByMode.inbox,
       home.queryByMode.inbox,
+      localQueuedThreadIds,
+      nowMs,
       projects,
       threads,
       worktrees,

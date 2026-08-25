@@ -25,8 +25,10 @@ import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { TimelineEntry } from "@ryco/client-runtime/state/session";
 import {
   buildQueuedMessageSteerCommand,
+  getQueuedThreadKeys,
   resolveQueuedMessageSteerEligibility,
 } from "@ryco/client-runtime/state/message-queue";
+import { buildThreadInbox } from "@ryco/client-runtime/state/threads";
 import { EnvironmentId, MessageId, ThreadId, type ModelSelection } from "@ryco/contracts";
 import { IMAGE_ONLY_BOOTSTRAP_PROMPT } from "@ryco/client-runtime/state/composer";
 
@@ -49,6 +51,7 @@ import {
 } from "../../state/agentControlRuntime";
 import { useAgentControlSync } from "../../state/agentControlSync";
 import { useHomeWorkspaceData } from "../../state/homeData";
+import { useMessageQueueStore } from "../../state/messageQueueStore";
 import {
   useWsConnectionStatusForEnvironment,
   wsUiStateForEnvironment,
@@ -66,6 +69,7 @@ import { useThreadTimeline } from "../../state/threadTimeline";
 import {
   selectEnvironmentHydratedFromCacheAt,
   selectProjectByRef,
+  selectSidebarThreadSummaryByRef,
   selectThreadByRef,
   useStore,
 } from "../../state/threadsRuntime";
@@ -81,6 +85,7 @@ import {
   setThreadArchived,
   setThreadInteractionMode,
   setThreadRuntimeMode,
+  setThreadSettled,
 } from "./sessionActions";
 import { useThreadChecks } from "./useThreadChecks";
 import { buildThreadTimelineRows, toggleFold, type ThreadTimelineRow } from "./threadActivityFold";
@@ -265,6 +270,10 @@ export function ThreadDetailScreen(props: {
   const thread = useStore((state) =>
     selectThreadByRef(state, scopeThreadRef(environmentId, threadId)),
   );
+  const sidebarThread = useStore((state) =>
+    selectSidebarThreadSummaryByRef(state, scopeThreadRef(environmentId, threadId)),
+  );
+  const queuesByThreadKey = useMessageQueueStore((state) => state.queuesByThreadKey);
   const outboxMessages = useSyncExternalStore(
     subscribeThreadOutbox,
     listThreadOutboxMessages,
@@ -332,6 +341,27 @@ export function ThreadDetailScreen(props: {
   const environmentRow =
     environments.find((environment) => environment.environmentId === environmentId) ?? null;
   const nodeLabel = environmentRow?.label ?? null;
+  const settlementEntry = useMemo(() => {
+    if (!sidebarThread || !environmentRow) return null;
+    const model = buildThreadInbox({
+      projects: project ? [project] : [],
+      worktrees,
+      threads: [sidebarThread],
+      environments: [
+        {
+          environmentId,
+          label: environmentRow.label,
+          threadSettlementSupported: environmentRow.threadSettlementSupported ?? false,
+          connected: environmentRow.connectionState === "connected",
+          mutationReady: environmentRow.mutationReady ?? false,
+          shellCurrent: environmentRow.shellCurrent ?? false,
+        },
+      ],
+      localQueuedThreadKeys: getQueuedThreadKeys(queuesByThreadKey),
+      nowMs: Date.now(),
+    });
+    return model.active[0] ?? model.settled[0] ?? null;
+  }, [environmentId, environmentRow, project, queuesByThreadKey, sidebarThread, worktrees]);
   const cachedView = useMemo(
     () =>
       deriveThreadCachedView({
@@ -355,6 +385,17 @@ export function ThreadDetailScreen(props: {
             hasPendingApproval: pendingApprovals.length > 0,
             hasPendingUserInput: pendingUserInputs.length > 0,
             forcedOffline: cachedView.headerForcedOffline,
+            ...(settlementEntry
+              ? {
+                  settlement: {
+                    attentionState: settlementEntry.lifecycle.classification,
+                    canSettle: settlementEntry.lifecycle.eligibility.canSettle,
+                    settlementBlocker: settlementEntry.lifecycle.settlementBlocker,
+                    mutationEnabled: settlementEntry.mutationEnabled,
+                    mutationBlocker: settlementEntry.mutationBlocker,
+                  },
+                }
+              : {}),
           })
         : null,
     [
@@ -363,6 +404,7 @@ export function ThreadDetailScreen(props: {
       pendingApprovals.length,
       pendingUserInputs.length,
       project,
+      settlementEntry,
       thread,
       worktree,
     ],
@@ -1065,6 +1107,17 @@ export function ThreadDetailScreen(props: {
           onStop={() =>
             void runAction(() => interruptThreadTurn(ensureEnvironmentApi(environmentId), threadId))
           }
+          onToggleSettlement={() => {
+            const action = headerModel.settlementAction;
+            if (!action || action.disabled) return;
+            void runAction(() =>
+              setThreadSettled(
+                ensureEnvironmentApi(environmentId),
+                threadId,
+                action.kind === "settle",
+              ),
+            );
+          }}
           onToggleArchive={() =>
             void runAction(async () => {
               const shouldArchive = thread?.archivedAt === null;

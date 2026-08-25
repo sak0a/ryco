@@ -381,6 +381,7 @@ export interface DesktopWorkspaceMachineProjection {
   readonly canReadMetadata: boolean;
   readonly canConnect: boolean;
   readonly canMutate: boolean;
+  readonly threadSettlementSupported: boolean;
   readonly accessReasons: ReadonlyArray<string>;
 }
 

@@ -35,6 +35,7 @@ function state(): DesktopWorkspaceStateProjection {
         canReadMetadata: true,
         canConnect: true,
         canMutate: true,
+        threadSettlementSupported: true,
         accessReasons: [],
       },
       {
@@ -47,6 +48,7 @@ function state(): DesktopWorkspaceStateProjection {
         canReadMetadata: true,
         canConnect: true,
         canMutate: true,
+        threadSettlementSupported: true,
         accessReasons: [],
       },
     ],

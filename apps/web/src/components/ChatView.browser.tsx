@@ -307,7 +307,7 @@ function createBaseServerConfig(): ServerConfig {
       label: "Local environment",
       platform: { os: "darwin" as const, arch: "arm64" as const },
       serverVersion: "0.0.0-test",
-      capabilities: { repositoryIdentity: true },
+      capabilities: { repositoryIdentity: true, threadSettlement: false },
     },
     auth: {
       policy: "loopback-browser",
@@ -576,6 +576,8 @@ function createSnapshotForTargetUser(options: {
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
         deletedAt: null,
         messages,
         activities: [],
@@ -606,7 +608,7 @@ function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
         label: "Local environment",
         platform: { os: "darwin" as const, arch: "arm64" as const },
         serverVersion: "0.0.0-test",
-        capabilities: { repositoryIdentity: true },
+        capabilities: { repositoryIdentity: true, threadSettlement: false },
       },
       cwd: "/repo/project",
       projectName: "Project",
@@ -641,6 +643,8 @@ function addThreadToSnapshot(
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
         deletedAt: null,
         messages: [],
         activities: [],
@@ -674,6 +678,8 @@ function toShellThread(thread: OrchestrationReadModel["threads"][number]) {
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     archivedAt: thread.archivedAt,
+    settledOverride: thread.settledOverride,
+    settledAt: thread.settledAt,
     session: thread.session,
     latestUserMessageAt:
       thread.messages.findLast((message) => message.role === "user")?.createdAt ?? null,
@@ -1019,6 +1025,8 @@ function createSnapshotWithSecondaryProject(options?: {
             updatedAt: isoAt(31),
           },
           archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
         },
       ]
     : [];
@@ -1040,6 +1048,8 @@ function createSnapshotWithSecondaryProject(options?: {
           createdAt: isoAt(24),
           updatedAt: isoAt(25),
           deletedAt: null,
+          settledOverride: null,
+          settledAt: null,
           messages: [],
           activities: [],
           proposedPlans: [],
@@ -3257,13 +3267,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const rowLocator = page.getByRole("button", { name: /Inbox exact target/ });
-      const row = Array.from(
+      const rows = Array.from(
         document.querySelectorAll<HTMLButtonElement>('[data-testid="inbox-thread-row"]'),
-      ).find((candidate) => candidate.textContent?.includes("Inbox exact target"));
-      const siblingRow = Array.from(
-        document.querySelectorAll<HTMLButtonElement>('[data-testid="inbox-thread-row"]'),
-      ).find((candidate) => candidate.textContent?.includes("Inbox motion sibling"));
+      );
+      const rowIndex = rows.findIndex((candidate) =>
+        candidate.textContent?.includes("Inbox exact target"),
+      );
+      const row = rows[rowIndex];
+      const rowLocator = page.getByTestId("inbox-thread-row").nth(rowIndex);
+      const siblingRow = rows.find((candidate) =>
+        candidate.textContent?.includes("Inbox motion sibling"),
+      );
       expect(row).toBeDefined();
       expect(siblingRow).toBeDefined();
       expect(row?.textContent).toContain("This device");
@@ -3274,11 +3288,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(row?.className).toContain("motion-reduce:translate-none");
       expect(row?.className).toContain("group/row");
 
-      const rowAccent = row?.firstElementChild as HTMLElement;
-      const siblingAccent = siblingRow?.firstElementChild as HTMLElement;
-      expect(rowAccent.className).toContain("group-hover/row:opacity-100");
-      expect(getComputedStyle(rowAccent).opacity).toBe("0");
-      expect(getComputedStyle(siblingAccent).opacity).toBe("0");
+      expect(row?.querySelector('[class*="group-hover/row:opacity-100"]')).toBeNull();
+      expect(siblingRow?.querySelector('[class*="group-hover/row:opacity-100"]')).toBeNull();
 
       // Tailwind v4 guards hover utilities with `(hover: hover)`. Linux
       // headless Chromium can still report no hover device even though
@@ -3292,9 +3303,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         await rowLocator.hover();
         await vi.waitFor(() => {
           expect(getComputedStyle(row!).translate).not.toBe(restingTranslate);
-          expect(getComputedStyle(rowAccent).opacity).toBe("1");
         });
-        expect(getComputedStyle(siblingAccent).opacity).toBe("0");
       }
 
       await rowLocator.click();

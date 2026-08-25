@@ -8,6 +8,9 @@ export interface DirectHomeEnvironmentInput {
   readonly label: string;
   readonly connectionState: "connecting" | "connected" | "disconnected" | "error";
   readonly role: "client" | "owner" | null;
+  readonly threadSettlementSupported?: boolean;
+  readonly shellCurrent?: boolean;
+  readonly apiAvailable?: boolean;
 }
 
 export interface HostedHomeEnvironmentInput {
@@ -31,6 +34,9 @@ export interface HostedHomeEnvironmentInput {
     | "delivery-unknown"
     | "closed";
   readonly role: "viewer" | "operator" | "owner" | null;
+  readonly threadSettlementSupported?: boolean;
+  readonly shellCurrent?: boolean;
+  readonly apiAvailable?: boolean;
 }
 
 /**
@@ -150,6 +156,9 @@ export function buildHomeEnvironments(input: {
       environmentId: direct.environmentId,
       label: direct.label,
       connectionState: directState(direct),
+      threadSettlementSupported: direct.threadSettlementSupported ?? false,
+      mutationReady: direct.connectionState === "connected" && (direct.apiAvailable ?? false),
+      shellCurrent: direct.shellCurrent ?? false,
       ...roleFields(direct.role),
       ...trustFields(direct.environmentId),
       ...(deliveryUnknownIds.has(direct.environmentId) ? { deliveryUnknown: true } : {}),
@@ -163,6 +172,9 @@ export function buildHomeEnvironments(input: {
       environmentId: node.environmentId,
       label: node.label,
       connectionState: "offline",
+      threadSettlementSupported: false,
+      mutationReady: false,
+      shellCurrent: false,
       ...roleFields(node.role),
       ...trustFields(node.environmentId),
       ...(deliveryUnknownIds.has(node.environmentId) ? { deliveryUnknown: true } : {}),
@@ -177,6 +189,12 @@ export function buildHomeEnvironments(input: {
       environmentId: hosted.environmentId,
       label: hosted.label,
       connectionState: hostedState(hosted),
+      threadSettlementSupported: hosted.threadSettlementSupported ?? false,
+      mutationReady:
+        hostedState(hosted) === "connected" &&
+        hosted.role !== "viewer" &&
+        (hosted.apiAvailable ?? false),
+      shellCurrent: hosted.shellCurrent ?? false,
       ...(hosted.sessionStatus === "delivery-unknown" ||
       deliveryUnknownIds.has(hosted.environmentId)
         ? { deliveryUnknown: true }

@@ -87,7 +87,7 @@ function thread(
 }
 
 describe("Inbox model", () => {
-  it("prioritizes input, delivery uncertainty, and running work above recent tasks", () => {
+  it("keeps idle work and attention blockers together in the Active queue", () => {
     const projects = [project(NODE_A, "project-a", "Ryco"), project(NODE_B, "project-b", "Hub")];
     const sections = buildInboxSections({
       projects,
@@ -111,13 +111,13 @@ describe("Inbox model", () => {
       deliveryUnknownThreadIds: new Set(["node-b:uncertain"]),
     });
 
-    expect(sections.map((section) => section.title)).toEqual(["Active now", "Recent"]);
+    expect(sections.map((section) => section.title)).toEqual(["Active"]);
     expect(sections[0]?.rows.map((row) => row.threadId)).toEqual([
+      "idle",
+      "working",
       "approval",
       "uncertain",
-      "working",
     ]);
-    expect(sections[1]?.rows.map((row) => row.threadId)).toEqual(["idle"]);
   });
 
   it("surfaces delivery unknown only on rows from the affected environment", () => {
@@ -220,6 +220,45 @@ describe("Inbox model", () => {
     ]);
   });
 
+  it("partitions manual and merged-PR work into Settled", () => {
+    const merged = {
+      ...worktree(NODE_A, "tree-a", "project-a", "feat/mobile"),
+      prNumber: 42,
+      prState: "merged" as const,
+      updatedAt: "2026-07-26T10:00:00.000Z",
+    };
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco")],
+      worktrees: [merged],
+      threads: [
+        thread(NODE_A, "manual", "project-a", {
+          settledOverride: "settled",
+          settledAt: "2026-07-26T11:00:00.000Z",
+        }),
+        thread(NODE_A, "merged", "project-a", { worktreeId: "tree-a" }),
+        thread(NODE_A, "kept-active", "project-a", {
+          worktreeId: "tree-a",
+          settledOverride: "active",
+        }),
+      ],
+      environments: [
+        {
+          environmentId: NODE_A,
+          label: "Studio",
+          connectionState: "connected",
+          threadSettlementSupported: true,
+          mutationReady: true,
+          shellCurrent: true,
+        },
+      ],
+      nowMs: Date.parse("2026-07-26T12:00:00.000Z"),
+    });
+
+    expect(sections.map((section) => section.title)).toEqual(["Active", "Settled"]);
+    expect(sections[0]?.rows.map((row) => row.threadId)).toEqual(["kept-active"]);
+    expect(sections[1]?.rows.map((row) => row.threadId)).toEqual(["manual", "merged"]);
+  });
+
   it("routes every empty state to its missing prerequisite", () => {
     expect(
       resolveInboxEmptyState({
@@ -313,10 +352,8 @@ describe("inbox change-request badge", () => {
     });
 
     const active = sections.find((section) => section.key === "active");
-    const recent = sections.find((section) => section.key === "recent");
-    expect(active?.rows.map((row) => row.threadId)).toEqual(["live-working"]);
-    expect(recent?.rows.map((row) => row.state)).toEqual(["offline", "offline"]);
-    expect(recent?.rows[0]?.statusLabel).toBe("Offline · last seen 2h ago");
+    expect(active?.rows.map((row) => row.state)).toEqual(["offline", "offline", "working"]);
+    expect(active?.rows[0]?.statusLabel).toBe("Offline · last seen 2h ago");
   });
 });
 

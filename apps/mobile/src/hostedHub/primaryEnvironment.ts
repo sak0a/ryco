@@ -1,4 +1,5 @@
 import type { ExecutionEnvironmentDescriptor } from "@ryco/contracts";
+import { useSyncExternalStore } from "react";
 
 /**
  * The hosted plane's primary-environment descriptor.
@@ -13,6 +14,7 @@ import type { ExecutionEnvironmentDescriptor } from "@ryco/contracts";
 type Listener = () => void;
 
 let descriptor: ExecutionEnvironmentDescriptor | null = null;
+const descriptorsByEnvironmentId = new Map<string, ExecutionEnvironmentDescriptor>();
 const listeners = new Set<Listener>();
 
 export function writePrimaryEnvironmentDescriptor(
@@ -20,6 +22,7 @@ export function writePrimaryEnvironmentDescriptor(
 ): void {
   if (descriptor === next) return;
   descriptor = next;
+  if (next) descriptorsByEnvironmentId.set(next.environmentId, next);
   // Snapshot first: a listener may subscribe or unsubscribe while being
   // notified, and mutating the live set mid-walk would skip or re-run one.
   for (const listener of [...listeners]) listener();
@@ -27,6 +30,12 @@ export function writePrimaryEnvironmentDescriptor(
 
 export function readPrimaryEnvironmentDescriptor(): ExecutionEnvironmentDescriptor | null {
   return descriptor;
+}
+
+export function readEnvironmentDescriptor(
+  environmentId: string,
+): ExecutionEnvironmentDescriptor | null {
+  return descriptorsByEnvironmentId.get(environmentId) ?? null;
 }
 
 export function subscribePrimaryEnvironmentDescriptor(listener: Listener): () => void {
@@ -39,8 +48,17 @@ export function subscribePrimaryEnvironmentDescriptor(listener: Listener): () =>
   };
 }
 
+export function usePrimaryEnvironmentDescriptor(): ExecutionEnvironmentDescriptor | null {
+  return useSyncExternalStore(
+    subscribePrimaryEnvironmentDescriptor,
+    readPrimaryEnvironmentDescriptor,
+    () => null,
+  );
+}
+
 /** Test seam: drop the descriptor and every listener between cases. */
 export function resetPrimaryEnvironmentForTests(): void {
   descriptor = null;
+  descriptorsByEnvironmentId.clear();
   listeners.clear();
 }

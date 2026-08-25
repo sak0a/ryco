@@ -26,9 +26,10 @@ import {
   scopeThreadRef,
 } from "@ryco/client-runtime/scoped";
 import { getWsConnectionUiState } from "@ryco/client-runtime/rpc";
+import { getQueuedThreadKeys } from "@ryco/client-runtime/state/message-queue";
 import { isWorkspaceMetadataSnapshot } from "@ryco/client-runtime/state/workspace";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { usePrimaryEnvironmentId } from "../environments/primary";
+import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { PREFERS_REDUCED_MOTION_QUERY, shouldEnableAutoAnimate } from "../lib/perf/motion";
@@ -121,6 +122,7 @@ import { buildSidebarProjectFolderTree } from "../sidebarProjectFolders";
 import { useDesktopWorkspaceState } from "../platform/desktopWorkspace";
 import { useHostedWorkspaceState } from "../hostedHub/hostedConnectionCoordinator";
 import { useWsConnectionStatus } from "../rpc/wsConnectionState";
+import { useMessageQueueStore } from "../messageQueueStore";
 
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
@@ -283,12 +285,18 @@ export default function Sidebar() {
   const shortcutModifiers = useShortcutModifierState();
   const modelPickerOpen = useModelPickerOpen();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const primaryEnvironmentDescriptor = usePrimaryEnvironmentDescriptor();
   const primaryWsConnectionStatus = useWsConnectionStatus();
   const primaryConnectionState = getWsConnectionUiState(primaryWsConnectionStatus);
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
   const desktopWorkspace = useDesktopWorkspaceState();
   const hostedWorkspace = useHostedWorkspaceState();
+  const queuesByThreadKey = useMessageQueueStore((state) => state.queuesByThreadKey);
+  const localQueuedThreadKeys = useMemo(
+    () => getQueuedThreadKeys(queuesByThreadKey),
+    [queuesByThreadKey],
+  );
   const handleSidebarModeChange = useCallback(
     (mode: SidebarMode) => {
       setOpen(true);
@@ -329,6 +337,13 @@ export default function Sidebar() {
           role: machine.effectiveRole,
           trust: machine.nativeTrust,
           deliveryUnknown: machine.deliveryUnknown,
+          threadSettlementSupported:
+            machine.environmentId === primaryEnvironmentId
+              ? (primaryEnvironmentDescriptor?.capabilities.threadSettlement ??
+                machine.capabilities.threadSettlement)
+              : machine.capabilities.threadSettlement,
+          mutationReady: machine.canMutate && machine.connectionState === "connected" && !stale,
+          shellCurrent: !stale,
         });
       }
     } else if (desktopWorkspace.status !== "signed-out") {
@@ -355,6 +370,9 @@ export default function Sidebar() {
           role: null,
           trust: machine.nativeTrust,
           deliveryUnknown: false,
+          threadSettlementSupported: machine.threadSettlementSupported,
+          mutationReady: machine.canMutate && machine.connectionState === "connected" && !stale,
+          shellCurrent: !stale,
         });
       }
     }
@@ -369,6 +387,8 @@ export default function Sidebar() {
             connectionState: primaryConnectionState,
             hydratedFromCache:
               environmentStateById[environmentId]?.hydratedFromCacheAt !== undefined,
+            threadSettlementSupported:
+              primaryEnvironmentDescriptor?.capabilities.threadSettlement ?? false,
           }),
         );
         continue;
@@ -394,6 +414,9 @@ export default function Sidebar() {
         role: runtime?.role ?? null,
         trust: "unknown",
         deliveryUnknown: false,
+        threadSettlementSupported: runtime?.descriptor?.capabilities.threadSettlement ?? false,
+        mutationReady: connectionState === "connected" && runtime?.role !== null && !stale,
+        shellCurrent: !stale,
       });
     }
     return [...byEnvironmentId.values()].toSorted((left, right) =>
@@ -404,6 +427,7 @@ export default function Sidebar() {
     environmentStateById,
     hostedWorkspace,
     primaryConnectionState,
+    primaryEnvironmentDescriptor,
     primaryEnvironmentId,
     projects,
     savedEnvironmentRegistry,
@@ -1327,6 +1351,7 @@ export default function Sidebar() {
           activeThreadKey={activeRouteThreadKey}
           deliveryUnknownThreadKeys={deliveryUnknownThreadKeys}
           environments={inboxEnvironments}
+          localQueuedThreadKeys={localQueuedThreadKeys}
           onOpenThread={navigateToThread}
           projects={projects}
           threads={sidebarThreads}

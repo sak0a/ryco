@@ -2,8 +2,11 @@ import type {
   Project,
   SidebarThreadSummary,
   SidebarWorktreeSummary,
+  ThreadInboxMutationBlocker,
 } from "@ryco/client-runtime/state/threads";
+import { buildThreadInbox } from "@ryco/client-runtime/state/threads";
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
+import type { ThreadSettlementBlocker } from "@ryco/shared/threadSettlement";
 
 import { buildChangeRequestBadge, type ChangeRequestBadge } from "../../lib/changeRequestBadge";
 import {
@@ -20,7 +23,8 @@ export type InboxThreadState =
   | "error"
   | "reconnecting"
   | "offline"
-  | "idle";
+  | "idle"
+  | "settled";
 
 export interface InboxEnvironment {
   readonly environmentId: EnvironmentId;
@@ -49,6 +53,9 @@ export interface InboxEnvironment {
   readonly trust?: NodeTrust;
   /** Wave 3b: this environment, not the whole app, has an unconfirmed send. */
   readonly deliveryUnknown?: boolean;
+  readonly threadSettlementSupported?: boolean;
+  readonly mutationReady?: boolean;
+  readonly shellCurrent?: boolean;
 }
 
 export interface InboxThreadRow {
@@ -86,11 +93,16 @@ export interface InboxThreadRow {
   /** Current provider brand for the task; null renders the neutral mark. */
   readonly providerDriver: string | null;
   readonly providerLabel: string | null;
+  readonly attentionState: "active" | "settled";
+  readonly canSettle: boolean;
+  readonly settlementBlocker: ThreadSettlementBlocker | null;
+  readonly mutationEnabled: boolean;
+  readonly mutationBlocker: ThreadInboxMutationBlocker | null;
 }
 
 export interface InboxSection {
-  readonly key: "active" | "recent";
-  readonly title: "Active now" | "Recent";
+  readonly key: "active" | "settled";
+  readonly title: "Active" | "Settled";
   readonly rows: ReadonlyArray<InboxThreadRow>;
 }
 
@@ -102,16 +114,9 @@ export interface BuildInboxInput {
   readonly nodeScope?: EnvironmentId | null;
   readonly query?: string;
   readonly deliveryUnknownThreadIds?: ReadonlySet<string>;
+  readonly localQueuedThreadIds?: ReadonlySet<string>;
+  readonly nowMs?: number;
 }
-
-const ACTIVE_PRIORITY: Readonly<Record<Exclude<InboxThreadState, "idle" | "offline">, number>> = {
-  "needs-input": 0,
-  "delivery-unknown": 1,
-  error: 2,
-  working: 3,
-  connecting: 4,
-  reconnecting: 5,
-};
 
 function scopedKey(environmentId: EnvironmentId, id: string): string {
   return `${environmentId}:${id}`;
@@ -158,6 +163,8 @@ function statusLabel(state: InboxThreadState): string {
       return "Offline";
     case "idle":
       return "Idle";
+    case "settled":
+      return "Settled";
   }
 }
 
@@ -165,63 +172,53 @@ function timestamp(thread: SidebarThreadSummary): string {
   return thread.updatedAt ?? thread.latestUserMessageAt ?? thread.createdAt;
 }
 
-function compareRecent(left: InboxThreadRow, right: InboxThreadRow): number {
-  const delta = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
-  if (Number.isFinite(delta) && delta !== 0) return delta;
-  return left.key.localeCompare(right.key);
-}
-
 export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxSection> {
   const environmentById = new Map(
     input.environments.map((environment) => [environment.environmentId, environment] as const),
   );
-  const projectById = new Map(
-    input.projects.map(
-      (project) => [scopedKey(project.environmentId, project.id), project] as const,
-    ),
-  );
-  const worktreeById = new Map(
-    input.worktrees.map(
-      (worktree) => [scopedKey(worktree.environmentId, worktree.id), worktree] as const,
-    ),
-  );
-  const query = input.query?.trim().toLocaleLowerCase() ?? "";
   const deliveryUnknown = input.deliveryUnknownThreadIds ?? new Set<string>();
+  const inbox = buildThreadInbox({
+    projects: input.projects,
+    worktrees: input.worktrees,
+    threads: input.threads,
+    environments: input.environments.map((environment) => ({
+      environmentId: environment.environmentId,
+      label: environment.label,
+      threadSettlementSupported: environment.threadSettlementSupported ?? false,
+      connected: environment.connectionState === "connected",
+      mutationReady: environment.mutationReady ?? false,
+      shellCurrent: environment.shellCurrent ?? false,
+    })),
+    localQueuedThreadKeys: input.localQueuedThreadIds,
+    deliveryUnknownThreadKeys: deliveryUnknown,
+    filters: {
+      ...(input.nodeScope ? { environmentIds: [input.nodeScope] } : {}),
+      text: input.query,
+    },
+    nowMs: input.nowMs ?? Date.now(),
+  });
 
-  const rows: InboxThreadRow[] = [];
-  for (const thread of input.threads) {
-    if (thread.archivedAt !== null) continue;
-    if (input.nodeScope && thread.environmentId !== input.nodeScope) continue;
-
+  const toRow = (entry: (typeof inbox.active)[number]): InboxThreadRow => {
+    const thread = entry.thread!;
     const environment = environmentById.get(thread.environmentId);
-    const project = projectById.get(scopedKey(thread.environmentId, thread.projectId));
-    const worktree = thread.worktreeId
-      ? worktreeById.get(scopedKey(thread.environmentId, thread.worktreeId))
-      : undefined;
     const nodeLabel = environment?.label || "Unknown machine";
-    const projectLabel = project?.name || "Unknown project";
-    const worktreeLabel = worktree?.title || worktree?.branch || thread.branch || "Local workspace";
+    const projectLabel = entry.project?.name || "Unknown project";
+    const worktreeLabel =
+      entry.worktree?.title || entry.worktree?.branch || thread.branch || "Local workspace";
     const contextLabel = `${nodeLabel} · ${projectLabel} · ${worktreeLabel}`;
-
-    if (
-      query &&
-      !`${thread.title} ${nodeLabel} ${projectLabel} ${worktreeLabel}`
-        .toLocaleLowerCase()
-        .includes(query)
-    ) {
-      continue;
-    }
-
-    const state = threadState(thread, environment, deliveryUnknown);
+    const state =
+      entry.lifecycle.classification === "settled"
+        ? "settled"
+        : threadState(thread, environment, deliveryUnknown);
     const providerDriver =
       thread.session?.provider ??
       thread.providerDriver ??
       builtInProviderDriverForInstanceId(thread.modelSelection?.instanceId);
-    rows.push({
-      key: scopedKey(thread.environmentId, thread.id),
+    return {
+      key: entry.key,
       environmentId: thread.environmentId,
       threadId: thread.id,
-      title: thread.title || "Untitled task",
+      title: entry.title || "Untitled task",
       nodeLabel,
       projectLabel,
       worktreeLabel,
@@ -229,32 +226,26 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
       state,
       statusLabel:
         state === "offline" ? (environment?.staleDetail ?? "Offline") : statusLabel(state),
-      updatedAt: timestamp(thread),
-      changeRequest: buildChangeRequestBadge(worktree),
+      updatedAt: entry.lifecycle.effectiveSettlementTimestamp ?? timestamp(thread),
+      changeRequest: buildChangeRequestBadge(entry.worktree),
       trustLabel: environment?.trust === "unverified" ? NODE_TRUST_UNVERIFIED_LABEL : null,
       roleLabel: environment?.role === "viewer" ? "Viewer" : null,
       providerDriver,
       providerLabel: providerDisplayLabel(providerDriver),
-    });
-  }
+      attentionState: entry.lifecycle.classification,
+      canSettle: entry.lifecycle.eligibility.canSettle,
+      settlementBlocker: entry.lifecycle.settlementBlocker,
+      mutationEnabled: entry.mutationEnabled,
+      mutationBlocker: entry.mutationBlocker,
+    };
+  };
 
-  // Stale-environment rows are never "active now" — last-known state sorts
-  // with the recents, however lively its cached fields look.
-  const active = rows
-    .filter((row) => row.state !== "idle" && row.state !== "offline")
-    .toSorted((left, right) => {
-      const priority =
-        ACTIVE_PRIORITY[left.state as Exclude<InboxThreadState, "idle" | "offline">] -
-        ACTIVE_PRIORITY[right.state as Exclude<InboxThreadState, "idle" | "offline">];
-      return priority || compareRecent(left, right);
-    });
-  const recent = rows
-    .filter((row) => row.state === "idle" || row.state === "offline")
-    .toSorted(compareRecent);
+  const active = inbox.active.map(toRow);
+  const settled = inbox.settled.map(toRow);
 
   const sections: InboxSection[] = [];
-  if (active.length > 0) sections.push({ key: "active", title: "Active now", rows: active });
-  if (recent.length > 0) sections.push({ key: "recent", title: "Recent", rows: recent });
+  if (active.length > 0) sections.push({ key: "active", title: "Active", rows: active });
+  if (settled.length > 0) sections.push({ key: "settled", title: "Settled", rows: settled });
   return sections;
 }
 

@@ -12,12 +12,15 @@ import {
   NonNegativeInt,
 } from "@ryco/contracts";
 import { modelSelectionRequiresContextHandoff } from "@ryco/shared/model";
+import { derivePendingThreadRequestState } from "@ryco/shared/threadActivity";
+import { canSettleThread, type ThreadSettlementBlocker } from "@ryco/shared/threadSettlement";
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
   listThreadsByProjectId,
   listThreadsByWorktree,
+  findWorktreeById,
   requireProject,
   requireProjectAbsent,
   requireThread,
@@ -66,6 +69,83 @@ type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
 
 const normalizeTokenMode = (mode: AgentTokenMode | undefined): AgentTokenMode =>
   mode ?? DEFAULT_AGENT_TOKEN_MODE;
+
+function threadWorktree(
+  readModel: OrchestrationReadModel,
+  thread: OrchestrationReadModel["threads"][number],
+) {
+  if (thread.worktreeId !== null && thread.worktreeId !== undefined) {
+    return findWorktreeById(readModel, thread.worktreeId);
+  }
+  if (thread.worktreePath === null) {
+    return undefined;
+  }
+  return readModel.worktrees?.find(
+    (worktree) =>
+      worktree.projectId === thread.projectId && worktree.worktreePath === thread.worktreePath,
+  );
+}
+
+function latestUserMessageAt(thread: OrchestrationReadModel["threads"][number]): string | null {
+  return (
+    thread.messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.createdAt)
+      .toSorted()
+      .at(-1) ?? null
+  );
+}
+
+function settlementBlockerDetail(blocker: ThreadSettlementBlocker): string {
+  switch (blocker) {
+    case "thread-archived":
+      return "the thread is archived";
+    case "thread-deleted":
+      return "the thread is deleted";
+    case "worktree-archived":
+      return "its worktree is archived";
+    case "pending-approval":
+      return "an approval is pending";
+    case "pending-user-input":
+      return "user input is pending";
+    case "session-starting":
+      return "its provider session is starting";
+    case "session-running":
+      return "its provider session is running";
+    case "queued-turn":
+      return "a turn may still be queued";
+    case "local-queue":
+      return "a local message is queued";
+    case "delivery-unknown":
+      return "message delivery is unresolved";
+    case "unsupported":
+      return "thread settlement is unsupported";
+  }
+}
+
+function activityUnsettledEvent(input: {
+  readonly command: OrchestrationCommand;
+  readonly thread: OrchestrationReadModel["threads"][number];
+  readonly occurredAt: string;
+}): PlannedOrchestrationEvent | null {
+  if (input.thread.settledOverride === null) {
+    return null;
+  }
+  return {
+    ...withEventBase({
+      aggregateKind: "thread",
+      aggregateId: input.thread.id,
+      occurredAt: input.occurredAt,
+      commandId: input.command.commandId,
+    }),
+    type: "thread.unsettled",
+    payload: {
+      threadId: input.thread.id,
+      reason: "activity",
+      updatedAt: input.occurredAt,
+    },
+  };
+}
 
 type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
@@ -383,6 +463,105 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.settle": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.settledOverride === "settled" && thread.settledAt !== null) {
+        return {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: nowIso(),
+            commandId: command.commandId,
+          }),
+          type: "thread.settled",
+          payload: {
+            threadId: command.threadId,
+            settledAt: thread.settledAt,
+            updatedAt: thread.updatedAt,
+          },
+        };
+      }
+
+      const pendingRequests = derivePendingThreadRequestState(thread.activities);
+      const worktree = threadWorktree(readModel, thread);
+      const occurredAt = nowIso();
+      const eligibility = canSettleThread({
+        threadSettlementSupported: true,
+        archivedAt: thread.archivedAt,
+        deletedAt: thread.deletedAt,
+        worktreeArchivedAt: worktree?.archivedAt ?? null,
+        settledOverride: thread.settledOverride,
+        settledAt: thread.settledAt,
+        sessionStatus: thread.session?.status ?? null,
+        latestTurnState: thread.latestTurn?.state ?? null,
+        latestTurnRequestedAt: thread.latestTurn?.requestedAt ?? null,
+        latestTurnCompletedAt: thread.latestTurn?.completedAt ?? null,
+        latestUserMessageAt: latestUserMessageAt(thread),
+        hasPendingApprovals: pendingRequests.hasPendingApprovals,
+        hasPendingUserInput: pendingRequests.hasPendingUserInput,
+        hasLocalQueuedMessage: false,
+        deliveryUnknown: false,
+        prState: worktree?.prState ?? null,
+        worktreeUpdatedAt: worktree?.updatedAt ?? null,
+        updatedAt: thread.updatedAt,
+        createdAt: thread.createdAt,
+        nowMs: Date.parse(occurredAt),
+      });
+      if (!eligibility.canSettle) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' cannot be settled because ${
+            eligibility.blocker === null
+              ? "its current state is ineligible"
+              : settlementBlockerDetail(eligibility.blocker)
+          }.`,
+        });
+      }
+
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.settled",
+        payload: {
+          threadId: command.threadId,
+          settledAt: occurredAt,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.unsettle": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = nowIso();
+      const alreadyExplicitlyActive = thread.settledOverride === "active";
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.unsettled",
+        payload: {
+          threadId: command.threadId,
+          reason: command.reason,
+          updatedAt: alreadyExplicitlyActive ? thread.updatedAt : occurredAt,
         },
       };
     }
@@ -757,14 +936,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
-      return isContextHandoff && contextHandoffRequestedEvent && handoffActivityEvent
-        ? [
-            contextHandoffRequestedEvent,
-            handoffActivityEvent,
-            userMessageEvent,
-            turnStartRequestedEvent,
-          ]
-        : [userMessageEvent, turnStartRequestedEvent];
+      const turnEvents: ReadonlyArray<PlannedOrchestrationEvent> =
+        isContextHandoff && contextHandoffRequestedEvent && handoffActivityEvent
+          ? [
+              contextHandoffRequestedEvent,
+              handoffActivityEvent,
+              userMessageEvent,
+              turnStartRequestedEvent,
+            ]
+          : [userMessageEvent, turnStartRequestedEvent];
+      const unsettledEvent = activityUnsettledEvent({
+        command,
+        thread: targetThread,
+        occurredAt: command.createdAt,
+      });
+      return unsettledEvent === null ? turnEvents : [unsettledEvent, ...turnEvents];
     }
 
     case "thread.turn.steer": {
@@ -1157,12 +1343,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.session.set": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      return {
+      const sessionEvent: PlannedOrchestrationEvent = {
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -1176,6 +1362,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           session: command.session,
         },
       };
+      if (command.session.status !== "starting" && command.session.status !== "running") {
+        return sessionEvent;
+      }
+      const unsettledEvent = activityUnsettledEvent({
+        command,
+        thread,
+        occurredAt: command.createdAt,
+      });
+      return unsettledEvent === null ? sessionEvent : [unsettledEvent, sessionEvent];
     }
 
     case "thread.message.assistant.delta": {
@@ -1302,7 +1497,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.activity.append": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
@@ -1315,7 +1510,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ? ((command.activity.payload as { requestId: string })
               .requestId as OrchestrationEvent["metadata"]["requestId"])
           : undefined;
-      return {
+      const activityEvent: PlannedOrchestrationEvent = {
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -1329,6 +1524,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           activity: command.activity,
         },
       };
+      if (
+        command.activity.kind !== "approval.requested" &&
+        command.activity.kind !== "user-input.requested"
+      ) {
+        return activityEvent;
+      }
+      const unsettledEvent = activityUnsettledEvent({
+        command,
+        thread,
+        occurredAt: command.createdAt,
+      });
+      return unsettledEvent === null ? activityEvent : [unsettledEvent, activityEvent];
     }
 
     case "thread.turn.steer.resolve": {

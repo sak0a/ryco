@@ -68,6 +68,9 @@ function environment(
     role: "owner",
     trust: "verified",
     deliveryUnknown: false,
+    threadSettlementSupported: true,
+    mutationReady: true,
+    shellCurrent: true,
     ...overrides,
   };
 }
@@ -85,6 +88,7 @@ describe("buildPrimaryInboxSidebarEnvironment", () => {
         environmentId: ENV_A,
         connectionState: "connected",
         hydratedFromCache: false,
+        threadSettlementSupported: true,
       }),
     ).toEqual({
       environmentId: ENV_A,
@@ -94,6 +98,9 @@ describe("buildPrimaryInboxSidebarEnvironment", () => {
       role: "owner",
       trust: "not-required",
       deliveryUnknown: false,
+      threadSettlementSupported: true,
+      mutationReady: true,
+      shellCurrent: true,
     });
   });
 
@@ -103,6 +110,7 @@ describe("buildPrimaryInboxSidebarEnvironment", () => {
         environmentId: ENV_A,
         connectionState: "offline",
         hydratedFromCache: true,
+        threadSettlementSupported: true,
       }),
     ).toMatchObject({
       label: "This device",
@@ -262,5 +270,46 @@ describe("buildInboxSidebarSections", () => {
       threads: [thread("z"), thread("a")],
     });
     expect(sections[0]?.rows.map((row) => row.threadId)).toEqual(["a", "z"]);
+  });
+
+  it("adds a scoped Settled shelf without changing the owning route", () => {
+    const sections = build({
+      threads: [
+        thread("done", {
+          environmentId: ENV_B,
+          settledOverride: "settled",
+          settledAt: "2026-08-23T12:00:00.000Z",
+        }),
+      ],
+    });
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0]).toMatchObject({ key: "settled", title: "Settled" });
+    expect(sections[0]?.rows[0]).toMatchObject({
+      key: "machine-b:done",
+      environmentId: ENV_B,
+      settled: true,
+      settlementActionEnabled: true,
+      effectiveSettlementTimestamp: "2026-08-23T12:00:00.000Z",
+    });
+  });
+
+  it("keeps mixed-version environments Active-only and blocks unsupported commands", () => {
+    const sections = build({
+      environments: [environment(ENV_A, { threadSettlementSupported: false })],
+      threads: [
+        thread("legacy", {
+          settledOverride: "settled",
+          settledAt: "2026-08-23T12:00:00.000Z",
+        }),
+      ],
+    });
+
+    expect(sections[0]?.key).toBe("recent");
+    expect(sections[0]?.rows[0]).toMatchObject({
+      settled: false,
+      settlementActionEnabled: false,
+      settlementDisabledReason: "Update this machine to use Settle.",
+    });
   });
 });

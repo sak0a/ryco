@@ -15,6 +15,8 @@ import {
   OrchestrationGetThreadWindowInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
+  OrchestrationThread,
+  OrchestrationThreadShell,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
@@ -46,6 +48,8 @@ const decodeContextHandoffActivity = Schema.decodeUnknownEffect(ContextHandoffAc
 const decodeContextHandoffEntriesInput = Schema.decodeUnknownEffect(
   ContextHandoffInspectionEntriesInput,
 );
+const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
+const decodeOrchestrationThreadShell = Schema.decodeUnknownEffect(OrchestrationThreadShell);
 
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
@@ -489,6 +493,136 @@ it.effect("decodes thread archived and unarchived events", () =>
     }
     assert.strictEqual(archived.payload.archivedAt, "2026-01-01T00:00:00.000Z");
     assert.strictEqual(unarchived.type, "thread.unarchived");
+  }),
+);
+
+it.effect("defaults settlement fields on historical thread snapshots", () =>
+  Effect.gen(function* () {
+    const shell = {
+      id: "thread-settlement-legacy",
+      projectId: "project-1",
+      title: "Legacy thread",
+      modelSelection: {
+        instanceId: "codex",
+        model: "gpt-5.4",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      latestTurn: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      archivedAt: null,
+      session: null,
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    };
+    const parsedShell = yield* decodeOrchestrationThreadShell(shell);
+    const parsedThread = yield* decodeOrchestrationThread({
+      ...shell,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    });
+
+    assert.strictEqual(parsedShell.settledOverride, null);
+    assert.strictEqual(parsedShell.settledAt, null);
+    assert.strictEqual(parsedThread.settledOverride, null);
+    assert.strictEqual(parsedThread.settledAt, null);
+  }),
+);
+
+it.effect("decodes settlement commands and rejects client-forged activity resets", () =>
+  Effect.gen(function* () {
+    const settle = yield* decodeOrchestrationCommand({
+      type: "thread.settle",
+      commandId: "cmd-settle-1",
+      threadId: "thread-1",
+    });
+    const unsettle = yield* decodeOrchestrationCommand({
+      type: "thread.unsettle",
+      commandId: "cmd-unsettle-1",
+      threadId: "thread-1",
+      reason: "user",
+    });
+    const forgedActivityReset = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.unsettle",
+        commandId: "cmd-unsettle-forged",
+        threadId: "thread-1",
+        reason: "activity",
+      }),
+    );
+
+    assert.strictEqual(settle.type, "thread.settle");
+    assert.strictEqual(unsettle.type, "thread.unsettle");
+    assert.strictEqual(forgedActivityReset._tag, "Failure");
+  }),
+);
+
+it.effect("decodes settled and user/activity-unsettled events", () =>
+  Effect.gen(function* () {
+    const eventBase = {
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      occurredAt: "2026-01-02T00:00:00.000Z",
+      causationEventId: null,
+      metadata: {},
+    } as const;
+    const settled = yield* decodeOrchestrationEvent({
+      ...eventBase,
+      sequence: 3,
+      eventId: "event-settled-1",
+      type: "thread.settled",
+      commandId: "cmd-settle-1",
+      correlationId: "cmd-settle-1",
+      payload: {
+        threadId: "thread-1",
+        settledAt: "2026-01-02T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      },
+    });
+    const userUnsettled = yield* decodeOrchestrationEvent({
+      ...eventBase,
+      sequence: 4,
+      eventId: "event-unsettled-user",
+      type: "thread.unsettled",
+      commandId: "cmd-unsettle-1",
+      correlationId: "cmd-unsettle-1",
+      payload: {
+        threadId: "thread-1",
+        reason: "user",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      },
+    });
+    const activityUnsettled = yield* decodeOrchestrationEvent({
+      ...eventBase,
+      sequence: 5,
+      eventId: "event-unsettled-activity",
+      type: "thread.unsettled",
+      commandId: "cmd-turn-1",
+      correlationId: "cmd-turn-1",
+      payload: {
+        threadId: "thread-1",
+        reason: "activity",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      },
+    });
+
+    assert.strictEqual(settled.type, "thread.settled");
+    if (userUnsettled.type !== "thread.unsettled") {
+      assert.fail(`Expected thread.unsettled, got ${userUnsettled.type}`);
+    }
+    if (activityUnsettled.type !== "thread.unsettled") {
+      assert.fail(`Expected thread.unsettled, got ${activityUnsettled.type}`);
+    }
+    assert.strictEqual(userUnsettled.payload.reason, "user");
+    assert.strictEqual(activityUnsettled.payload.reason, "activity");
   }),
 );
 

@@ -252,6 +252,7 @@ function machineCatalog(
       serverVersion: node.clientVersion,
       capabilities: {
         repositoryIdentity: node.capabilities?.repositoryIdentity ?? true,
+        threadSettlement: node.capabilities?.threadSettlement ?? false,
         nativeClientRequired: node.capabilities?.nativeClientRequired ?? false,
       },
       clientTier: "hosted-web" as const,

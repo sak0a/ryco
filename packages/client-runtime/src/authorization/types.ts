@@ -355,6 +355,8 @@ export interface HostedHubNode {
   readonly capabilities?: {
     readonly repositoryIdentity: boolean;
     readonly nativeClientRequired: boolean;
+    /** Optional until every Hub directory projection publishes server capabilities. */
+    readonly threadSettlement?: boolean;
   };
 }
 

@@ -21,6 +21,7 @@ export interface WorkspaceMachineCatalogInput {
   readonly capabilities?: {
     readonly repositoryIdentity?: boolean;
     readonly nativeClientRequired?: boolean;
+    readonly threadSettlement?: boolean;
   };
   readonly clientTier: WorkspaceClientTier;
   readonly nativeTrust: WorkspaceNativeTrustState;
@@ -88,6 +89,7 @@ export function reconcileWorkspaceMachine(
     capabilities: {
       repositoryIdentity: input.capabilities?.repositoryIdentity ?? false,
       nativeClientRequired: input.capabilities?.nativeClientRequired ?? false,
+      threadSettlement: input.capabilities?.threadSettlement ?? false,
     },
     clientTier: input.clientTier,
     nativeTrust: input.nativeTrust,

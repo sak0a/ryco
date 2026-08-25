@@ -97,4 +97,11 @@ describe("workspace machine catalog", () => {
     expect(viewer.canMutate).toBe(false);
     expect(viewer.accessReasons).toContain("viewer");
   });
+
+  it("carries thread settlement capability independently", () => {
+    expect(
+      reconcileWorkspaceMachine(input("settlement", { capabilities: { threadSettlement: true } }))
+        .capabilities.threadSettlement,
+    ).toBe(true);
+  });
 });

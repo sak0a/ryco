@@ -3,6 +3,7 @@ import type { CommandId, MessageId, ModelSelection, ThreadId, TurnId } from "@ry
 
 import {
   buildQueuedMessageSteerCommand,
+  getQueuedThreadKeys,
   moveQueuedMessage,
   resolveQueuedMessageSteerEligibility,
 } from "./logic.ts";
@@ -86,5 +87,14 @@ describe("message queue", () => {
     expect(
       resolveQueuedMessageSteerEligibility({ ...steerable, mutationReady: false }),
     ).toMatchObject({ allowed: false, reason: expect.stringContaining("connection") });
+  });
+
+  it("returns only scoped keys with non-empty queues", () => {
+    expect(
+      getQueuedThreadKeys({
+        "environment-a:thread-a": [{ id: "message", composer: null, settings: null }],
+        "environment-a:thread-b": [],
+      }),
+    ).toEqual(new Set(["environment-a:thread-a"]));
   });
 });

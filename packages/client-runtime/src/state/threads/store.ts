@@ -340,6 +340,8 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
+    settledOverride: thread.settledOverride,
+    settledAt: thread.settledAt,
     updatedAt: thread.updatedAt,
     latestTurn: thread.latestTurn,
     pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
@@ -376,6 +378,8 @@ function mapThreadShell(
     error: sanitizeThreadErrorMessage(thread.session?.lastError),
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
+    settledOverride: thread.settledOverride,
+    settledAt: thread.settledAt,
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
@@ -401,6 +405,8 @@ function mapThreadShell(
     providerDriver: session?.provider ?? null,
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
+    settledOverride: thread.settledOverride,
+    settledAt: thread.settledAt,
     updatedAt: thread.updatedAt,
     latestTurn: thread.latestTurn,
     branch: thread.branch,
@@ -436,6 +442,8 @@ function toThreadShell(thread: Thread): ThreadShell {
     error: thread.error,
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
+    settledOverride: thread.settledOverride,
+    settledAt: thread.settledAt,
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
@@ -529,6 +537,8 @@ function sidebarThreadSummariesEqual(
     threadSessionsEqual(left.session, right.session) &&
     left.createdAt === right.createdAt &&
     left.archivedAt === right.archivedAt &&
+    left.settledOverride === right.settledOverride &&
+    left.settledAt === right.settledAt &&
     left.updatedAt === right.updatedAt &&
     latestTurnsEqual(left.latestTurn, right.latestTurn) &&
     left.branch === right.branch &&
@@ -559,6 +569,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.error === right.error &&
     left.createdAt === right.createdAt &&
     left.archivedAt === right.archivedAt &&
+    left.settledOverride === right.settledOverride &&
+    left.settledAt === right.settledAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
@@ -1338,6 +1350,52 @@ function updateThreadShellTimestamp(
         updatedAt,
       },
     },
+  };
+}
+
+function updateThreadSettlementState(
+  state: EnvironmentState,
+  threadId: ThreadId,
+  patch: Pick<ThreadShell, "settledOverride" | "settledAt"> & { readonly updatedAt: string },
+): EnvironmentState {
+  const shell = state.threadShellById[threadId];
+  const summary = state.sidebarThreadSummaryById[threadId];
+  if (!shell && !summary) {
+    return state;
+  }
+
+  const shellUnchanged =
+    !shell ||
+    (shell.settledOverride === patch.settledOverride &&
+      shell.settledAt === patch.settledAt &&
+      shell.updatedAt === patch.updatedAt);
+  const summaryUnchanged =
+    !summary ||
+    (summary.settledOverride === patch.settledOverride &&
+      summary.settledAt === patch.settledAt &&
+      summary.updatedAt === patch.updatedAt);
+  if (shellUnchanged && summaryUnchanged) {
+    return state;
+  }
+
+  return {
+    ...state,
+    ...(shell
+      ? {
+          threadShellById: {
+            ...state.threadShellById,
+            [threadId]: { ...shell, ...patch },
+          },
+        }
+      : {}),
+    ...(summary
+      ? {
+          sidebarThreadSummaryById: {
+            ...state.sidebarThreadSummaryById,
+            [threadId]: { ...summary, ...patch },
+          },
+        }
+      : {}),
   };
 }
 
@@ -2121,6 +2179,8 @@ function applyEnvironmentOrchestrationEvent(
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
           archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
           deletedAt: null,
           messages: [],
           proposedPlans: [],
@@ -2149,6 +2209,20 @@ function applyEnvironmentOrchestrationEvent(
         archivedAt: null,
         updatedAt: event.payload.updatedAt,
       }));
+
+    case "thread.settled":
+      return updateThreadSettlementState(state, event.payload.threadId, {
+        settledOverride: "settled",
+        settledAt: event.payload.settledAt,
+        updatedAt: event.payload.updatedAt,
+      });
+
+    case "thread.unsettled":
+      return updateThreadSettlementState(state, event.payload.threadId, {
+        settledOverride: event.payload.reason === "user" ? "active" : null,
+        settledAt: null,
+        updatedAt: event.payload.updatedAt,
+      });
 
     case "thread.meta-updated":
       return updateThreadState(state, event.payload.threadId, (thread) => ({

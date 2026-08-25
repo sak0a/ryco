@@ -138,6 +138,7 @@ describe("remote environment api", () => {
             serverVersion: "0.0.0-test",
             capabilities: {
               repositoryIdentity: true,
+              threadSettlement: false,
             },
           }),
           { status: 200 },

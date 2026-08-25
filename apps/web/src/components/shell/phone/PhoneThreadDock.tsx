@@ -102,6 +102,8 @@ export function PhoneThreadDock(props: PhoneThreadDockProps) {
       session: null,
       createdAt: props.draft.createdAt,
       archivedAt: null,
+      settledOverride: null,
+      settledAt: null,
       latestTurn: null,
       branch: null,
       worktreePath: null,

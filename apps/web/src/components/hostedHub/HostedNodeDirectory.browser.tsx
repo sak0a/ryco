@@ -254,9 +254,7 @@ describe("hosted node directory", () => {
     resetHubRoutesForTests();
     mounted = await render(<RouterProvider router={router} />);
 
-    await expect
-      .element(page.getByRole("button", { name: /Cached thread from another node/ }))
-      .toBeVisible();
+    await expect.element(page.getByTestId("inbox-thread-row")).toBeVisible();
     const cachedThreadRow = Array.from(
       document.querySelectorAll<HTMLButtonElement>('[data-testid="inbox-thread-row"]'),
     ).find((candidate) => candidate.textContent?.includes("Cached thread from another node"));

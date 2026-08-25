@@ -100,6 +100,23 @@ export async function setThreadArchived(
   });
 }
 
+export async function setThreadSettled(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  settled: boolean,
+): Promise<void> {
+  await api.orchestration.dispatchCommand(
+    settled
+      ? { type: "thread.settle", commandId: newCommandId(), threadId }
+      : {
+          type: "thread.unsettle",
+          commandId: newCommandId(),
+          threadId,
+          reason: "user",
+        },
+  );
+}
+
 export async function respondToThreadApproval(input: {
   api: EnvironmentApi;
   threadId: ThreadId;

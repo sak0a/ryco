@@ -7,6 +7,7 @@ import {
   type OrchestrationEventType,
   ThreadId,
 } from "@ryco/contracts";
+import { derivePendingThreadRequestState } from "@ryco/shared/threadActivity";
 import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -100,6 +101,8 @@ export const ORCHESTRATION_EVENT_PROJECTORS = {
   "thread.runtime-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.interaction-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.token-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
+  "thread.settled": [ORCHESTRATION_PROJECTOR_NAMES.threads],
+  "thread.unsettled": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.goal-updated": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.goal-cleared": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.context-handoff-requested": [],
@@ -234,14 +237,6 @@ function derivePendingUserInputStatesFromActivities(
   }
 
   return states;
-}
-
-function derivePendingUserInputCountFromActivities(
-  activities: ReadonlyArray<ProjectionThreadActivity>,
-): number {
-  return [...derivePendingUserInputStatesFromActivities(activities).values()].filter(
-    (state) => state.isPending,
-  ).length;
 }
 
 function bucketCount(count: number): string {
@@ -691,7 +686,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       const pendingApprovalCount = pendingApprovals.filter(
         (approval) => approval.status === "pending",
       ).length;
-      const pendingUserInputCount = derivePendingUserInputCountFromActivities(activities);
+      const pendingUserInputCount =
+        derivePendingThreadRequestState(activities).pendingUserInputCount;
       const hasActionableProposedPlan = deriveHasActionableProposedPlan({
         latestTurnId: existingRow.value.latestTurnId,
         proposedPlans,
@@ -742,6 +738,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
             latestUserMessageAt: null,
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
@@ -775,6 +773,38 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             archivedAt: null,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.settled": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            settledOverride: "settled",
+            settledAt: event.payload.settledAt,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.unsettled": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            settledOverride: event.payload.reason === "user" ? "active" : null,
+            settledAt: null,
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -1807,7 +1837,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           // rows.  Other activity kinds that happen to carry a requestId
           // (e.g. user-input.requested / user-input.resolved) must not
           // pollute this projection — they have their own accounting via
-          // derivePendingUserInputCountFromActivities.
+          // derivePendingThreadRequestState.
           if (event.payload.activity.kind !== "approval.requested") {
             return;
           }
