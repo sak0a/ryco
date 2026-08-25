@@ -104,6 +104,7 @@ describe("Inbox sidebar settlement", () => {
       expect(popup.textContent).toContain("This device");
       expect(popup.textContent).toContain("feat/settle");
       expect(popup.textContent).toContain("Codex · gpt-5.4");
+      expect(popup.getBoundingClientRect().width).toBeLessThanOrEqual(290);
       expect(popup.getBoundingClientRect().left).toBeGreaterThanOrEqual(
         rowElement.getBoundingClientRect().right,
       );

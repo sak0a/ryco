@@ -191,12 +191,12 @@ function InboxThreadRow(props: {
     <div className="group/inbox-row relative">
       <Tooltip>
         <TooltipTrigger closeDelay={80} delay={140} render={navigationButton} />
-        <TooltipPopup align="start" className="w-80 p-2.5" side="right" sideOffset={8}>
-          <div className="space-y-2 text-left">
+        <TooltipPopup align="start" className="w-72 p-2" side="right" sideOffset={8}>
+          <div className="space-y-1.5 text-left">
             <p className="whitespace-normal text-sm font-semibold leading-5 text-popover-foreground">
               {props.row.title}
             </p>
-            <div className="space-y-1.5 text-[11px] leading-4 text-muted-foreground">
+            <div className="space-y-1 text-[11px] leading-4 text-muted-foreground">
               <div className="flex items-center gap-2">
                 <FolderIcon aria-hidden className="size-3.5 shrink-0" />
                 <span className="truncate">{props.row.projectLabel}</span>
