@@ -3288,11 +3288,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(row?.className).toContain("motion-reduce:translate-none");
       expect(row?.className).toContain("group/row");
 
-      const rowAccent = row?.firstElementChild as HTMLElement;
-      const siblingAccent = siblingRow?.firstElementChild as HTMLElement;
-      expect(rowAccent.className).toContain("group-hover/row:opacity-100");
-      expect(getComputedStyle(rowAccent).opacity).toBe("0");
-      expect(getComputedStyle(siblingAccent).opacity).toBe("0");
+      expect(row?.querySelector('[class*="group-hover/row:opacity-100"]')).toBeNull();
+      expect(siblingRow?.querySelector('[class*="group-hover/row:opacity-100"]')).toBeNull();
 
       // Tailwind v4 guards hover utilities with `(hover: hover)`. Linux
       // headless Chromium can still report no hover device even though
@@ -3306,9 +3303,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         await rowLocator.hover();
         await vi.waitFor(() => {
           expect(getComputedStyle(row!).translate).not.toBe(restingTranslate);
-          expect(getComputedStyle(rowAccent).opacity).toBe("1");
         });
-        expect(getComputedStyle(siblingAccent).opacity).toBe("0");
       }
 
       await rowLocator.click();
