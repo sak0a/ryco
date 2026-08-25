@@ -4161,20 +4161,21 @@ export default function ChatView(props: ChatViewProps) {
         onOpenChange={handleHeaderLinkedItemDialogOpenChange}
       />
 
-      {/* Error banners. With the header overlaying the transcript they float
-          just beneath it instead of participating in flow (they are transient
-          interrupts, not layout). */}
+      {/* Provider status remains contextual to the composer. Thread errors use
+          the global liquid-glass notification surface instead of obscuring the
+          transcript with a full-width inline strip. */}
       <div
         className={cn(
           headerOverlayActive && "absolute inset-x-0 top-(--chat-header-clearance,0px) z-20",
         )}
       >
         <ProviderStatusBanner status={activeProviderStatus} />
-        <ThreadErrorBanner
-          error={activeThread.error}
-          onDismiss={() => setThreadError(activeThread.id, null)}
-        />
       </div>
+      <ThreadErrorBanner
+        error={activeThread.error}
+        threadRef={activeThreadRef}
+        onDismiss={() => setThreadError(activeThread.id, null)}
+      />
       {/* Main content area with optional plan sidebar */}
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
