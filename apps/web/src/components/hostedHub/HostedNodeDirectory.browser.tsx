@@ -255,8 +255,15 @@ describe("hosted node directory", () => {
     mounted = await render(<RouterProvider router={router} />);
 
     await expect
-      .element(page.getByText("Studio · Cached workspace · Local workspace", { exact: true }))
+      .element(page.getByRole("button", { name: /Cached thread from another node/ }))
       .toBeVisible();
+    const cachedThreadRow = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[data-testid="inbox-thread-row"]'),
+    ).find((candidate) => candidate.textContent?.includes("Cached thread from another node"));
+    expect(cachedThreadRow).toBeDefined();
+    expect(cachedThreadRow?.textContent).toContain("Studio");
+    expect(cachedThreadRow?.textContent).toContain("Cached workspace");
+    expect(cachedThreadRow?.textContent).toContain("Local workspace");
     expect(selectNode).not.toHaveBeenCalled();
   });
 

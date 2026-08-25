@@ -3231,6 +3231,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
     const sourceThread = snapshot.threads[0]!;
     const inboxThreadId = "thread-inbox-target" as ThreadId;
+    const inboxSiblingThreadId = "thread-inbox-sibling" as ThreadId;
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: {
@@ -3244,12 +3245,59 @@ describe("ChatView timeline estimator parity (full app)", () => {
             createdAt: "2026-08-23T09:00:00.000Z",
             updatedAt: "2026-08-23T11:00:00.000Z",
           },
+          {
+            ...sourceThread,
+            id: inboxSiblingThreadId,
+            title: "Inbox motion sibling",
+            createdAt: "2026-08-23T08:00:00.000Z",
+            updatedAt: "2026-08-23T10:00:00.000Z",
+          },
         ],
       },
     });
 
     try {
-      await page.getByRole("button", { name: /Inbox exact target/ }).click();
+      const rowLocator = page.getByRole("button", { name: /Inbox exact target/ });
+      const row = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[data-testid="inbox-thread-row"]'),
+      ).find((candidate) => candidate.textContent?.includes("Inbox exact target"));
+      const siblingRow = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[data-testid="inbox-thread-row"]'),
+      ).find((candidate) => candidate.textContent?.includes("Inbox motion sibling"));
+      expect(row).toBeDefined();
+      expect(siblingRow).toBeDefined();
+      expect(row?.textContent).toContain("This device");
+      expect(row?.textContent).toContain("Project");
+      expect(row?.textContent).toContain("main");
+      expect(row?.textContent).toContain("Idle");
+      expect(row?.className).toContain("hover:-translate-y-px");
+      expect(row?.className).toContain("motion-reduce:translate-none");
+      expect(row?.className).toContain("group/row");
+
+      const rowAccent = row?.firstElementChild as HTMLElement;
+      const siblingAccent = siblingRow?.firstElementChild as HTMLElement;
+      expect(rowAccent.className).toContain("group-hover/row:opacity-100");
+      expect(getComputedStyle(rowAccent).opacity).toBe("0");
+      expect(getComputedStyle(siblingAccent).opacity).toBe("0");
+
+      // Tailwind v4 guards hover utilities with `(hover: hover)`. Linux
+      // headless Chromium can still report no hover device even though
+      // Playwright can dispatch a mouse; exercise the motion only when the
+      // same media query that guards the production CSS is active.
+      if (
+        window.matchMedia("(hover: hover)").matches &&
+        !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        const restingTranslate = getComputedStyle(row!).translate;
+        await rowLocator.hover();
+        await vi.waitFor(() => {
+          expect(getComputedStyle(row!).translate).not.toBe(restingTranslate);
+          expect(getComputedStyle(rowAccent).opacity).toBe("1");
+        });
+        expect(getComputedStyle(siblingAccent).opacity).toBe("0");
+      }
+
+      await rowLocator.click();
       await vi.waitFor(() => {
         expect(mounted.router.state.location.pathname).toBe(
           `/${LOCAL_ENVIRONMENT_ID}/${inboxThreadId}`,
