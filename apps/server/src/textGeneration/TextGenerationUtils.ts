@@ -18,6 +18,12 @@ export function limitSection(value: string, maxChars: number): string {
   return `${truncated}\n\n[truncated]`;
 }
 
+/** Truncate by Unicode code point so surrogate pairs are never split. */
+export function limitUnicode(value: string, maxCodePoints: number): string {
+  const codePoints = Array.from(value);
+  return codePoints.length <= maxCodePoints ? value : codePoints.slice(0, maxCodePoints).join("");
+}
+
 export function extractJsonObject(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
