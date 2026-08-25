@@ -2,7 +2,12 @@ import { useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { getCachedHubNodeRoster, subscribeCachedHubNodeRoster } from "../../hostedHub/nodeRoster";
+import {
+  readEnvironmentDescriptor,
+  usePrimaryEnvironmentDescriptor,
+} from "../../hostedHub/primaryEnvironment";
 import { useMobileHostedConnectionsStore } from "../../hostedHub/state";
+import { readEnvironmentApi } from "../../connection/environmentApi";
 import { selectCacheHydratedEnvironmentIds, useStore } from "../../state/threadsRuntime";
 import { useSavedEnvironments } from "../connection/useConnectionController";
 import { buildHomeEnvironments } from "./homeEnvironmentModel";
@@ -23,6 +28,8 @@ export function useHomeEnvironments() {
   // against; cache-provenance ids mark which environments are last-known state.
   const rosterNodes = useSyncExternalStore(subscribeCachedHubNodeRoster, getCachedHubNodeRoster);
   const cacheProvenanceEnvironmentIds = useStore(useShallow(selectCacheHydratedEnvironmentIds));
+  const environmentStateById = useStore((state) => state.environmentStateById);
+  const primaryDescriptor = usePrimaryEnvironmentDescriptor();
   // Wave 4: trust is keyed by the roster's Hub-minted node id, which is why the
   // roster records go in whole rather than the environment ids alone. The store
   // snapshot is a stable reference between commits, so this does not re-derive
@@ -60,6 +67,9 @@ export function useHomeEnvironments() {
           label: row.record.label,
           connectionState: row.runtime.connectionState,
           role: row.runtime.role,
+          threadSettlementSupported: row.runtime.descriptor?.capabilities.threadSettlement ?? false,
+          shellCurrent: environmentStateById[row.record.environmentId]?.bootstrapComplete === true,
+          apiAvailable: readEnvironmentApi(row.record.environmentId) !== undefined,
         })),
         hosted: hosted.selectedNodes
           .filter((connection) => eligibleHostedEnvironmentIds.has(connection.environmentId))
@@ -69,6 +79,12 @@ export function useHomeEnvironments() {
             transportStatus: connection.transportStatus,
             sessionStatus: connection.sessionStatus,
             role: connection.effectiveRole,
+            threadSettlementSupported:
+              readEnvironmentDescriptor(connection.environmentId)?.capabilities.threadSettlement ??
+              false,
+            shellCurrent:
+              environmentStateById[connection.environmentId]?.bootstrapComplete === true,
+            apiAvailable: readEnvironmentApi(connection.environmentId) !== undefined,
           })),
         cachedHubNodes: rosterNodes
           .filter((node) => eligibleHostedEnvironmentIds.has(node.environmentId))
@@ -89,7 +105,9 @@ export function useHomeEnvironments() {
       cacheProvenanceEnvironmentIds,
       directRows,
       eligibleHostedEnvironmentIds,
+      environmentStateById,
       hosted,
+      primaryDescriptor,
       rosterNodes,
       trustByEnvironmentId,
     ],

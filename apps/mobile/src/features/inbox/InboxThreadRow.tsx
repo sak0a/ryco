@@ -21,6 +21,8 @@ function statusDotClassName(state: InboxThreadState): string {
     case "offline":
     case "idle":
       return "border border-foreground-tertiary";
+    case "settled":
+      return "bg-foreground-tertiary";
   }
 }
 
@@ -37,6 +39,7 @@ function statusTextClassName(state: InboxThreadState): string {
       return "text-accent-strong";
     case "offline":
     case "idle":
+    case "settled":
       return "text-foreground-tertiary";
   }
 }
@@ -45,6 +48,7 @@ export function InboxThreadRow(props: {
   readonly row: InboxThreadRowModel;
   readonly onPress: () => void;
 }) {
+  const settled = props.row.attentionState === "settled";
   // A badge that exists only in pixels is invisible to VoiceOver, so the two
   // provenance markers join the accessible name in the order they are read.
   const accessibilityLabel = [
@@ -61,7 +65,9 @@ export function InboxThreadRow(props: {
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       onPress={props.onPress}
-      className="mx-4 mb-2.5 flex-row items-start gap-3 rounded-2xl bg-card px-4 py-3.5 active:bg-card-alt"
+      className={`mx-4 mb-2.5 flex-row items-start gap-3 rounded-2xl px-4 active:bg-card-alt ${
+        settled ? "bg-subtle py-2.5" : "bg-card py-3.5"
+      }`}
     >
       <View className={`mt-1.5 h-2.5 w-2.5 rounded-full ${statusDotClassName(props.row.state)}`} />
       <View className="min-w-0 flex-1 gap-1">

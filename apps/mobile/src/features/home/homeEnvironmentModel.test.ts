@@ -28,7 +28,7 @@ describe("Home environments", () => {
       ],
     });
 
-    expect(environments).toEqual([
+    expect(environments).toMatchObject([
       {
         environmentId: "direct-a",
         label: "MacBook",
@@ -66,7 +66,7 @@ describe("Home environments", () => {
       ],
     });
 
-    expect(environments).toEqual([
+    expect(environments).toMatchObject([
       {
         environmentId,
         label: "Studio",
@@ -143,7 +143,7 @@ describe("Home environments", () => {
       now,
     });
 
-    expect(environments).toEqual([
+    expect(environments).toMatchObject([
       {
         environmentId: "node-a",
         label: "Work Mac",
@@ -221,7 +221,7 @@ describe("Home environments", () => {
       cacheProvenanceEnvironmentIds: ["direct-a" as EnvironmentId, "node-a" as EnvironmentId],
       now,
     });
-    expect(environments).toEqual([
+    expect(environments).toMatchObject([
       expect.objectContaining({
         environmentId: "direct-a",
         connectionState: "connected",
@@ -361,7 +361,16 @@ describe("Home environment provenance (wave 4)", () => {
     // "read-only" connectionState is derived exactly as before, and wave 2's
     // staleness text is untouched.
     const strip = (environments: ReadonlyArray<InboxEnvironment>) =>
-      environments.map(({ role: _role, trust: _trust, ...rest }) => rest);
+      environments.map(
+        ({
+          role: _role,
+          trust: _trust,
+          threadSettlementSupported: _threadSettlementSupported,
+          mutationReady: _mutationReady,
+          shellCurrent: _shellCurrent,
+          ...rest
+        }) => rest,
+      );
 
     const withTrust = provenanceFixture(new Map<string, NodeTrust>([[HOSTED, "unverified"]]));
     expect(strip(withTrust)).toEqual(strip(provenanceFixture(null)));

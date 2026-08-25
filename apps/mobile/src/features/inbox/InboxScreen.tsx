@@ -1,23 +1,19 @@
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react-native";
-import { View } from "react-native";
+import { useState } from "react";
+import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 import { EmptyState } from "../../components/EmptyState";
 import type { InboxEmptyState, InboxSection, InboxThreadRow } from "./inboxModel";
+import {
+  flattenInboxSections,
+  MOBILE_SETTLED_PAGE_SIZE,
+  type InboxListItem,
+} from "./inboxListModel";
 import { InboxThreadRow as ThreadRow } from "./InboxThreadRow";
 import { HOME_LIST_PADDING_BOTTOM } from "../home/homeChromeModel";
 import { WorkspaceConnectionStatus } from "../home/WorkspaceConnectionStatus";
-
-type InboxListItem =
-  | { readonly kind: "section"; readonly key: string; readonly title: string }
-  | { readonly kind: "thread"; readonly key: string; readonly row: InboxThreadRow };
-
-function flattenSections(sections: ReadonlyArray<InboxSection>): ReadonlyArray<InboxListItem> {
-  return sections.flatMap((section) => [
-    { kind: "section" as const, key: `section:${section.key}`, title: section.title },
-    ...section.rows.map((row) => ({ kind: "thread" as const, key: row.key, row })),
-  ]);
-}
 
 const EMPTY_COPY: Readonly<
   Record<
@@ -56,15 +52,55 @@ export function InboxScreen(props: {
   readonly onEmptyAction: (state: Exclude<InboxEmptyState, null>) => void;
   readonly onScrollOffset?: (offset: number) => void;
 }) {
-  const data = flattenSections(props.sections);
+  const [settledOpen, setSettledOpen] = useState(false);
+  const [settledVisibleCount, setSettledVisibleCount] = useState(MOBILE_SETTLED_PAGE_SIZE);
+  const data = flattenInboxSections({
+    sections: props.sections,
+    settledOpen,
+    settledVisibleCount,
+  });
   const empty = props.emptyState ? EMPTY_COPY[props.emptyState] : null;
 
   const renderItem = ({ item }: LegendListRenderItemProps<InboxListItem>) => {
     if (item.kind === "section") {
+      if (item.sectionKey === "settled") {
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Settled, ${item.count} tasks`}
+            accessibilityState={{ expanded: item.expanded }}
+            className="min-h-11 flex-row items-center gap-2 px-5 pt-4 pb-2 active:opacity-70"
+            onPress={() => setSettledOpen((open) => !open)}
+          >
+            <SymbolView
+              name={item.expanded ? "chevron.down" : "chevron.right"}
+              size={13}
+              type="monochrome"
+            />
+            <Text className="text-sm font-ryco-medium text-foreground-muted">{item.title}</Text>
+            <Text className="ml-auto rounded-full bg-subtle px-2 py-0.5 font-mono text-2xs text-foreground-tertiary">
+              {item.count}
+            </Text>
+          </Pressable>
+        );
+      }
       return (
         <Text className="px-5 pt-5 pb-2 text-sm font-ryco-medium text-foreground-muted">
-          {item.title}
+          {item.title} · {item.count}
         </Text>
+      );
+    }
+    if (item.kind === "show-more") {
+      return (
+        <Pressable
+          accessibilityRole="button"
+          className="mx-4 mb-2 min-h-11 items-center justify-center rounded-2xl bg-subtle active:bg-subtle-strong"
+          onPress={() => setSettledVisibleCount((count) => count + MOBILE_SETTLED_PAGE_SIZE)}
+        >
+          <Text className="text-sm font-ryco-medium text-foreground-muted">
+            Show {Math.min(MOBILE_SETTLED_PAGE_SIZE, item.remaining)} more
+          </Text>
+        </Pressable>
       );
     }
     return <ThreadRow row={item.row} onPress={() => props.onOpenThread(item.row)} />;

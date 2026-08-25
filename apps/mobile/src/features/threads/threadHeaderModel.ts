@@ -1,5 +1,11 @@
 import { resolveThreadWorkspaceRoot } from "@ryco/client-runtime/state/files";
-import type { Project, SidebarWorktreeSummary, Thread } from "@ryco/client-runtime/state/threads";
+import type {
+  Project,
+  SidebarWorktreeSummary,
+  Thread,
+  ThreadInboxMutationBlocker,
+} from "@ryco/client-runtime/state/threads";
+import type { ThreadSettlementBlocker } from "@ryco/shared/threadSettlement";
 
 import { buildChangeRequestBadge, type ChangeRequestBadge } from "../../lib/changeRequestBadge";
 
@@ -11,6 +17,13 @@ import { buildChangeRequestBadge, type ChangeRequestBadge } from "../../lib/chan
 export { findThreadWorktree } from "@ryco/client-runtime/state/files";
 
 export type ThreadMoreAction = "rename" | "archive" | "unarchive" | "stop" | "details";
+
+export interface ThreadSettlementActionModel {
+  readonly kind: "settle" | "unsettle";
+  readonly label: "Settle task" | "Move to Active";
+  readonly detail: string;
+  readonly disabled: boolean;
+}
 
 export interface ThreadHeaderModel {
   readonly title: string;
@@ -35,6 +48,54 @@ export interface ThreadHeaderModel {
   readonly moreActions: ReadonlyArray<ThreadMoreAction>;
   /** Last known pull request / work item for the thread's worktree, if any. */
   readonly changeRequest: ChangeRequestBadge | null;
+  readonly settlementAction: ThreadSettlementActionModel | null;
+}
+
+function settlementDisabledReason(input: {
+  readonly mutationEnabled: boolean;
+  readonly mutationBlocker: ThreadInboxMutationBlocker | null;
+  readonly canSettle: boolean;
+  readonly settlementBlocker: ThreadSettlementBlocker | null;
+}): string | null {
+  if (!input.mutationEnabled) {
+    switch (input.mutationBlocker) {
+      case "unsupported":
+        return "Update this machine before changing attention state.";
+      case "disconnected":
+        return "Reconnect this machine to change attention state.";
+      case "read-only":
+        return "This machine is read-only.";
+      case "shell-stale":
+        return "Waiting for the latest task list from this machine.";
+      case "client-draft":
+        return "Send the first message before settling this task.";
+      case null:
+        return "This task cannot be changed right now.";
+    }
+  }
+  if (input.canSettle) return null;
+  switch (input.settlementBlocker) {
+    case "pending-approval":
+      return "Resolve the pending approval first.";
+    case "pending-user-input":
+      return "Answer the pending question first.";
+    case "session-starting":
+    case "session-running":
+      return "Wait for the agent to finish.";
+    case "queued-turn":
+    case "local-queue":
+      return "Send or remove queued work first.";
+    case "delivery-unknown":
+      return "Reconnect to confirm delivery first.";
+    case "unsupported":
+      return "Update this machine before settling tasks.";
+    case "thread-archived":
+    case "thread-deleted":
+    case "worktree-archived":
+      return "Archived work is managed separately.";
+    case null:
+      return "This task cannot be settled right now.";
+  }
 }
 
 function basename(path: string): string {
@@ -79,6 +140,15 @@ export function buildThreadHeaderModel(input: {
    * "Running" long after the node stopped answering.
    */
   readonly forcedOffline?: boolean;
+  readonly settlement?:
+    | {
+        readonly attentionState: "active" | "settled";
+        readonly canSettle: boolean;
+        readonly settlementBlocker: ThreadSettlementBlocker | null;
+        readonly mutationEnabled: boolean;
+        readonly mutationBlocker: ThreadInboxMutationBlocker | null;
+      }
+    | undefined;
 }): ThreadHeaderModel {
   const running =
     input.thread.latestTurn?.state === "running" || input.thread.session?.status === "running";
@@ -103,6 +173,23 @@ export function buildThreadHeaderModel(input: {
   const moreActions: ThreadMoreAction[] = ["rename"];
   if (running) moreActions.push("stop");
   moreActions.push(input.thread.archivedAt === null ? "archive" : "unarchive", "details");
+  const settlementDisabled = input.settlement ? settlementDisabledReason(input.settlement) : null;
+  const settlementAction =
+    input.thread.archivedAt !== null || !input.settlement
+      ? null
+      : input.settlement.attentionState === "settled"
+        ? {
+            kind: "unsettle" as const,
+            label: "Move to Active" as const,
+            detail: settlementDisabled ?? "Return this task to your active attention queue.",
+            disabled: settlementDisabled !== null,
+          }
+        : {
+            kind: "settle" as const,
+            label: "Settle task" as const,
+            detail: settlementDisabled ?? "Mark this task handled without archiving it.",
+            disabled: settlementDisabled !== null,
+          };
 
   return {
     title: input.thread.title.trim() || "Untitled task",
@@ -120,5 +207,6 @@ export function buildThreadHeaderModel(input: {
       }) !== null,
     moreActions,
     changeRequest: buildChangeRequestBadge(input.worktree),
+    settlementAction,
   };
 }

@@ -132,6 +132,44 @@ describe("buildThreadHeaderModel", () => {
     // the last to learn the thread is not live.
     expect(model.contextAccessibilityLabel).toContain("Offline.");
   });
+
+  it("presents settle and unsettle independently from archive", () => {
+    const base = {
+      thread: thread(),
+      project: { name: "Ryco", cwd: "/repo" },
+      worktree: null,
+      nodeLabel: "Studio",
+      hasPendingApproval: false,
+      hasPendingUserInput: false,
+    } as const;
+    const active = buildThreadHeaderModel({
+      ...base,
+      settlement: {
+        attentionState: "active",
+        canSettle: true,
+        settlementBlocker: null,
+        mutationEnabled: true,
+        mutationBlocker: null,
+      },
+    });
+    expect(active.settlementAction).toMatchObject({
+      kind: "settle",
+      label: "Settle task",
+      disabled: false,
+    });
+
+    const settled = buildThreadHeaderModel({
+      ...base,
+      settlement: {
+        attentionState: "settled",
+        canSettle: true,
+        settlementBlocker: null,
+        mutationEnabled: true,
+        mutationBlocker: null,
+      },
+    });
+    expect(settled.settlementAction?.kind).toBe("unsettle");
+  });
 });
 
 describe("findThreadWorktree", () => {
