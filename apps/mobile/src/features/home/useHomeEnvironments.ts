@@ -80,8 +80,10 @@ export function useHomeEnvironments() {
             sessionStatus: connection.sessionStatus,
             role: connection.effectiveRole,
             threadSettlementSupported:
-              readEnvironmentDescriptor(connection.environmentId)?.capabilities.threadSettlement ??
-              false,
+              connection.environmentId === primaryDescriptor?.environmentId
+                ? primaryDescriptor.capabilities.threadSettlement
+                : (readEnvironmentDescriptor(connection.environmentId)?.capabilities
+                    .threadSettlement ?? false),
             shellCurrent:
               environmentStateById[connection.environmentId]?.bootstrapComplete === true,
             apiAvailable: readEnvironmentApi(connection.environmentId) !== undefined,

@@ -323,6 +323,7 @@ export function InboxSidebar(props: InboxSidebarProps) {
       }),
     [
       environmentId,
+      props.activeThreadKey,
       props.deliveryUnknownThreadKeys,
       props.environments,
       props.localQueuedThreadKeys,
