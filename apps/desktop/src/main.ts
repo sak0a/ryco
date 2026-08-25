@@ -163,6 +163,7 @@ import {
   DESKTOP_WORKSPACE_MAX_RPC_FRAME_BYTES,
   DesktopWorkspaceRelayManager,
 } from "./desktopWorkspaceRelay.ts";
+import { createResilientStdIoWriter } from "./resilientStdIo.ts";
 
 const desktopStartupTiming = createStartupTiming();
 desktopStartupTiming.mark("desktop.launch");
@@ -1255,33 +1256,30 @@ function installStdIoCapture(): void {
   const originalStdoutWrite = process.stdout.write.bind(process.stdout);
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
-  const patchWrite =
-    (streamName: "stdout" | "stderr", originalWrite: typeof process.stdout.write) =>
-    (
-      chunk: string | Uint8Array,
-      encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-      callback?: (error?: Error | null) => void,
-    ): boolean => {
-      const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
-      writeDesktopStreamChunk(streamName, chunk, encoding);
-      if (typeof encodingOrCallback === "function") {
-        return originalWrite(chunk, encodingOrCallback);
-      }
-      if (callback !== undefined) {
-        return originalWrite(chunk, encoding, callback);
-      }
-      if (encoding !== undefined) {
-        return originalWrite(chunk, encoding);
-      }
-      return originalWrite(chunk);
-    };
+  const createWriter = (streamName: "stdout" | "stderr") => {
+    const stream = process[streamName];
+    return createResilientStdIoWriter({
+      stream,
+      originalWrite: streamName === "stdout" ? originalStdoutWrite : originalStderrWrite,
+      capture: (chunk, encoding) => writeDesktopStreamChunk(streamName, chunk, encoding),
+      onUnavailable: (error) => {
+        desktopLogSink?.write(
+          `[${logTimestamp()}] [${logScope("desktop")}] ${streamName} unavailable; continuing with file logging message=${formatErrorMessage(error)}\n`,
+        );
+      },
+    });
+  };
 
-  process.stdout.write = patchWrite("stdout", originalStdoutWrite);
-  process.stderr.write = patchWrite("stderr", originalStderrWrite);
+  const stdoutWriter = createWriter("stdout");
+  const stderrWriter = createWriter("stderr");
+  process.stdout.write = stdoutWriter.write;
+  process.stderr.write = stderrWriter.write;
 
   restoreStdIoCapture = () => {
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
+    stdoutWriter.dispose();
+    stderrWriter.dispose();
     restoreStdIoCapture = null;
   };
 }
