@@ -3092,6 +3092,46 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("keeps the desktop composer centered at eighty percent while phones remain full width", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-composer-width" as MessageId,
+        targetText: "composer width",
+      }),
+    });
+
+    try {
+      const composerForm = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-chat-composer-form="true"]'),
+        "Unable to find the composer form.",
+      );
+      const composerContainer = composerForm.parentElement;
+      expect(composerContainer).toBeTruthy();
+      await waitForLayout();
+
+      const desktopFormRect = composerForm.getBoundingClientRect();
+      const desktopContainerRect = composerContainer!.getBoundingClientRect();
+      expect(desktopFormRect.width / desktopContainerRect.width).toBeCloseTo(0.8, 2);
+      expect(desktopFormRect.left - desktopContainerRect.left).toBeCloseTo(
+        (desktopContainerRect.width - desktopFormRect.width) / 2,
+        1,
+      );
+
+      await mounted.setViewport(PHONE_VIEWPORT);
+      await vi.waitFor(() => {
+        expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+      });
+      await waitForLayout();
+
+      const phoneFormRect = composerForm.getBoundingClientRect();
+      const phoneContainerRect = composerContainer!.getBoundingClientRect();
+      expect(phoneFormRect.width / phoneContainerRect.width).toBeCloseTo(1, 2);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("contains the active chat and composer at 320 CSS pixels", async () => {
     const mounted = await mountChatView({
       viewport: NARROW_PHONE_VIEWPORT,
