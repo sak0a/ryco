@@ -2249,7 +2249,7 @@ export const ChatComposer = memo(
       <form
         ref={composerFormRef}
         onSubmit={submitComposer}
-        className="relative mx-auto w-full min-w-0 not-phone:w-[clamp(40rem,80%,90rem)] not-phone:max-w-full"
+        className="relative mx-auto w-full min-w-0 max-w-208"
         data-chat-composer-form="true"
       >
         {pendingContextHandoff ? (
