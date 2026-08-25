@@ -58,6 +58,8 @@ export function InboxThreadRow(props: {
     ...(props.row.roleLabel === null ? [] : [props.row.roleLabel]),
     ...(props.row.trustLabel === null ? [] : [props.row.trustLabel]),
     ...(props.row.providerLabel === null ? [] : [`Provider: ${props.row.providerLabel}`]),
+    ...(props.row.focusTitle === null ? [] : [props.row.focusTitle]),
+    ...(props.row.focusDetail === null ? [] : [props.row.focusDetail]),
   ].join(", ");
 
   return (
@@ -85,6 +87,22 @@ export function InboxThreadRow(props: {
         <Text className="font-sans text-xs text-foreground-muted" numberOfLines={1}>
           {props.row.contextLabel}
         </Text>
+        {props.row.focusTitle === null ? null : (
+          <View className="flex-row items-center gap-1.5">
+            <Text className="font-ryco-medium text-xs text-foreground" numberOfLines={1}>
+              {props.row.focusTitle}
+            </Text>
+            {props.row.focusAiGenerated ? (
+              <Text className="font-sans text-2xs text-foreground-tertiary">AI</Text>
+            ) : null}
+            <Text
+              className="min-w-0 flex-1 font-sans text-xs text-foreground-muted"
+              numberOfLines={1}
+            >
+              {props.row.focusDetail}
+            </Text>
+          </View>
+        )}
         <View className="flex-row items-center gap-2">
           <Text
             className={`shrink text-xs font-ryco-medium ${statusTextClassName(props.row.state)}`}

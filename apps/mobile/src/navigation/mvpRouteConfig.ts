@@ -196,6 +196,7 @@ export const MVP_SETTINGS_SHEET_ROUTES = {
   Settings: { linking: "", ...SETTINGS_PUSH },
   SettingsHub: { linking: "hub", ...SETTINGS_PUSH },
   SettingsWorkspace: { linking: "workspace", ...SETTINGS_PUSH },
+  SettingsInbox: { linking: "inbox", ...SETTINGS_PUSH },
   // Hosted Hub account. Account management stays nested; voluntary sign-in
   // opens the full-screen root Access route rather than a dismissible sheet.
   SettingsAccount: { linking: "account", ...SETTINGS_PUSH },

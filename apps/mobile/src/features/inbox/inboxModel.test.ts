@@ -87,6 +87,29 @@ function thread(
 }
 
 describe("Inbox model", () => {
+  it("puts Focus above Active without duplicating promoted threads", () => {
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco")],
+      worktrees: [],
+      environments: [{ environmentId: NODE_A, label: "Mac Studio", connectionState: "connected" }],
+      threads: [
+        thread(NODE_A, "approval", "project-a", { hasPendingApprovals: true }),
+        thread(NODE_A, "ordinary", "project-a"),
+      ],
+      aiFocusEnabled: true,
+      nowMs: Date.parse("2026-08-25T12:00:00.000Z"),
+    });
+
+    expect(sections.map((section) => section.title)).toEqual(["Focus", "Active"]);
+    expect(sections[0]?.rows[0]).toMatchObject({
+      threadId: "approval",
+      focusTitle: "Approval required",
+      focusAiGenerated: false,
+    });
+    expect(sections[1]?.rows.map((row) => row.threadId)).toEqual(["ordinary"]);
+    expect(new Set(sections.flatMap((section) => section.rows.map((row) => row.key))).size).toBe(2);
+  });
+
   it("keeps idle work and attention blockers together in the Active queue", () => {
     const projects = [project(NODE_A, "project-a", "Ryco"), project(NODE_B, "project-b", "Hub")];
     const sections = buildInboxSections({

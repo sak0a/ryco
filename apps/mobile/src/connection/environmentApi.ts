@@ -1,8 +1,10 @@
 import type { EnvironmentApi, EnvironmentId } from "@ryco/contracts";
 import { createEnvironmentApi, createEnvironmentApiLookup } from "@ryco/client-runtime/connection";
 import type { WsRpcClient } from "@ryco/client-runtime/rpc";
+import type { ServerSettingsPatch } from "@ryco/contracts/settings";
 
 import { createMobileConnectionRegistry } from "../runtime/bootstrap";
+import { patchEnvironmentServerSettings } from "../state/environmentServerConfigs";
 
 // Mobile analog of apps/web/src/environmentApi.ts. The single seam that turns an
 // EnvironmentId into the typed RPC surface the send pipeline, approvals/user-input
@@ -69,6 +71,17 @@ export function ensureEnvironmentApi(environmentId: EnvironmentId): EnvironmentA
   const api = readEnvironmentApi(environmentId);
   if (!api) throw new Error(`Environment API not found for environment ${environmentId}`);
   return api;
+}
+
+/** Updates one environment without changing the active environment or opening a connection. */
+export async function updateEnvironmentServerSettings(
+  environmentId: EnvironmentId,
+  patch: ServerSettingsPatch,
+): Promise<void> {
+  const client = readRpcClient(environmentId);
+  if (!client) throw new Error("Connect this environment before changing its Inbox model.");
+  await client.server.updateSettings(patch);
+  patchEnvironmentServerSettings(environmentId, patch);
 }
 
 export function __setEnvironmentApiOverrideForTests(

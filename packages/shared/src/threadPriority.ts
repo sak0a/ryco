@@ -10,6 +10,46 @@ export interface ThreadPriorityFocusMetadata {
   readonly ranking: ThreadPriorityProjectedRanking | null;
 }
 
+export interface ThreadPriorityFocusExplanation {
+  readonly title: string;
+  readonly detail: string;
+  readonly aiGenerated: boolean;
+}
+
+/** Shared user-facing vocabulary for why a thread entered Focus. */
+export function describeThreadPriorityFocus(
+  focus: ThreadPriorityFocusMetadata,
+): ThreadPriorityFocusExplanation {
+  switch (focus.source) {
+    case "pin":
+      return { title: "Pinned", detail: "Pinned by you.", aiGenerated: false };
+    case "approval":
+      return {
+        title: "Approval required",
+        detail: "This thread is waiting for your approval.",
+        aiGenerated: false,
+      };
+    case "input":
+      return {
+        title: "Input required",
+        detail: "This thread is waiting for your response.",
+        aiGenerated: false,
+      };
+    case "failure":
+      return {
+        title: "Recent failure",
+        detail: "The latest turn failed and has not received a newer request.",
+        aiGenerated: false,
+      };
+    case "ai":
+      return {
+        title: focus.ranking?.tier === "now" ? "Now" : "Soon",
+        detail: focus.ranking?.reason ?? "Selected by the Inbox ranking model.",
+        aiGenerated: true,
+      };
+  }
+}
+
 export interface ThreadPriorityPartitionCandidate {
   readonly scopedKey: string;
   readonly pinned: boolean;

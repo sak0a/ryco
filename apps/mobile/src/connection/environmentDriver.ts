@@ -28,6 +28,7 @@ import { subscribeAppStateResume } from "./appStateResume";
 import { createMobileEnvironmentStateSink } from "./environmentStateSink";
 import type { MobileRemoteEnvironmentApi } from "./remoteApi";
 import { createThreadDetailEventApplier } from "./threadDetailEvents";
+import { writeEnvironmentServerConfig } from "../state/environmentServerConfigs";
 
 // §4 stub closure: the supervisor evicts idle thread-detail subscriptions; a
 // subscription is non-idle while the thread has pending approvals/user-input, an
@@ -314,6 +315,13 @@ export function createMobileEnvironmentDriver(
         environmentId: record.environmentId,
       },
       client,
+      onConfigSnapshot: (config) => {
+        writeEnvironmentServerConfig(record.environmentId, config);
+        patchRuntime(record.environmentId, {
+          descriptor: config.environment,
+          serverConfig: config,
+        });
+      },
       pushSequenceMonitor: noopPushSequenceMonitor,
       resetShellProjection: (environmentId) => getSupervisor().resetShellProjection(environmentId),
       applyShellEvent: (event, environmentId) =>

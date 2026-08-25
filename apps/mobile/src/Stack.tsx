@@ -34,6 +34,7 @@ import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppea
 import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
 import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsClientStorageRouteScreen";
 import { SettingsHubRouteScreen } from "./features/settings/SettingsHubRouteScreen";
+import { SettingsInboxRouteScreen } from "./features/settings/SettingsInboxRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { SettingsWorkspaceRouteScreen } from "./features/settings/SettingsWorkspaceRouteScreen";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
@@ -158,6 +159,11 @@ const SettingsSheetStack = createNativeStackNavigator({
       screen: SettingsWorkspaceRouteScreen,
       linking: MVP_SETTINGS_SHEET_ROUTES.SettingsWorkspace.linking,
       options: settingsRouteOptions("SettingsWorkspace", "Workspace defaults"),
+    }),
+    SettingsInbox: createNativeStackScreen({
+      screen: SettingsInboxRouteScreen,
+      linking: MVP_SETTINGS_SHEET_ROUTES.SettingsInbox.linking,
+      options: settingsRouteOptions("SettingsInbox", "Inbox and AI Focus"),
     }),
     SettingsAccount: createNativeStackScreen({
       screen: HostedAccountRouteScreen,

@@ -28,6 +28,7 @@ import { prepareMobileRelayE2eeAttempt, resolveMobileRelayE2eeProvider } from ".
 import { readPrimaryEnvironmentDescriptor } from "./primaryEnvironment";
 import { MobileHostedRelaySocket, mobileHostedRelayUrl } from "./relaySocket";
 import { getMobileHostedConfig } from "./runtimeConfig";
+import { writeEnvironmentServerConfig } from "../state/environmentServerConfigs";
 
 /**
  * Builds the node connection that runs **through the Hub relay**.
@@ -189,6 +190,10 @@ export function createHostedPrimaryConnection(
     kind: "primary",
     knownEnvironment,
     client,
+    onConfigSnapshot: (config) => {
+      if (!acceptsEvent()) return;
+      writeEnvironmentServerConfig(descriptor.environmentId, config);
+    },
     pushSequenceMonitor: deps.pushSequenceMonitor,
     resetShellProjection: (environmentId) => {
       if (!acceptsEvent()) return;

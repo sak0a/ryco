@@ -59,4 +59,22 @@ describe("preferencesStore persistence", () => {
     expect(prefs.baseFontSize).toBeUndefined();
     expect(prefs.codeWordBreak).toBe(true);
   });
+
+  it("persists only supported AI Focus intervals", async () => {
+    updatePreferences({ aiFocusEnabled: true, aiFocusRefreshIntervalMs: 600_000 });
+    await flush();
+    expect(getPreferencesSnapshot()).toMatchObject({
+      aiFocusEnabled: true,
+      aiFocusRefreshIntervalMs: 600_000,
+    });
+
+    kvStore.set(
+      "ryco.preferences",
+      JSON.stringify({ aiFocusEnabled: true, aiFocusRefreshIntervalMs: 86_400_001 }),
+    );
+    resetPreferencesStoreForTests();
+    hydratePreferences();
+    await flush();
+    expect(getPreferencesSnapshot().aiFocusRefreshIntervalMs).toBeUndefined();
+  });
 });

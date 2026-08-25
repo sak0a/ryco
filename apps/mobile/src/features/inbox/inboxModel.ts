@@ -7,6 +7,10 @@ import type {
 import { buildThreadInbox } from "@ryco/client-runtime/state/threads";
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 import type { ThreadSettlementBlocker } from "@ryco/shared/threadSettlement";
+import {
+  describeThreadPriorityFocus,
+  type ThreadPriorityFocusMetadata,
+} from "@ryco/shared/threadPriority";
 
 import { buildChangeRequestBadge, type ChangeRequestBadge } from "../../lib/changeRequestBadge";
 import {
@@ -93,6 +97,10 @@ export interface InboxThreadRow {
   /** Current provider brand for the task; null renders the neutral mark. */
   readonly providerDriver: string | null;
   readonly providerLabel: string | null;
+  readonly focus: ThreadPriorityFocusMetadata | null;
+  readonly focusTitle: string | null;
+  readonly focusDetail: string | null;
+  readonly focusAiGenerated: boolean;
   readonly attentionState: "active" | "settled";
   readonly canSettle: boolean;
   readonly settlementBlocker: ThreadSettlementBlocker | null;
@@ -101,8 +109,8 @@ export interface InboxThreadRow {
 }
 
 export interface InboxSection {
-  readonly key: "active" | "settled";
-  readonly title: "Active" | "Settled";
+  readonly key: "focus" | "active" | "settled";
+  readonly title: "Focus" | "Active" | "Settled";
   readonly rows: ReadonlyArray<InboxThreadRow>;
 }
 
@@ -115,6 +123,8 @@ export interface BuildInboxInput {
   readonly query?: string;
   readonly deliveryUnknownThreadIds?: ReadonlySet<string>;
   readonly localQueuedThreadIds?: ReadonlySet<string>;
+  readonly pinnedThreadKeys?: ReadonlySet<string> | ReadonlyArray<string>;
+  readonly aiFocusEnabled?: boolean;
   readonly nowMs?: number;
 }
 
@@ -191,6 +201,8 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
     })),
     localQueuedThreadKeys: input.localQueuedThreadIds,
     deliveryUnknownThreadKeys: deliveryUnknown,
+    pinnedThreadKeys: input.pinnedThreadKeys,
+    aiFocusEnabled: input.aiFocusEnabled ?? false,
     filters: {
       ...(input.nodeScope ? { environmentIds: [input.nodeScope] } : {}),
       text: input.query,
@@ -214,6 +226,7 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
       thread.session?.provider ??
       thread.providerDriver ??
       builtInProviderDriverForInstanceId(thread.modelSelection?.instanceId);
+    const focusExplanation = entry.focus === null ? null : describeThreadPriorityFocus(entry.focus);
     return {
       key: entry.key,
       environmentId: thread.environmentId,
@@ -232,6 +245,10 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
       roleLabel: environment?.role === "viewer" ? "Viewer" : null,
       providerDriver,
       providerLabel: providerDisplayLabel(providerDriver),
+      focus: entry.focus,
+      focusTitle: focusExplanation?.title ?? null,
+      focusDetail: focusExplanation?.detail ?? null,
+      focusAiGenerated: focusExplanation?.aiGenerated ?? false,
       attentionState: entry.lifecycle.classification,
       canSettle: entry.lifecycle.eligibility.canSettle,
       settlementBlocker: entry.lifecycle.settlementBlocker,
@@ -240,10 +257,12 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
     };
   };
 
+  const focus = inbox.focus.map(toRow);
   const active = inbox.active.map(toRow);
   const settled = inbox.settled.map(toRow);
 
   const sections: InboxSection[] = [];
+  if (focus.length > 0) sections.push({ key: "focus", title: "Focus", rows: focus });
   if (active.length > 0) sections.push({ key: "active", title: "Active", rows: active });
   if (settled.length > 0) sections.push({ key: "settled", title: "Settled", rows: settled });
   return sections;
