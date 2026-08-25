@@ -5,7 +5,7 @@ import type {
   SidebarWorktreeSummary,
 } from "@ryco/client-runtime/state/threads";
 import type { EnvironmentId, ScopedThreadRef } from "@ryco/contracts";
-import { SearchIcon } from "lucide-react";
+import { GitBranchIcon, SearchIcon, ServerIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -42,18 +42,18 @@ const STATUS_FILTERS: ReadonlyArray<{
 function statusTone(state: InboxSidebarRow["state"]): string {
   switch (state) {
     case "needs-input":
-      return "bg-warning/12 text-warning-foreground";
+      return "text-warning-foreground";
     case "delivery-unknown":
     case "error":
-      return "bg-destructive/10 text-destructive";
+      return "text-destructive";
     case "working":
-      return "bg-success/10 text-success-foreground";
+      return "text-success-foreground";
     case "connecting":
     case "reconnecting":
-      return "bg-info/10 text-info-foreground";
+      return "text-info-foreground";
     case "offline":
     case "idle":
-      return "bg-muted text-muted-foreground";
+      return "text-muted-foreground";
   }
 }
 
@@ -69,41 +69,59 @@ function InboxThreadRow(props: {
     <button
       type="button"
       aria-current={props.active ? "page" : undefined}
-      className="group relative flex w-full min-w-0 flex-col gap-1 rounded-lg px-2.5 py-2 text-left outline-hidden ring-ring transition-colors hover:bg-sidebar-accent focus-visible:ring-2 aria-[current=page]:bg-sidebar-accent"
+      className="group/row relative flex w-full min-w-0 flex-col gap-1 overflow-hidden rounded-lg border border-transparent px-2.5 py-2 text-left outline-hidden ring-ring transition-[background-color,border-color,box-shadow,translate,scale] duration-200 ease-out will-change-transform hover:-translate-y-px hover:border-sidebar-border/60 hover:bg-sidebar-accent hover:shadow-sm/5 focus-visible:ring-2 active:translate-y-0 active:scale-[0.995] motion-reduce:translate-none motion-reduce:scale-100 motion-reduce:transition-colors aria-[current=page]:border-sidebar-border/60 aria-[current=page]:bg-sidebar-accent aria-[current=page]:shadow-xs/5"
+      data-testid="inbox-thread-row"
       onClick={props.onOpen}
     >
-      <div className="flex w-full min-w-0 items-start gap-2">
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-sidebar-foreground">
-          {props.row.title}
+      <span
+        aria-hidden
+        className={`absolute inset-y-2 left-0 w-0.5 origin-center rounded-full bg-sidebar-foreground/25 transition-[scale,opacity] duration-200 group-hover/row:scale-y-100 group-hover/row:opacity-100 group-focus-visible/row:scale-y-100 group-focus-visible/row:opacity-100 motion-reduce:transition-none ${props.active ? "scale-y-100 opacity-100" : "scale-y-0 opacity-0"}`}
+      />
+      <div className="flex w-full min-w-0 items-center gap-2 text-[10px] leading-4 text-muted-foreground/70">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <ServerIcon aria-hidden className="size-3 shrink-0 opacity-70" />
+          <span className="truncate">
+            <span className="font-medium text-sidebar-foreground/75">{props.row.machineLabel}</span>
+            <span aria-hidden className="px-1 text-muted-foreground/40">
+              ·
+            </span>
+            <span>{props.row.projectLabel}</span>
+          </span>
         </span>
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/65">
+        <span className="shrink-0 tabular-nums text-muted-foreground/60">
           {formatRelativeTimeLabel(props.row.updatedAt)}
         </span>
       </div>
-      <div className="flex w-full min-w-0 items-end gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[11px] text-muted-foreground/75">{props.row.contextLabel}</p>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
-            <span
-              className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${statusTone(props.row.state)}`}
-            >
-              {props.row.statusLabel}
-            </span>
-            {props.row.trustLabel ? (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                {props.row.trustLabel}
-              </span>
-            ) : null}
-            {props.row.roleLabel ? (
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                {props.row.roleLabel}
-              </span>
-            ) : null}
-          </div>
-        </div>
+      <div className="flex w-full min-w-0 items-center">
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-4.5 text-sidebar-foreground transition-[translate] duration-200 group-hover/row:translate-x-0.5 motion-reduce:translate-none">
+          {props.row.title}
+        </span>
+      </div>
+      <div className="flex w-full min-w-0 items-center gap-1.5 text-[10px] leading-4">
+        <span
+          className={`inline-flex shrink-0 items-center gap-1 font-medium ${statusTone(props.row.state)}`}
+        >
+          <span aria-hidden className="size-1.5 rounded-full bg-current opacity-80" />
+          {props.row.statusLabel}
+        </span>
+        <span aria-hidden className="h-3 w-px shrink-0 bg-sidebar-border/60" />
+        <span className="flex min-w-0 flex-1 items-center gap-1 text-muted-foreground/70">
+          <GitBranchIcon aria-hidden className="size-3 shrink-0 opacity-70" />
+          <span className="truncate">{props.row.workspaceLabel}</span>
+        </span>
+        {props.row.trustLabel ? (
+          <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
+            {props.row.trustLabel}
+          </span>
+        ) : null}
+        {props.row.roleLabel ? (
+          <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
+            {props.row.roleLabel}
+          </span>
+        ) : null}
         <span
           aria-label={props.row.providerLabel ? `${props.row.providerLabel} provider` : "Provider"}
-          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70"
+          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-[color,scale] duration-200 group-hover/row:scale-110 group-hover/row:text-sidebar-foreground/85 motion-reduce:scale-100"
           title={props.row.providerLabel ?? "Provider"}
         >
           {ProviderIcon ? (
