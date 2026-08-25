@@ -72,11 +72,13 @@ layer("ThreadPriorityRepository", (it) => {
       yield* insertThread("thread-priority-b");
       const repository = yield* ThreadPriorityRepository;
       const snapshot = makeSnapshot();
-      yield* repository.replace(snapshot);
+      yield* repository.replace({ snapshot, inputFingerprint: "batch-input-1" });
 
       const hydrated = yield* repository.readLatest();
       assert.isTrue(Option.isSome(hydrated));
-      if (Option.isSome(hydrated)) assert.deepEqual(hydrated.value, snapshot);
+      if (Option.isSome(hydrated)) {
+        assert.deepEqual(hydrated.value, { snapshot, inputFingerprint: "batch-input-1" });
+      }
     }),
   );
 
@@ -86,18 +88,20 @@ layer("ThreadPriorityRepository", (it) => {
       yield* insertThread("thread-priority-b");
       const repository = yield* ThreadPriorityRepository;
       const original = makeSnapshot();
-      yield* repository.replace(original);
+      yield* repository.replace({ snapshot: original, inputFingerprint: "batch-input-1" });
 
       const invalidReplacement = {
         ...makeSnapshot("batch-2"),
         entries: [original.entries[0]!, original.entries[0]!],
       };
-      const result = yield* repository.replace(invalidReplacement).pipe(Effect.result);
+      const result = yield* repository
+        .replace({ snapshot: invalidReplacement, inputFingerprint: "batch-input-2" })
+        .pipe(Effect.result);
       assert.isTrue(Result.isFailure(result));
 
       const hydrated = yield* repository.readLatest();
       assert.isTrue(Option.isSome(hydrated));
-      if (Option.isSome(hydrated)) assert.deepEqual(hydrated.value, original);
+      if (Option.isSome(hydrated)) assert.deepEqual(hydrated.value.snapshot, original);
     }),
   );
 
@@ -106,7 +110,7 @@ layer("ThreadPriorityRepository", (it) => {
       yield* insertThread("thread-priority-a");
       yield* insertThread("thread-priority-b");
       const repository = yield* ThreadPriorityRepository;
-      yield* repository.replace(makeSnapshot());
+      yield* repository.replace({ snapshot: makeSnapshot(), inputFingerprint: "batch-input-1" });
       const sql = yield* SqlClient.SqlClient;
       yield* sql`
         UPDATE projection_threads SET settled_override = 'settled',
@@ -120,8 +124,8 @@ layer("ThreadPriorityRepository", (it) => {
 
       const auditable = yield* repository.readLatest();
       const usable = yield* repository.readUsable("2026-08-25T13:30:00.000Z");
-      assert.equal(Option.getOrThrow(auditable).entries.length, 2);
-      assert.equal(Option.getOrThrow(usable).entries.length, 0);
+      assert.equal(Option.getOrThrow(auditable).snapshot.entries.length, 2);
+      assert.equal(Option.getOrThrow(usable).snapshot.entries.length, 0);
     }),
   );
 
@@ -130,7 +134,10 @@ layer("ThreadPriorityRepository", (it) => {
       yield* insertThread("thread-priority-a");
       yield* insertThread("thread-priority-b");
       const repository = yield* ThreadPriorityRepository;
-      yield* repository.replace(makeSnapshot("expired-batch", "2026-08-25T12:30:00.000Z"));
+      yield* repository.replace({
+        snapshot: makeSnapshot("expired-batch", "2026-08-25T12:30:00.000Z"),
+        inputFingerprint: "batch-input-expired",
+      });
       assert.isTrue(Option.isSome(yield* repository.readLatest()));
       assert.isTrue(Option.isNone(yield* repository.readUsable("2026-08-25T12:30:00.000Z")));
     }),
@@ -141,7 +148,7 @@ layer("ThreadPriorityRepository", (it) => {
       yield* insertThread("thread-priority-a");
       yield* insertThread("thread-priority-b");
       const repository = yield* ThreadPriorityRepository;
-      yield* repository.replace(makeSnapshot());
+      yield* repository.replace({ snapshot: makeSnapshot(), inputFingerprint: "batch-input-1" });
       const sql = yield* SqlClient.SqlClient;
       yield* sql`DELETE FROM projection_threads WHERE thread_id = 'thread-priority-a'`;
       const rows = yield* repository.inspectRows();

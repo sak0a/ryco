@@ -15,16 +15,21 @@ import {
 
 export type ThreadPriorityRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 
+export interface ThreadPriorityStoredBatch {
+  readonly snapshot: ThreadPriorityBatchSnapshot;
+  readonly inputFingerprint: string;
+}
+
 export interface ThreadPriorityRepositoryShape {
   readonly readLatest: () => Effect.Effect<
-    Option.Option<ThreadPriorityBatchSnapshot>,
+    Option.Option<ThreadPriorityStoredBatch>,
     ThreadPriorityRepositoryError
   >;
   readonly readUsable: (
     now: string,
-  ) => Effect.Effect<Option.Option<ThreadPriorityBatchSnapshot>, ThreadPriorityRepositoryError>;
+  ) => Effect.Effect<Option.Option<ThreadPriorityStoredBatch>, ThreadPriorityRepositoryError>;
   readonly replace: (
-    snapshot: ThreadPriorityBatchSnapshot,
+    batch: ThreadPriorityStoredBatch,
   ) => Effect.Effect<void, ThreadPriorityRepositoryError>;
   readonly deleteThread: (threadId: ThreadId) => Effect.Effect<void, ThreadPriorityRepositoryError>;
   readonly inspectRows: () => Effect.Effect<
@@ -40,6 +45,7 @@ export class ThreadPriorityRepository extends Context.Service<
 
 interface BatchRow {
   readonly batchId: string;
+  readonly inputFingerprint: string;
   readonly modelSelectionJson: string;
   readonly modelFingerprint: string;
   readonly promptVersion: string;
@@ -64,6 +70,7 @@ const makeThreadPriorityRepository = Effect.gen(function* () {
       const batches = yield* sql<BatchRow>`
         SELECT
           batch_id AS "batchId",
+          input_fingerprint AS "inputFingerprint",
           model_selection_json AS "modelSelectionJson",
           model_fingerprint AS "modelFingerprint",
           prompt_version AS "promptVersion",
@@ -74,7 +81,7 @@ const makeThreadPriorityRepository = Effect.gen(function* () {
         WHERE slot = 1
       `;
       const batch = batches[0];
-      if (batch === undefined) return Option.none<ThreadPriorityBatchSnapshot>();
+      if (batch === undefined) return Option.none<ThreadPriorityStoredBatch>();
 
       const rows = activeOnly
         ? yield* sql<RankingRow>`
@@ -116,7 +123,7 @@ const makeThreadPriorityRepository = Effect.gen(function* () {
         },
         entries: rows,
       });
-      return Option.some(decoded);
+      return Option.some({ snapshot: decoded, inputFingerprint: batch.inputFingerprint });
     }).pipe(
       Effect.mapError((cause) =>
         Schema.isSchemaError(cause)
@@ -125,7 +132,7 @@ const makeThreadPriorityRepository = Effect.gen(function* () {
       ),
     );
 
-  const replace: ThreadPriorityRepositoryShape["replace"] = (snapshot) =>
+  const replace: ThreadPriorityRepositoryShape["replace"] = ({ snapshot, inputFingerprint }) =>
     sql
       .withTransaction(
         Effect.gen(function* () {
@@ -133,11 +140,13 @@ const makeThreadPriorityRepository = Effect.gen(function* () {
           yield* sql`DELETE FROM thread_priority_batches WHERE slot = 1`;
           yield* sql`
             INSERT INTO thread_priority_batches (
-              slot, batch_id, model_selection_json, model_fingerprint, prompt_version,
+              slot, batch_id, input_fingerprint, model_selection_json, model_fingerprint,
+              prompt_version,
               ranked_at, usable_until, checked_at
             ) VALUES (
               1,
               ${snapshot.batchId},
+              ${inputFingerprint},
               ${JSON.stringify(snapshot.modelSelection)},
               ${snapshot.modelFingerprint},
               ${snapshot.promptVersion},
@@ -171,7 +180,9 @@ const makeThreadPriorityRepository = Effect.gen(function* () {
     readUsable: (now) =>
       readSnapshot(true).pipe(
         Effect.map(
-          Option.filter((snapshot) => Date.parse(snapshot.freshness.usableUntil) > Date.parse(now)),
+          Option.filter(
+            (batch) => Date.parse(batch.snapshot.freshness.usableUntil) > Date.parse(now),
+          ),
         ),
       ),
     replace,
@@ -185,7 +196,7 @@ const makeThreadPriorityRepository = Effect.gen(function* () {
         Effect.map(
           Option.match({
             onNone: () => [],
-            onSome: (snapshot) => snapshot.entries,
+            onSome: (batch) => batch.snapshot.entries,
           }),
         ),
       ),

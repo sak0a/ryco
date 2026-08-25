@@ -7,6 +7,7 @@ export default Effect.gen(function* () {
     CREATE TABLE IF NOT EXISTS thread_priority_batches (
       slot INTEGER PRIMARY KEY CHECK (slot = 1),
       batch_id TEXT NOT NULL UNIQUE,
+      input_fingerprint TEXT NOT NULL,
       model_selection_json TEXT NOT NULL,
       model_fingerprint TEXT NOT NULL,
       prompt_version TEXT NOT NULL,
