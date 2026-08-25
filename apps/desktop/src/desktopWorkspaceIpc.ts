@@ -82,6 +82,7 @@ export function projectDesktopWorkspaceState(
       canReadMetadata: machine.canReadMetadata,
       canConnect: machine.canConnect,
       canMutate: machine.canMutate,
+      threadSettlementSupported: machine.capabilities.threadSettlement,
       accessReasons: machine.accessReasons,
     })),
     snapshots: state.workspace.snapshots.flatMap((entry) =>

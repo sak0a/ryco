@@ -240,6 +240,8 @@ function adaptDraftThreadForSidebarTree(input: {
 }): SidebarTreeThread {
   return {
     archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
     branch: input.draftThread.branch,
     createdAt: input.draftThread.createdAt,
     draftId: input.draftId,

@@ -2308,7 +2308,9 @@ export class HostedHubApi {
         !nullableNumber(presence.lastHeartbeatAt) ||
         (capabilities !== null &&
           (typeof capabilities.repositoryIdentity !== "boolean" ||
-            typeof capabilities.nativeClientRequired !== "boolean"))
+            typeof capabilities.nativeClientRequired !== "boolean" ||
+            (capabilities.threadSettlement !== undefined &&
+              typeof capabilities.threadSettlement !== "boolean")))
       ) {
         throw new HostedHubApiError("invalid_response", 502);
       }
@@ -2336,6 +2338,9 @@ export class HostedHubApi {
             capabilities: {
               repositoryIdentity: capabilities.repositoryIdentity as boolean,
               nativeClientRequired: capabilities.nativeClientRequired as boolean,
+              ...(typeof capabilities.threadSettlement === "boolean"
+                ? { threadSettlement: capabilities.threadSettlement }
+                : {}),
             },
           })
         : decodedNode;

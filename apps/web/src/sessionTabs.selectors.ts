@@ -33,6 +33,8 @@ export function draftThreadToSidebarSummary(draft: DraftThreadState): SidebarThr
     session: null,
     createdAt: draft.createdAt,
     archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
     updatedAt: draft.createdAt,
     latestTurn: null,
     branch: draft.branch,

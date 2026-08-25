@@ -8,6 +8,7 @@ import type {
   RelayEffectiveRole,
   RepositoryIdentity,
   ThreadId,
+  ThreadSettlementOverride,
   WorktreeId,
 } from "@ryco/contracts";
 
@@ -43,6 +44,7 @@ export interface WorkspaceMachineCatalogEntry {
   readonly capabilities: {
     readonly repositoryIdentity: boolean;
     readonly nativeClientRequired: boolean;
+    readonly threadSettlement: boolean;
   };
   readonly clientTier: WorkspaceClientTier;
   readonly nativeTrust: WorkspaceNativeTrustState;
@@ -95,6 +97,10 @@ export interface WorkspaceThreadMetadata {
   readonly createdAt: string;
   readonly updatedAt: string | null;
   readonly archivedAt: string | null;
+  /** Optional for backward compatibility with schema-v1 metadata caches. */
+  readonly settledOverride?: ThreadSettlementOverride | null;
+  /** Optional for backward compatibility with schema-v1 metadata caches. */
+  readonly settledAt?: string | null;
   readonly modelSelection: ModelSelection | null;
   readonly providerDriver: ProviderDriverKind | null;
   readonly branch: string | null;

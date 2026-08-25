@@ -938,21 +938,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
       const turnEvents: ReadonlyArray<PlannedOrchestrationEvent> =
         isContextHandoff && contextHandoffRequestedEvent && handoffActivityEvent
-        ? [
-            contextHandoffRequestedEvent,
-            handoffActivityEvent,
-            userMessageEvent,
-            turnStartRequestedEvent,
-          ]
-        : [userMessageEvent, turnStartRequestedEvent];
+          ? [
+              contextHandoffRequestedEvent,
+              handoffActivityEvent,
+              userMessageEvent,
+              turnStartRequestedEvent,
+            ]
+          : [userMessageEvent, turnStartRequestedEvent];
       const unsettledEvent = activityUnsettledEvent({
         command,
         thread: targetThread,
         occurredAt: command.createdAt,
       });
-      return unsettledEvent === null
-        ? turnEvents
-        : [unsettledEvent, ...turnEvents];
+      return unsettledEvent === null ? turnEvents : [unsettledEvent, ...turnEvents];
     }
 
     case "thread.turn.steer": {
