@@ -1687,6 +1687,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsThreadsSetManualBucketRpc,
   WsThreadsSetManualPositionRpc,
   WsSearchThreadMessagesRpc,
+  WsThreadPriorityEnsureCurrentRpc,
   WsWorktreesSetManualPositionRpc,
   WsProjectsInitializeGitRpc,
   WsVcsListRefsRpc,

@@ -70,6 +70,7 @@ import { JiraWorkItemService } from "../atlassian/JiraWorkItemService.ts";
 import { AdvertisedEndpointRegistry } from "../remote/Services/AdvertisedEndpointRegistry.ts";
 import { LocalDiagnosticsMetrics } from "../observability/Services/LocalDiagnosticsMetrics.ts";
 import { rpcAccessFor } from "./RpcAccessPolicy.ts";
+import { ThreadPriorityCoordinator } from "../threadPriority/ThreadPriorityCoordinator.ts";
 
 import { SOURCE_CONTROL_LINKED_REFRESH_DEBOUNCE_MS } from "./context/constants.ts";
 import { toGitManagerError } from "./context/gitErrors.ts";
@@ -118,6 +119,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     // the RPC under test. Keep this additive capability optional at context
     // construction; production provides it in `makeServerWsRpcLayer`.
     const contextHandoffInspection = yield* Effect.serviceOption(ContextHandoffInspection);
+    const threadPriorityCoordinator = yield* Effect.serviceOption(ThreadPriorityCoordinator);
     // Optional for the same route-test reason; production always provides it
     // through the runtime's Agent Control layer.
     const agentControlProposals = yield* Effect.serviceOption(AgentControlProposalService);
@@ -627,6 +629,10 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
         orchestrationEngine,
         projectionSnapshotQuery,
         repositoryIdentityResolver,
+        threadPriorityChanges: Option.match(threadPriorityCoordinator, {
+          onNone: () => Stream.empty,
+          onSome: (coordinator) => coordinator.changes,
+        }),
       });
 
     const {
@@ -693,6 +699,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       usageService,
       orchestrationEngine,
       contextHandoffInspection,
+      threadPriorityCoordinator,
       agentControlProposals,
       agentControlExternalIntegrations,
       agentControlExternalInstallations,

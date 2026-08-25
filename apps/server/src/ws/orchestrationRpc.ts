@@ -13,6 +13,7 @@ import {
   OrchestrationStopBackgroundTaskError,
   ORCHESTRATION_WS_METHODS,
   WS_METHODS,
+  ThreadPriorityRpcError,
   type OrchestrationGetThreadHistoryPageInput,
   type OrchestrationGetThreadWindowInput,
   type ThreadId,
@@ -53,6 +54,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
     makeReplayableThreadStream,
     recordThreadSnapshotDurationMs,
     reconcileAllWorktrees,
+    threadPriorityCoordinator,
   } = ctx;
 
   /**
@@ -651,6 +653,26 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
           ),
         ),
         { "rpc.aggregate": "orchestration" },
+      ),
+    [WS_METHODS.threadPriorityEnsureCurrent]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.threadPriorityEnsureCurrent,
+        ownerEffect(
+          WS_METHODS.threadPriorityEnsureCurrent,
+          Option.match(threadPriorityCoordinator, {
+            onNone: () =>
+              Effect.fail(
+                new ThreadPriorityRpcError({
+                  failure: {
+                    kind: "unsupported",
+                    detail: "Inbox priority ranking is not available on this server.",
+                  },
+                }),
+              ),
+            onSome: (coordinator) => coordinator.ensureCurrent(input),
+          }),
+        ),
+        { "rpc.aggregate": "threadPriority" },
       ),
   });
 };

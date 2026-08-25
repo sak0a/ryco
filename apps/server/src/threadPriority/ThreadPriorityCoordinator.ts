@@ -10,7 +10,7 @@ import {
   type ThreadPriorityEnsureCurrentResult,
   type ThreadPriorityFailureKind,
 } from "@ryco/contracts";
-import { Context, Effect, Layer, Option, Ref, Schema, Semaphore } from "effect";
+import { Context, Effect, Layer, Option, PubSub, Ref, Schema, Semaphore, Stream } from "effect";
 
 import { ServerSettingsService } from "../serverSettings.ts";
 import { TextGeneration, type TextGenerationShape } from "../textGeneration/TextGeneration.ts";
@@ -36,6 +36,7 @@ export interface ThreadPriorityCoordinatorShape {
   readonly ensureCurrent: (
     input: ThreadPriorityEnsureCurrentInput,
   ) => Effect.Effect<ThreadPriorityEnsureCurrentResult, ThreadPriorityRpcError>;
+  readonly changes: Stream.Stream<void>;
 }
 
 export class ThreadPriorityCoordinator extends Context.Service<
@@ -107,6 +108,7 @@ export const makeThreadPriorityCoordinator = Effect.fn("makeThreadPriorityCoordi
   const lock = yield* Semaphore.make(1);
   const lastAutomaticAt = yield* Ref.make<number | null>(null);
   const lastManualAt = yield* Ref.make<number | null>(null);
+  const changes = yield* PubSub.unbounded<void>();
 
   const ensureCurrent: ThreadPriorityCoordinatorShape["ensureCurrent"] = (input) => {
     const requestedAt = dependencies.nowMs();
@@ -120,11 +122,15 @@ export const makeThreadPriorityCoordinator = Effect.fn("makeThreadPriorityCoordi
         const chunks = buildThreadPriorityChunks(candidates, nowMs);
         const candidateFingerprints = new Map<string, string>();
         const threadIdsByCandidateId = new Map<string, string>();
+        const fingerprintByThreadId = new Map<string, string>();
         for (const chunk of chunks) {
           for (const candidate of chunk.candidates) {
             candidateFingerprints.set(candidate.candidateId, candidateFingerprint(candidate));
             const threadId = chunk.threadIdsByCandidateId.get(candidate.candidateId);
-            if (threadId !== undefined) threadIdsByCandidateId.set(candidate.candidateId, threadId);
+            if (threadId !== undefined) {
+              threadIdsByCandidateId.set(candidate.candidateId, threadId);
+              fingerprintByThreadId.set(threadId, candidateFingerprint(candidate));
+            }
           }
         }
         const inputFingerprint = fingerprint(
@@ -194,19 +200,12 @@ export const makeThreadPriorityCoordinator = Effect.fn("makeThreadPriorityCoordi
             confidence: ranking.confidence,
             reason: ranking.reason,
             inputFingerprint: ThreadPriorityFingerprint.make(
-              [...threadIdsByCandidateId.entries()].find(
-                ([, threadId]) => threadId === ranking.threadId,
-              ) === undefined
-                ? fingerprint(ranking.threadId)
-                : (candidateFingerprints.get(
-                    [...threadIdsByCandidateId.entries()].find(
-                      ([, threadId]) => threadId === ranking.threadId,
-                    )![0],
-                  ) ?? fingerprint(ranking.threadId)),
+              fingerprintByThreadId.get(ranking.threadId) ?? fingerprint(ranking.threadId),
             ),
           })),
         };
         yield* dependencies.repository.replace({ snapshot, inputFingerprint });
+        yield* PubSub.publish(changes, undefined);
         return {
           batchId: snapshot.batchId,
           disposition: "ranked" as const,
@@ -215,7 +214,10 @@ export const makeThreadPriorityCoordinator = Effect.fn("makeThreadPriorityCoordi
       }).pipe(Effect.mapError(mapFailure)),
     );
   };
-  return { ensureCurrent } satisfies ThreadPriorityCoordinatorShape;
+  return {
+    ensureCurrent,
+    changes: Stream.fromPubSub(changes),
+  } satisfies ThreadPriorityCoordinatorShape;
 });
 
 export const ThreadPriorityCoordinatorLive = Layer.effect(

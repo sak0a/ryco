@@ -42,6 +42,9 @@ import * as ForgejoApi from "./sourceControl/ForgejoApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
+import { ThreadPriorityCandidateQueryLive } from "./threadPriority/ThreadPriorityCandidateQuery.ts";
+import { ThreadPriorityCoordinatorLive } from "./threadPriority/ThreadPriorityCoordinator.ts";
+import { ThreadPriorityRepositoryLive } from "./threadPriority/ThreadPriorityRepository.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
 import * as GitManager from "./git/GitManager.ts";
@@ -198,6 +201,15 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(RuntimeReceiptBusLive),
+);
+
+const RuntimeFeatureLayerLive = Layer.mergeAll(
+  ReactorLayerLive,
+  ThreadPriorityCoordinatorLive,
+).pipe(
+  Layer.provideMerge(ThreadPriorityCandidateQueryLive),
+  Layer.provideMerge(ThreadPriorityRepositoryLive),
+  Layer.provideMerge(TextGeneration.layer),
 );
 
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
@@ -365,7 +377,7 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeCoreBaseDependenciesLive = RuntimeFeatureLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),

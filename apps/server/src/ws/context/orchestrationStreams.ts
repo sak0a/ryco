@@ -105,8 +105,10 @@ export const makeOrchestrationStreamHelpers = (deps: {
   readonly orchestrationEngine: OrchestrationEngineShape;
   readonly projectionSnapshotQuery: ProjectionSnapshotQueryShape;
   readonly repositoryIdentityResolver: RepositoryIdentityResolverShape;
+  readonly threadPriorityChanges?: Stream.Stream<void>;
 }) => {
   const { orchestrationEngine, projectionSnapshotQuery, repositoryIdentityResolver } = deps;
+  const threadPriorityChanges = deps.threadPriorityChanges ?? Stream.empty;
 
   const enrichProjectEvent = (
     event: OrchestrationEvent,
@@ -388,13 +390,20 @@ export const makeOrchestrationStreamHelpers = (deps: {
           shellEventsFromDomainEvents(replayStream),
           shellEventsFromDomainEvents(liveStream),
         ).pipe(dedupeBySequence((event) => event.sequence, lastSequenceRef));
+        const prioritySnapshotStream = threadPriorityChanges.pipe(
+          Stream.mapEffect(() => snapshot),
+          Stream.map((nextSnapshot) => ({
+            kind: "snapshot" as const,
+            snapshot: nextSnapshot,
+          })),
+        );
 
         return Stream.concat(
           Stream.make({
             kind: "snapshot" as const,
             snapshot: loadedSnapshot,
           }),
-          eventStream,
+          Stream.merge(eventStream, prioritySnapshotStream),
         ).pipe(Stream.ensuring(replayMetrics.reset));
       }),
     );

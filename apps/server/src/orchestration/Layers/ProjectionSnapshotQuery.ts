@@ -26,6 +26,7 @@ import {
   type OrchestrationThreadWindowSnapshot,
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
+  ThreadPriorityProjectedRanking,
   type OrchestrationWorktreeShell,
   ModelSelection,
   ProjectId,
@@ -73,6 +74,7 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread);
+const decodeProjectedPriority = Schema.decodeUnknownSync(ThreadPriorityProjectedRanking);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
@@ -468,6 +470,35 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
   const repositoryIdentityResolutionConcurrency = 4;
+  const listThreadPriorityRows = () => {
+    const now = new Date().toISOString();
+    return sql<{
+      readonly threadId: string;
+      readonly tier: ThreadPriorityProjectedRanking["tier"];
+      readonly confidence: ThreadPriorityProjectedRanking["confidence"];
+      readonly reason: string;
+      readonly inputFingerprint: string;
+      readonly batchId: string;
+      readonly modelSelectionJson: string;
+      readonly rankedAt: string;
+      readonly usableUntil: string;
+    }>`
+      SELECT
+        ranking.thread_id AS "threadId",
+        ranking.tier,
+        ranking.confidence,
+        ranking.reason,
+        ranking.input_fingerprint AS "inputFingerprint",
+        batch.batch_id AS "batchId",
+        batch.model_selection_json AS "modelSelectionJson",
+        batch.ranked_at AS "rankedAt",
+        batch.usable_until AS "usableUntil"
+      FROM thread_priority_rankings AS ranking
+      INNER JOIN thread_priority_batches AS batch ON batch.batch_id = ranking.batch_id
+      WHERE batch.usable_until > ${now}
+      ORDER BY ranking.thread_id ASC
+    `;
+  };
   const resolveRepositoryIdentitiesForProjects = Effect.fn(
     "ProjectionSnapshotQuery.resolveRepositoryIdentitiesForProjects",
   )(function* (
@@ -2197,11 +2228,26 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listThreadPriorityRows().pipe(
+            Effect.mapError(
+              toPersistenceSqlError(
+                "ProjectionSnapshotQuery.getShellSnapshot:listThreadPriorityRows",
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, worktreeRows, sessionRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            threadRows,
+            worktreeRows,
+            sessionRows,
+            latestTurnRows,
+            stateRows,
+            priorityRows,
+          ]) =>
             Effect.gen(function* () {
               let updatedAt: string | null = null;
               for (const row of projectRows) {
@@ -2242,6 +2288,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               );
               const activeProjectIds = new Set(
                 projectRows.filter((row) => row.deletedAt === null).map((row) => row.projectId),
+              );
+              const priorityByThread = new Map(
+                priorityRows.map((row) => [
+                  row.threadId,
+                  decodeProjectedPriority({
+                    tier: row.tier,
+                    confidence: row.confidence,
+                    reason: row.reason,
+                    inputFingerprint: row.inputFingerprint,
+                    batchId: row.batchId,
+                    modelSelection: JSON.parse(row.modelSelectionJson) as unknown,
+                    rankedAt: row.rankedAt,
+                    usableUntil: row.usableUntil,
+                  }),
+                ]),
               );
 
               const snapshot = {
@@ -2284,6 +2345,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
                       row.threadId,
                     ),
+                    ...(priorityByThread.has(row.threadId)
+                      ? { priority: priorityByThread.get(row.threadId) }
+                      : {}),
                   })),
                 updatedAt: updatedAt ?? new Date(0).toISOString(),
               };
