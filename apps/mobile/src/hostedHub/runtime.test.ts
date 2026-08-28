@@ -129,8 +129,8 @@ import { resetMobileHostedRuntimeConfigForTests } from "./runtimeConfig";
 
 const HOSTED_CONFIG = {
   hubOrigin: "https://hub.example.test",
-  appUrl: "https://app.ryco.dev/",
-  relyingParty: "app.ryco.dev",
+  appUrl: "https://app.ryco.space/",
+  relyingParty: "app.ryco.space",
 };
 
 const signer = { sign: async () => "proof" };

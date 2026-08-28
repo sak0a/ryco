@@ -17,7 +17,7 @@ const credentialId = new Uint8Array([17, 18, 19, 20]);
 function registrationOptions() {
   return {
     challenge,
-    rp: { name: "Ryco", id: "app.ryco.dev" },
+    rp: { name: "Ryco", id: "app.ryco.space" },
     user: { id: userId, name: "owner@example.test", displayName: "Owner" },
     pubKeyCredParams: [{ type: "public-key" as const, alg: -7 }],
   };
@@ -27,13 +27,13 @@ describe("passkey option encoding", () => {
   it("base64url-encodes every binary member of an authentication request", () => {
     const request = encodeAuthenticationRequest({
       challenge,
-      rpId: "app.ryco.dev",
+      rpId: "app.ryco.space",
       allowCredentials: [{ id: credentialId, type: "public-key", transports: ["internal"] }],
     });
 
     expect(request.challenge).toBe(encodeBase64Url(challenge));
     expect(decodeBase64Url(request.challenge)).toEqual(challenge);
-    expect(request.rpId).toBe("app.ryco.dev");
+    expect(request.rpId).toBe("app.ryco.space");
     expect(request.allowCredentials).toEqual([
       { type: "public-key", id: encodeBase64Url(credentialId), transports: ["internal"] },
     ]);
@@ -47,7 +47,7 @@ describe("passkey option encoding", () => {
 
     expect(request.challenge).toBe(encodeBase64Url(challenge));
     expect(request.user.id).toBe(encodeBase64Url(userId));
-    expect(request.rp).toEqual({ id: "app.ryco.dev", name: "Ryco" });
+    expect(request.rp).toEqual({ id: "app.ryco.space", name: "Ryco" });
     expect(request.excludeCredentials).toEqual([
       { type: "public-key", id: encodeBase64Url(credentialId) },
     ]);
@@ -57,7 +57,7 @@ describe("passkey option encoding", () => {
     const extensions = { credProps: true };
     const request = encodeAuthenticationRequest({
       challenge,
-      rpId: "app.ryco.dev",
+      rpId: "app.ryco.space",
       timeout: 60_000,
       userVerification: "required",
       extensions,
@@ -69,7 +69,7 @@ describe("passkey option encoding", () => {
   });
 
   it("omits absent optional members rather than emitting undefined", () => {
-    const request = encodeAuthenticationRequest({ challenge, rpId: "app.ryco.dev" });
+    const request = encodeAuthenticationRequest({ challenge, rpId: "app.ryco.space" });
 
     expect(Object.keys(request).toSorted()).toEqual(["challenge", "rpId"]);
   });

@@ -759,7 +759,7 @@
             <h2><span class="n">01</span>The one big idea</h2>
             <p>
               Ryco has a clean runtime boundary. The client (a desktop Electron renderer, a browser
-              tab on <code>app.ryco.dev</code>, or a phone) talks to a
+              tab on <code>app.ryco.space</code>, or a phone) talks to a
               <strong>Ryco server</strong> over HTTP + WebSocket. That server owns everything real:
             </p>
             <div class="chips">
@@ -1502,7 +1502,7 @@
             </div>
             <p>
               Any <code>http:</code> endpoint is auto-tagged <code>mixed-content-blocked</code> — a
-              browser on an HTTPS page (like <code>app.ryco.dev</code>) can’t open a plain
+              browser on an HTTPS page (like <code>app.ryco.space</code>) can’t open a plain
               <code>http://</code>/<code>ws://</code> backend. That’s why LAN endpoints pair from
               the desktop/CLI directly, while HTTPS endpoints work from the hosted app.
             </p>
@@ -1583,7 +1583,7 @@ tailscale serve --https=443 off                                <span class="cm">
             <div class="call warn">
               <div class="tag">Good to know</div>
               <p>
-                For <code>https://app.ryco.dev</code>, prefer an HTTPS Tailnet endpoint. A plain
+                For <code>https://app.ryco.space</code>, prefer an HTTPS Tailnet endpoint. A plain
                 <code>http://100.x.y.z:3773</code> works from a desktop client or an HTTP browser
                 page, but not from the hosted HTTPS app (mixed-content). The commands
                 <code>tailscale ip -4</code> / <code>tailscale cert</code> appear only in the README
@@ -1683,7 +1683,7 @@ tailscale serve --https=443 off                                <span class="cm">
 
             <h3>Hosted web pairing & the URL hash</h3>
             <p>A hosted link looks like:</p>
-            <pre><code>https://app.ryco.dev/pair?host=https://backend.example.com:3773#token=PAIRCODE</code></pre>
+            <pre><code>https://app.ryco.space/pair?host=https://backend.example.com:3773#token=PAIRCODE</code></pre>
             <p>
               The <code>host</code> is a query param; the <strong>token is in the URL hash</strong>.
               That’s deliberate — URL fragments are never sent in HTTP requests, so the pairing

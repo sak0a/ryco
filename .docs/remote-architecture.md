@@ -158,7 +158,7 @@ A hosted pairing request is a bootstrap URL for the static web app, not a transp
 Example:
 
 ```text
-https://app.ryco.dev/pair?host=https://backend.example.com:3773#token=PAIRCODE
+https://app.ryco.space/pair?host=https://backend.example.com:3773#token=PAIRCODE
 ```
 
 The hosted app reads the `host` parameter and pairing token, exchanges the token directly with that backend, then saves the resulting environment record in browser local storage.

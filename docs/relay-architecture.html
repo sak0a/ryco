@@ -1501,8 +1501,8 @@
           <a href="#boundaries">Boundaries</a>
           <a href="#configure">Configure</a>
         </nav>
-        <a class="header-action" href="https://staging.ryco.space" target="_blank" rel="noreferrer">
-          Open staging
+        <a class="header-action" href="https://app.ryco.space" target="_blank" rel="noreferrer">
+          Open app
         </a>
       </div>
     </header>
@@ -1569,7 +1569,7 @@
 
             <a class="actor-node actor-web" href="#actors" data-actor-link="web">
               <span class="node-type">Browser client</span>
-              <strong>staging.ryco.space</strong>
+              <strong>app.ryco.space</strong>
               <small>Cookie session</small>
             </a>
             <a class="actor-node actor-mobile" href="#actors" data-actor-link="mobile">
@@ -1624,7 +1624,7 @@
           <div class="actor-details" aria-live="polite">
             <article class="actor-detail" data-actor-detail="web" data-active="true">
               <span class="detail-kicker">Browser or installed PWA</span>
-              <h3>Hosted web at staging.ryco.space</h3>
+              <h3>Hosted web at app.ryco.space</h3>
               <p class="actor-summary">
                 A human client served by a Hub instance. It reaches only explicitly granted nodes
                 and never becomes the source of truth for node work.
@@ -2473,7 +2473,7 @@
             </p>
             <pre><code>ryco serve \
   --hub-connector-enabled \
-  --hub-origin https://staging.ryco.space
+  --hub-origin https://app.ryco.space
 
 # Optional protected-store fallback
 ryco serve --hub-allow-file-secret-store
@@ -2491,7 +2491,7 @@ ryco serve --restrict-to-cwd</code></pre>
 
         <div class="deployment-choice reveal">
           <article class="choice-column">
-            <h4>Use staging.ryco.space</h4>
+            <h4>Use app.ryco.space</h4>
             <p>
               Choose the hosted instance when you want a managed Hub surface and do not need to
               operate the control and relay service yourself.

@@ -31,7 +31,7 @@ if (
   );
 }
 
-// Reverse-DNS of the canonical hosted origin app.ryco.dev.
+// Reverse-DNS identifiers for the canonical hosted origin app.ryco.space.
 const VARIANT_CONFIG: Record<
   AppVariant,
   {
@@ -49,7 +49,7 @@ const VARIANT_CONFIG: Record<
     scheme: "ryco-dev",
     iosBundleIdentifier: "dev.ryco.app.dev",
     androidPackage: "dev.ryco.app.dev",
-    relyingParty: "app.ryco.dev",
+    relyingParty: "app.ryco.space",
     androidNotificationColor: "#00639B",
     splashDark: "#0a0a0a",
   },
@@ -58,7 +58,7 @@ const VARIANT_CONFIG: Record<
     scheme: "ryco-preview",
     iosBundleIdentifier: "dev.ryco.app.preview",
     androidPackage: "dev.ryco.app.preview",
-    relyingParty: "app.ryco.dev",
+    relyingParty: "app.ryco.space",
     androidNotificationColor: "#7565C7",
     splashDark: "#0a0a0a",
   },
@@ -67,7 +67,7 @@ const VARIANT_CONFIG: Record<
     scheme: "ryco",
     iosBundleIdentifier: "dev.ryco.app",
     androidPackage: "dev.ryco.app",
-    relyingParty: "app.ryco.dev",
+    relyingParty: "app.ryco.space",
     androidNotificationColor: "#FFFFFF",
     splashDark: "#0a0a0a",
   },
@@ -89,7 +89,7 @@ const relyingPartyOverride = repoEnv.EXPO_PUBLIC_RYCO_RELYING_PARTY?.trim();
 if (relyingPartyOverride !== undefined && relyingPartyOverride !== "") {
   if (!HOST_PATTERN.test(relyingPartyOverride)) {
     throw new Error(
-      `EXPO_PUBLIC_RYCO_RELYING_PARTY must be a bare hostname such as app.ryco.dev — received ${JSON.stringify(relyingPartyOverride)}. It is a WebAuthn RP id, so it carries no scheme, port, or path.`,
+      `EXPO_PUBLIC_RYCO_RELYING_PARTY must be a bare hostname such as app.ryco.space — received ${JSON.stringify(relyingPartyOverride)}. It is a WebAuthn RP id, so it carries no scheme, port, or path.`,
     );
   }
 }

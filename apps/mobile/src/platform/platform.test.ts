@@ -128,14 +128,14 @@ describe("mobile platform adapters", () => {
 
     const response = await ceremony.authenticate({
       challenge: new Uint8Array([1, 2, 3]),
-      rpId: "app.ryco.dev",
+      rpId: "app.ryco.space",
       allowCredentials: [{ id: new Uint8Array([4, 5]), type: "public-key" }],
     });
 
     // Options reach native base64url-encoded, with the server's RP ID intact.
     expect(passkeyGet).toHaveBeenCalledWith({
       challenge: "AQID",
-      rpId: "app.ryco.dev",
+      rpId: "app.ryco.space",
       allowCredentials: [{ type: "public-key", id: "BAU" }],
     });
     expect(response).toEqual({
@@ -158,14 +158,14 @@ describe("mobile platform adapters", () => {
 
     const response = await mobilePasskeyCeremony.register({
       challenge: new Uint8Array([1, 2, 3]),
-      rp: { name: "Ryco", id: "app.ryco.dev" },
+      rp: { name: "Ryco", id: "app.ryco.space" },
       user: { id: new Uint8Array([6, 7]), name: "owner@example.test", displayName: "Owner" },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }],
     });
 
     expect(passkeyCreate).toHaveBeenCalledWith({
       challenge: "AQID",
-      rp: { id: "app.ryco.dev", name: "Ryco" },
+      rp: { id: "app.ryco.space", name: "Ryco" },
       user: { id: "Bgc", name: "owner@example.test", displayName: "Owner" },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }],
     });
@@ -180,7 +180,7 @@ describe("mobile platform adapters", () => {
     });
 
     const failure = await mobilePasskeyCeremony
-      .authenticate({ challenge: new Uint8Array([1]), rpId: "app.ryco.dev" })
+      .authenticate({ challenge: new Uint8Array([1]), rpId: "app.ryco.space" })
       .then(
         () => null,
         (error: unknown) => error as Error,
@@ -268,7 +268,7 @@ describe("mobile platform adapters", () => {
 
   it("extracts the pairing token from hash and query", () => {
     expect(extractPairingToken("ryco://pair#token=abc")).toBe("abc");
-    expect(extractPairingToken("https://app.ryco.dev/pair?token=def")).toBe("def");
+    expect(extractPairingToken("https://app.ryco.space/pair?token=def")).toBe("def");
     expect(extractPairingToken("ryco://pair")).toBeNull();
     expect(extractPairingToken("not a url")).toBeNull();
   });
