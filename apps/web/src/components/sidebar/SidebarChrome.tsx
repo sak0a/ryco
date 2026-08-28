@@ -1,7 +1,7 @@
 import {
   BarChart3Icon,
-  CheckIcon,
-  ChevronDownIcon,
+  FolderTreeIcon,
+  InboxIcon,
   PanelLeftCloseIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -18,7 +18,6 @@ import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { cn } from "../../lib/utils";
 import type { SidebarMode } from "../../uiStateStore";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
 const SIDEBAR_HEADER_ACTION_CLASS_NAME =
   "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2";
@@ -40,6 +39,9 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     }
     openSettings();
   }, [isMobile, openSettings, setOpenMobile]);
+  const nextMode = mode === "inbox" ? "projects" : "inbox";
+  const ModeIcon = mode === "inbox" ? InboxIcon : FolderTreeIcon;
+  const nextModeLabel = nextMode === "inbox" ? "Inbox" : "Projects";
 
   const actionButtons = (
     <div className="ml-auto flex shrink-0 items-center gap-0.5">
@@ -102,25 +104,29 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           {APP_BASE_NAME} {APP_STAGE_LABEL} · Version {APP_VERSION}
         </TooltipPopup>
       </Tooltip>
-      <Menu>
-        <MenuTrigger
-          aria-label={`Sidebar mode: ${mode === "inbox" ? "Inbox" : "Projects"}`}
-          className="inline-flex min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-xs font-semibold text-sidebar-foreground outline-hidden ring-ring transition-colors hover:bg-accent focus-visible:ring-2 [-webkit-app-region:no-drag]"
-        >
-          <span className="truncate">{mode === "inbox" ? "Inbox" : "Projects"}</span>
-          <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
-        </MenuTrigger>
-        <MenuPopup align="start" className="min-w-36">
-          <MenuItem onClick={() => onModeChange("inbox")}>
-            <CheckIcon className={cn("size-3.5", mode !== "inbox" && "opacity-0")} />
-            Inbox
-          </MenuItem>
-          <MenuItem onClick={() => onModeChange("projects")}>
-            <CheckIcon className={cn("size-3.5", mode !== "projects" && "opacity-0")} />
-            Projects
-          </MenuItem>
-        </MenuPopup>
-      </Menu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label={`Show ${nextModeLabel} sidebar`}
+              aria-pressed={mode === "inbox"}
+              onClick={() => onModeChange(nextMode)}
+              className={cn(
+                "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md outline-hidden ring-ring transition-colors focus-visible:ring-2 [-webkit-app-region:no-drag]",
+                mode === "inbox"
+                  ? "bg-primary/10 text-primary hover:bg-primary/15"
+                  : "text-muted-foreground/70 hover:bg-accent hover:text-foreground",
+              )}
+            >
+              <ModeIcon className="size-4" />
+            </button>
+          }
+        />
+        <TooltipPopup side="bottom" sideOffset={2}>
+          Switch to {nextModeLabel}
+        </TooltipPopup>
+      </Tooltip>
       {actionButtons}
     </div>
   );

@@ -3315,8 +3315,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await waitForWsRequestsToSettle();
       const requestCountBeforeSwitch = wsRequests.length;
 
-      await page.getByRole("button", { name: "Sidebar mode: Projects" }).click();
-      await page.getByRole("menuitem", { name: "Inbox" }).click();
+      const showInboxButton = page.getByRole("button", { name: "Show Inbox sidebar" });
+      await expect.element(showInboxButton).toHaveAttribute("aria-pressed", "false");
+      await showInboxButton.click();
 
       await expect.element(page.getByTestId("inbox-sidebar")).toBeInTheDocument();
       expect(inboxSidebar?.checkVisibility()).toBe(true);
@@ -3324,8 +3325,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(wsRequests).toHaveLength(requestCountBeforeSwitch);
       expect(useUiStateStore.getState().sidebarMode).toBe("inbox");
 
-      await page.getByRole("button", { name: "Sidebar mode: Inbox" }).click();
-      await page.getByRole("menuitem", { name: "Projects" }).click();
+      const showProjectsButton = page.getByRole("button", { name: "Show Projects sidebar" });
+      await expect.element(showProjectsButton).toHaveAttribute("aria-pressed", "true");
+      await showProjectsButton.click();
       expect(useUiStateStore.getState().sidebarMode).toBe("projects");
       expect(projectTrigger?.checkVisibility()).toBe(true);
       expect(wsRequests).toHaveLength(requestCountBeforeSwitch);
