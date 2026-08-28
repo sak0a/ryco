@@ -10871,6 +10871,15 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       expect(getComputedStyle(chrome).getPropertyValue("-webkit-app-region")).toBe("no-drag");
       expect(chrome.querySelector('a[aria-label="Go to threads"]')).not.toBeNull();
+      expect(chrome.querySelector('a[aria-label="Open statistics"]')).not.toBeNull();
+
+      const breadcrumb = await waitForElement(
+        () => document.querySelector<HTMLElement>('nav[aria-label="Breadcrumb"]'),
+        "Unable to find the thread breadcrumb beside the collapsed sidebar chrome.",
+      );
+      expect(chrome.getBoundingClientRect().right).toBeLessThanOrEqual(
+        breadcrumb.getBoundingClientRect().left + 0.5,
+      );
 
       const settingsButton = chrome.querySelector<HTMLButtonElement>(
         'button[aria-label="Settings"]',
