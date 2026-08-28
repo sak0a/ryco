@@ -107,8 +107,8 @@ vi.mock("expo-constants", () => ({
         appVariant: "production",
         hosted: {
           hubBaseUrl: "https://hub.example.test",
-          appUrl: "https://app.ryco.dev",
-          relyingParty: "app.ryco.dev",
+          appUrl: "https://app.ryco.space",
+          relyingParty: "app.ryco.space",
         },
       },
     },

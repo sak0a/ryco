@@ -163,7 +163,7 @@ Example:
 ```sh
 ryco serve \
   --hub-connector-enabled \
-  --hub-origin https://staging.ryco.space \
+  --hub-origin https://app.ryco.space \
   --hub-node-name "MacBook · client-project"
 ```
 

@@ -4,7 +4,7 @@ import { extractPairingToken } from "../../platform";
 import type { ResolvedPairingTarget } from "../../connection/environmentActions";
 import { buildPairingUrl } from "./pairing";
 
-const PAIRING_BASE_ORIGIN_FALLBACK = "https://app.ryco.dev";
+const PAIRING_BASE_ORIGIN_FALLBACK = "https://app.ryco.space";
 
 // App-level pairing-target resolver wired into environmentActions. Direct-node
 // only: hosted pairing is C-gated (readHostedPairingRequest -> null). Accepts a

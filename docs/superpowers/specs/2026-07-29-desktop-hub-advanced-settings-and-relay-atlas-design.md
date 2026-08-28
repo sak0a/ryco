@@ -232,7 +232,7 @@ The expanded panel contains four compact groups:
      ```sh
      ryco serve \
        --hub-connector-enabled \
-       --hub-origin https://staging.ryco.space
+       --hub-origin https://app.ryco.space
      ```
 
    - A second line adds `--hub-allow-file-secret-store` as an explicit optional flag.
@@ -345,7 +345,7 @@ The page is a hybrid atlas rather than a long linear article:
 
 ### Actors and relationships
 
-#### Hosted web at `staging.ryco.space`
+#### Hosted web at `app.ryco.space`
 
 This is a browser or installed PWA client served by a Ryco Hub instance. It authenticates the human
 with an HttpOnly same-origin session cookie. It can list explicitly granted nodes, request a

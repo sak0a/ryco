@@ -159,7 +159,7 @@ export function HubAdvancedOptions({
               <pre className="overflow-x-auto rounded-lg border border-border/60 bg-background/70 px-3 py-2.5 font-mono text-[11px] leading-5 text-foreground">
                 <code>
                   {
-                    'ryco serve \\\n  --hub-connector-enabled \\\n  --hub-origin https://staging.ryco.space \\\n  --hub-node-name "Build node"\n\n# Optional on supported POSIX hosts\nryco serve --hub-allow-file-secret-store'
+                    'ryco serve \\\n  --hub-connector-enabled \\\n  --hub-origin https://app.ryco.space \\\n  --hub-node-name "Build node"\n\n# Optional on supported POSIX hosts\nryco serve --hub-allow-file-secret-store'
                   }
                 </code>
               </pre>

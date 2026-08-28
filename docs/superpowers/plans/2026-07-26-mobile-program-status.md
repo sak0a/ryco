@@ -105,14 +105,14 @@ The table is a snapshot **at `ffb0dd871`**. The `home-ia` slice on top of it add
 
 ### 2.1 Hub staging compatibility (checked 2026-07-27, non-mutating)
 
-`GET https://staging.ryco.space/api/account/security` returns **401**, while a sibling
+`GET https://app.ryco.space/api/account/security` returns **401**, while a sibling
 nonexistent path under the same prefix returns **404**. The route is deployed and auth-gated,
 which is what the mobile account surface requires. Nothing was mutated to establish this — two
 unauthenticated GETs, no session, no writes.
 
 Re-confirmed independently later the same day, same result (401 vs 404). The 401 response
 carries `content-type: application/json`, `cache-control: no-store`, HSTS, and a CSP whose
-`connect-src` is `'self' wss://staging.ryco.space` — i.e. the app shell and the relay origin
+`connect-src` is `'self' wss://app.ryco.space` — i.e. the app shell and the relay origin
 agree. Still two unauthenticated GETs; staging was neither deployed nor modified.
 
 ---
@@ -188,7 +188,7 @@ browserStatus === "current" && !revokedAt`.
 - `hostedAuthModel.ts`, `hostedAccountModel.ts`, `hostedTotpQr.ts` — the testable logic.
 
 **Configuration — `app.config.ts`.** `relyingParty` is now env-driven
-(`EXPO_PUBLIC_RYCO_RELYING_PARTY`, defaulting to `app.ryco.dev`) with build-time validation
+(`EXPO_PUBLIC_RYCO_RELYING_PARTY`, defaulting to `app.ryco.space`) with build-time validation
 that it equals the Hub host or a registrable parent of it (`app.config.ts:143-157`), so a
 staging Hub on its own domain no longer needs a code change. A hosted build also fails at
 config time without `RYCO_IOS_APPLE_TEAM_ID`, and refuses the personal-team bundle-id
@@ -214,7 +214,7 @@ This corrects a standing assumption — repeated in several plans and hand-offs 
 Simulator "cannot connect to Hub nodes". It can, and does.
 
 Directly observed on a booted **iPhone 17 Pro, iOS 26.5**, dev client `dev.ryco.app.dev`
-against Metro from this worktree, with `staging.ryco.space` as the Hub:
+against Metro from this worktree, with `app.ryco.space` as the Hub:
 
 - **Nodes → Hub nodes** listed a real node (`Hub relay · Online · Owner`) with a green
   **Online** pill, and the group header flipped from `Idle` to `Online`.
