@@ -2,7 +2,10 @@ import type { HostedHubApi } from "@ryco/client-runtime/authorization";
 import { HostedHubApiError } from "@ryco/client-runtime/authorization";
 
 import type { DesktopHubControlClient } from "./desktopHubControl.ts";
-import { DesktopHostedIdentityCoordinator } from "./desktopHostedIdentity.ts";
+import {
+  DesktopHostedIdentityCoordinator,
+  shouldEnableDesktopHubConnectorForAccountSetup,
+} from "./desktopHostedIdentity.ts";
 import type { DesktopHostedSessionCredentials } from "./hostedCredentials.ts";
 import type { DesktopLocalIntroductionSecurity } from "./localTrustedIntroduction.ts";
 import type { DesktopProtectedRecordStore } from "./protectedRecordStore.ts";
@@ -35,6 +38,30 @@ function coordinator(input: {
 }
 
 describe("Desktop hosted identity coordinator", () => {
+  it("repairs a disabled connector after interactive account sign-in", () => {
+    expect(
+      shouldEnableDesktopHubConnectorForAccountSetup({
+        hubOrigin: "https://hub.example.test",
+        connectorEnabled: false,
+        hasSessionMaterial: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldEnableDesktopHubConnectorForAccountSetup({
+        hubOrigin: "https://hub.example.test",
+        connectorEnabled: false,
+        hasSessionMaterial: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldEnableDesktopHubConnectorForAccountSetup({
+        hubOrigin: null,
+        connectorEnabled: false,
+        hasSessionMaterial: true,
+      }),
+    ).toBe(false);
+  });
+
   it("does not open the browser during a background resume without a session", async () => {
     const signIn = vi.fn();
     const setup = vi.fn();
@@ -46,6 +73,26 @@ describe("Desktop hosted identity coordinator", () => {
     await expect(identity.resume()).resolves.toEqual({ status: "signed-out" });
     expect(signIn).not.toHaveBeenCalled();
     expect(setup).not.toHaveBeenCalled();
+  });
+
+  it("exposes retained session material when sign-in succeeds before node setup", async () => {
+    let hasSessionMaterial = false;
+    const api = {
+      get hasSessionMaterial() {
+        return hasSessionMaterial;
+      },
+      signIn: vi.fn().mockImplementation(async () => {
+        hasSessionMaterial = true;
+        return { account: { id: "account-1" } };
+      }),
+    };
+    const identity = coordinator({
+      api,
+      setup: vi.fn().mockRejectedValue(new Error("node connector disabled")),
+    });
+
+    await expect(identity.connect()).resolves.toEqual({ status: "unavailable" });
+    expect(identity.hasSessionMaterial).toBe(true);
   });
 
   it("resumes the client from retained local trust while the node plane is unavailable", async () => {

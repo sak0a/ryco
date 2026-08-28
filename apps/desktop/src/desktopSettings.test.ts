@@ -235,6 +235,25 @@ describe("desktopSettings", () => {
     });
   });
 
+  it("enables the connector when a Hub origin is selected for account onboarding", () => {
+    const configured = setDesktopHubPreference(DEFAULT_DESKTOP_SETTINGS, {
+      origin: "https://hub.example.com",
+    });
+    expect(configured).toMatchObject({
+      hubConnectorEnabled: true,
+      hubOrigin: "https://hub.example.com",
+    });
+
+    const deliberatelyDisabled = setDesktopHubPreference(DEFAULT_DESKTOP_SETTINGS, {
+      enabled: false,
+      origin: "https://hub.example.com",
+    });
+    expect(deliberatelyDisabled).toMatchObject({
+      hubConnectorEnabled: false,
+      hubOrigin: "https://hub.example.com",
+    });
+  });
+
   it("normalizes, preserves, and resets the desktop Hub node name", () => {
     const configured = setDesktopHubPreference(DEFAULT_DESKTOP_SETTINGS, {
       enabled: true,

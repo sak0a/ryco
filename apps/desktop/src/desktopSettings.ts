@@ -103,7 +103,14 @@ export function setDesktopHubPreference(
         : normalizeHubNodeName(input.nodeName);
   const next = {
     ...settings,
-    hubConnectorEnabled: input.enabled ?? settings.hubConnectorEnabled,
+    // A newly selected Hub is an onboarding action, not a dormant launch
+    // preference. Start its connector on the same relaunch so native account
+    // sign-in can claim the colocated node without a second Enable step.
+    // Callers can still preserve an intentionally disabled connector by
+    // passing `enabled: false` explicitly.
+    hubConnectorEnabled:
+      input.enabled ??
+      (input.origin !== undefined && input.origin !== null ? true : settings.hubConnectorEnabled),
     hubOrigin: input.origin === undefined ? settings.hubOrigin : input.origin,
     hubNodeName: nodeName,
     hubAllowFileSecretStore: input.allowFileSecretStore ?? settings.hubAllowFileSecretStore,

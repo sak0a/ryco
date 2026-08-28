@@ -490,6 +490,15 @@ export function HubSection({
   const editable = snapshot === null ? false : canEditHubOrigin(snapshot.identity);
   const originChanged = originDraft.trim() !== (config?.origin ?? "");
   const nodeNameChanged = nodeNameDraft.trim() !== (config?.nodeName ?? "");
+  const automaticNativeSetup =
+    config !== null &&
+    config.origin !== null &&
+    desktopBridge.getHostedIdentityState !== undefined &&
+    desktopBridge.connectHostedIdentity !== undefined &&
+    snapshot?.identity.enrolled === "none";
+  const automaticNativeSetupWaiting =
+    automaticNativeSetup &&
+    (presentation?.action === "enable" || presentation?.action === "enroll");
 
   const renderAction = (action: HubAction, variant: "outline" | "destructive-outline") =>
     action === "none" ? null : (
@@ -514,11 +523,13 @@ export function HubSection({
       <SettingsRow
         title="Connection"
         description={
-          presentation === null
-            ? "Loading…"
-            : presentation.detail === null
-              ? "Reach this Mac from anywhere, including behind NAT or CGNAT, without opening a port."
-              : presentation.detail
+          automaticNativeSetupWaiting
+            ? "Connect your Ryco account below. Ryco will register this Mac with this Hub automatically."
+            : presentation === null
+              ? "Loading…"
+              : presentation.detail === null
+                ? "Reach this Mac from anywhere, including behind NAT or CGNAT, without opening a port."
+                : presentation.detail
         }
         status={
           <>
@@ -540,7 +551,9 @@ export function HubSection({
                 />
                 {stale
                   ? `${presentation.headline} · last checked ${Math.round((nowMs - snapshot.readAt) / 1000)}s ago`
-                  : presentation.headline}
+                  : automaticNativeSetupWaiting
+                    ? "Ready for account setup"
+                    : presentation.headline}
               </span>
             )}
             {error ? <span className="block text-destructive">{error}</span> : null}
@@ -550,11 +563,11 @@ export function HubSection({
           presentation === null ? null : (
             <>
               {renderAction(
-                presentation.action,
+                automaticNativeSetupWaiting ? "none" : presentation.action,
                 presentation.action === "leave" ? "destructive-outline" : "outline",
               )}
               {renderAction(
-                presentation.secondaryAction,
+                automaticNativeSetupWaiting ? "none" : presentation.secondaryAction,
                 presentation.secondaryAction === "leave" ? "destructive-outline" : "outline",
               )}
             </>
@@ -621,17 +634,21 @@ export function HubSection({
         </AnimatedHeight>
       </SettingsRow>
 
-      {config?.origin !== null && desktopBridge.getHostedIdentityState !== undefined ? (
+      {config !== null &&
+      config.origin !== null &&
+      desktopBridge.getHostedIdentityState !== undefined ? (
         <SettingsRow
           title="Ryco account"
           description={
             hostedIdentity === null
               ? "Checking this Mac's native account setup…"
-              : hostedIdentity.status === "ready"
-                ? "Your native account session and this Mac's automatic node claim are ready. Local trust introduction is verified."
-                : hostedIdentity.status === "signed-out"
-                  ? "Sign in in your browser. Ryco will claim this Mac's node and verify its local trust automatically."
-                  : "Automatic secure setup did not finish. Existing node and trust state are preserved while you retry."
+              : automaticNativeSetupWaiting && hostedIdentity.status === "ready"
+                ? "You are signed in. Finish setup to register this Mac with the Hub and verify local trust automatically."
+                : hostedIdentity.status === "ready"
+                  ? "Your native account session and this Mac's automatic node claim are ready. Local trust introduction is verified."
+                  : hostedIdentity.status === "signed-out"
+                    ? "Sign in in your browser. Ryco will claim this Mac's node and verify its local trust automatically."
+                    : "Automatic secure setup did not finish. Existing node and trust state are preserved while you retry."
           }
           status={
             <>
@@ -639,16 +656,20 @@ export function HubSection({
                 <span className="flex items-center gap-1.5">
                   <span
                     className={`inline-block size-2 shrink-0 rounded-full ${
-                      hostedIdentity.status === "ready"
-                        ? "bg-success"
-                        : hostedIdentity.status === "unavailable"
-                          ? "bg-warning"
-                          : "bg-muted-foreground/40"
+                      automaticNativeSetupWaiting && hostedIdentity.status === "ready"
+                        ? "bg-warning"
+                        : hostedIdentity.status === "ready"
+                          ? "bg-success"
+                          : hostedIdentity.status === "unavailable"
+                            ? "bg-warning"
+                            : "bg-muted-foreground/40"
                     }`}
                     aria-hidden
                   />
                   {hostedIdentity.status === "ready"
-                    ? "Secure setup complete"
+                    ? automaticNativeSetupWaiting
+                      ? "Signed in · Node setup needed"
+                      : "Secure setup complete"
                     : hostedIdentity.status === "unavailable"
                       ? "Setup needs attention"
                       : "Not signed in"}
@@ -660,7 +681,16 @@ export function HubSection({
             </>
           }
           control={
-            hostedIdentity === null ? null : hostedIdentity.status === "ready" ? (
+            hostedIdentity === null ? null : automaticNativeSetupWaiting &&
+              hostedIdentity.status === "ready" ? (
+              <Button
+                size="xs"
+                disabled={hostedIdentityPending || !desktopBridge.connectHostedIdentity}
+                onClick={() => void runHostedIdentityAction("connect")}
+              >
+                {hostedIdentityPending ? "Finishing setup…" : "Finish setup"}
+              </Button>
+            ) : hostedIdentity.status === "ready" ? (
               <Button
                 size="xs"
                 variant="outline"
@@ -708,6 +738,7 @@ export function HubSection({
                 term={machine.label}
                 action={
                   machine.nodeId &&
+                  machine.online &&
                   (machine.nativeTrust === "unverified" || machine.nativeTrust === "unknown") ? (
                     <Button
                       size="xs"
@@ -730,7 +761,9 @@ export function HubSection({
                     : "Verified · Offline"
                   : machine.nativeTrust === "identity-conflict"
                     ? "Identity changed · Locked"
-                    : "Needs verification"}
+                    : machine.online
+                      ? "Needs verification"
+                      : "Needs verification · Offline"}
               </DataListItem>
             ))}
           </DataList>

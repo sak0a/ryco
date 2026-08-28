@@ -24,6 +24,11 @@ const HostedAuthenticationSurface = lazy(() =>
 
 type ConsentAction = "approve" | "cancel" | "switch-account";
 
+type ApprovedHandoff = {
+  readonly redirectUri: string;
+  readonly deviceLabel: string;
+};
+
 function navigateToNativeCallback(redirectUri: string): void {
   window.location.assign(redirectUri);
 }
@@ -40,6 +45,7 @@ export function HostedNativeAuthorizationRoute({
   const [presentation, setPresentation] = useState<NativeHandoffPresentation | null>(null);
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<ConsentAction | null>(null);
+  const [approvedHandoff, setApprovedHandoff] = useState<ApprovedHandoff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -94,8 +100,19 @@ export function HostedNativeAuthorizationRoute({
         nextAction === "approve"
           ? await hostedHubApi.approveNativeHandoff(handoffId)
           : await hostedHubApi.cancelNativeHandoff(handoffId);
+      if (nextAction === "approve") {
+        setApprovedHandoff({
+          redirectUri: result.redirectUri,
+          deviceLabel: presentation?.deviceLabel ?? "your device",
+        });
+        // Commit the success surface before asking the browser to open the
+        // custom scheme. Safari keeps this tab alive, so it should visibly
+        // acknowledge approval instead of leaving the consent button frozen.
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
       navigate(result.redirectUri);
     } catch (cause) {
+      if (nextAction === "approve") setApprovedHandoff(null);
       setError(
         cause instanceof HostedHubApiError
           ? cause.message
@@ -105,6 +122,62 @@ export function HostedNativeAuthorizationRoute({
       setAction(null);
     }
   };
+
+  if (approvedHandoff !== null) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+        <section
+          role="status"
+          aria-live="polite"
+          className="w-full max-w-md rounded-[1.5rem] border border-border bg-card p-6 text-center shadow-2xl shadow-black/10 sm:p-8"
+        >
+          <div className="relative mx-auto flex size-24 items-center justify-center">
+            <span
+              aria-hidden
+              className="absolute inset-2 rounded-full bg-success/20 motion-safe:animate-ping"
+            />
+            <span
+              aria-hidden
+              className="absolute inset-0 rounded-full border border-success/25 motion-safe:animate-pulse"
+            />
+            <span className="relative flex size-16 items-center justify-center rounded-full bg-success text-success-foreground shadow-lg shadow-success/20">
+              <CheckIcon aria-hidden className="size-8" strokeWidth={2.5} />
+            </span>
+          </div>
+
+          <p className="mt-7 text-[11px] font-semibold tracking-[0.16em] text-success uppercase">
+            Sign-in approved
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Ryco is opening</h1>
+          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+            Ryco is securely finishing account and node setup on {approvedHandoff.deviceLabel}. This
+            tab can be closed when the app shows setup complete.
+          </p>
+
+          <div className="mt-7 rounded-2xl border border-border bg-background/65 p-4">
+            <div className="flex items-center justify-center gap-2 text-sm font-medium">
+              <SmartphoneIcon aria-hidden className="size-4 text-primary" />
+              Waiting for the Ryco app
+              <span className="flex gap-1" aria-hidden>
+                <span className="size-1 rounded-full bg-primary motion-safe:animate-pulse" />
+                <span className="size-1 rounded-full bg-primary motion-safe:animate-pulse [animation-delay:150ms]" />
+                <span className="size-1 rounded-full bg-primary motion-safe:animate-pulse [animation-delay:300ms]" />
+              </span>
+            </div>
+          </div>
+
+          <Button
+            size="lg"
+            variant="outline"
+            className="mt-5 min-h-11 w-full"
+            onClick={() => navigate(approvedHandoff.redirectUri)}
+          >
+            Open Ryco again
+          </Button>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="flex min-h-dvh items-center justify-center overflow-x-hidden bg-background px-4 py-10 text-foreground sm:px-6">
