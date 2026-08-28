@@ -357,7 +357,9 @@ jobs:
     name: Publish CLI to npm
     needs: [preflight, build]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    # npm trusted publishing requires GitHub-hosted runners so the OIDC runner
+    # identity matches the package's trusted publisher configuration.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
