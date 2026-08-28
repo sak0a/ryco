@@ -21,6 +21,30 @@ export interface ReconcilableProject {
   readonly workspaceRoot: string;
 }
 
+export interface ReconcilableProjectRoots {
+  /** Projects whose roots can safely be inspected by git. */
+  readonly available: ReadonlyArray<ReconcilableProject>;
+  /** Projects retained in history whose roots are currently absent. */
+  readonly missing: ReadonlyArray<ReconcilableProject>;
+}
+
+/**
+ * Missing roots are an availability condition, not permission to delete the
+ * project or its thread history. Partition them before invoking git so a
+ * removed managed worktree cannot turn every reconnect into a failed sweep.
+ */
+export function partitionReconcilableProjectRoots(
+  projects: ReadonlyArray<ReconcilableProject>,
+  pathExists: (workspaceRoot: string) => boolean,
+): ReconcilableProjectRoots {
+  const available: ReconcilableProject[] = [];
+  const missing: ReconcilableProject[] = [];
+  for (const project of projects) {
+    (pathExists(project.workspaceRoot) ? available : missing).push(project);
+  }
+  return { available, missing };
+}
+
 export interface ReconcilableWorktree {
   readonly worktreeId: WorktreeId;
   readonly projectId: ProjectId;

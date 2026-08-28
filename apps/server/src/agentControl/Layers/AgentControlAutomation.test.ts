@@ -10,7 +10,8 @@ import {
   type AgentControlProposal,
 } from "@ryco/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Duration, Effect, Layer, Logger, Option } from "effect";
+import { TestClock } from "effect/testing";
 
 import { AgentControlAuditRepositoryLive } from "../../persistence/Layers/AgentControlAudit.ts";
 import { AgentControlAutomationRepositoryLive } from "../../persistence/Layers/AgentControlAutomations.ts";
@@ -66,8 +67,11 @@ const makeAutomation = (id: string, start: string): AgentControlAutomation => ({
   updatedAt: start,
 });
 
-const layer = it.layer(
-  makeAgentControlAutomationLive({ disableBackground: true }).pipe(
+const makeAutomationLayer = (
+  enabled: boolean,
+  options: Parameters<typeof makeAgentControlAutomationLive>[0],
+) =>
+  makeAgentControlAutomationLive(options).pipe(
     Layer.provideMerge(AgentControlAutomationRepositoryLive),
     Layer.provideMerge(AgentControlProposalStoreLive),
     Layer.provideMerge(AgentControlProposalEventsLive),
@@ -76,9 +80,10 @@ const layer = it.layer(
     Layer.provideMerge(AgentControlOperationRepositoryLive),
     Layer.provideMerge(AgentControlAuditRepositoryLive),
     Layer.provideMerge(SqlitePersistenceMemory),
-    Layer.provideMerge(ServerSettingsService.layerTest({ agentControl: { enabled: true } })),
-  ),
-);
+    Layer.provideMerge(ServerSettingsService.layerTest({ agentControl: { enabled } })),
+  );
+
+const layer = it.layer(makeAutomationLayer(true, { disableBackground: true }));
 
 const cancellationProposal = (
   automation: AgentControlAutomation,
@@ -323,5 +328,34 @@ layer("AgentControlAutomationService", (it) => {
       );
       assert.strictEqual(denied._tag, "AgentControlPlanValidationError");
     }),
+  );
+});
+
+it.effect("keeps the background scheduler idle while Agent Control is disabled", () => {
+  const messages: string[] = [];
+  const logger = Logger.make(({ message }) => {
+    messages.push(String(message));
+  });
+
+  return Effect.gen(function* () {
+    yield* AgentControlAutomationService;
+    yield* Effect.yieldNow;
+    yield* TestClock.adjust(Duration.millis(30));
+    yield* Effect.yieldNow;
+    assert.isFalse(
+      messages.some(
+        (message) =>
+          message.includes("agent-control.automation-scheduler-failed") ||
+          message.includes("agent-control.automation-recovery-failed"),
+      ),
+    );
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        makeAutomationLayer(false, { schedulerIntervalMs: 5 }),
+        Logger.layer([logger], { mergeWithExisting: false }),
+        TestClock.layer(),
+      ),
+    ),
   );
 });

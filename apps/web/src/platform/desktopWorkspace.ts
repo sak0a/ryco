@@ -60,31 +60,64 @@ function retainDesktopWorkspaceScope(
   scope: DesktopWorkspaceScopeProjection,
 ): () => void {
   const bridge = globalThis.window?.desktopBridge;
-  if (!bridge?.retainDesktopWorkspaceScope) return () => undefined;
+  const retainScope = bridge?.retainDesktopWorkspaceScope;
+  if (!bridge || !retainScope) return () => undefined;
   let released = false;
+  let retaining = false;
   let leaseId: string | null = null;
   let renewal: ReturnType<typeof setInterval> | null = null;
-  void bridge
-    .retainDesktopWorkspaceScope({
+
+  const canRetain = () =>
+    current.status === "ready" &&
+    current.machines.some(
+      (machine) => machine.environmentId === environmentId && machine.canConnect,
+    );
+
+  const stopLease = () => {
+    if (renewal) globalThis.clearInterval(renewal);
+    renewal = null;
+    const retainedLeaseId = leaseId;
+    leaseId = null;
+    if (retainedLeaseId) {
+      void bridge.releaseDesktopWorkspaceScope?.(retainedLeaseId).catch(() => undefined);
+    }
+  };
+
+  const reconcile = () => {
+    if (released) return;
+    if (!canRetain()) {
+      stopLease();
+      return;
+    }
+    if (retaining || leaseId !== null) return;
+    retaining = true;
+    void retainScope({
       environmentId,
       scope,
     })
-    .then((result) => {
-      leaseId = result.leaseId;
-      if (released) {
-        void bridge.releaseDesktopWorkspaceScope?.(result.leaseId);
-        return;
-      }
-      renewal = globalThis.setInterval(() => {
-        void bridge.renewDesktopWorkspaceScope?.(result.leaseId).catch(() => undefined);
-      }, 15_000);
-    })
-    .catch(() => undefined);
+      .then((result) => {
+        retaining = false;
+        if (released || !canRetain()) {
+          void bridge.releaseDesktopWorkspaceScope?.(result.leaseId).catch(() => undefined);
+          return;
+        }
+        leaseId = result.leaseId;
+        renewal = globalThis.setInterval(() => {
+          void bridge.renewDesktopWorkspaceScope?.(result.leaseId).catch(() => undefined);
+        }, 15_000);
+      })
+      .catch(() => {
+        retaining = false;
+      });
+  };
+
+  const unsubscribe = subscribeDesktopWorkspaceState(reconcile);
+  reconcile();
 
   return () => {
     released = true;
-    if (renewal) globalThis.clearInterval(renewal);
-    if (leaseId) void bridge.releaseDesktopWorkspaceScope?.(leaseId).catch(() => undefined);
+    unsubscribe();
+    stopLease();
   };
 }
 

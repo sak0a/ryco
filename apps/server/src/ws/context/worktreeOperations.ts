@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { Effect, Option } from "effect";
+import { Cause, Effect, Option } from "effect";
 import {
   type CommandId,
   type GitCreateWorktreeForProjectInput,
@@ -20,6 +20,7 @@ import type { GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import {
   canonicalizeFilesystemPath,
   isCaseSensitiveFileSystem,
+  partitionReconcilableProjectRoots,
   planWorktreeReconciliation,
 } from "../../git/worktreeReconciliation.ts";
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -50,6 +51,7 @@ const RECONCILIATION_THROTTLE_MS = 5 * 60 * 1000;
 // Process-wide: the WS context is rebuilt per connection, but the on-disk state
 // this sweep inspects is shared by all of them.
 let lastReconciliationAtMs = 0;
+const missingProjectRoots = new Set<ProjectId>();
 
 type AppendSetupScriptActivity = (input: {
   readonly threadId: ThreadId;
@@ -775,14 +777,45 @@ export const makeWorktreeOperations = (deps: {
     lastReconciliationAtMs = nowMs;
 
     const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
+    const roots = partitionReconcilableProjectRoots(snapshot.projects, existsSync);
+    const currentProjectIds = new Set(snapshot.projects.map((project) => project.id));
+    const availableProjectIds = new Set(roots.available.map((project) => project.id));
+    const resumedProjectIds: ProjectId[] = [];
+    for (const trackedProjectId of missingProjectRoots) {
+      if (!currentProjectIds.has(trackedProjectId)) {
+        missingProjectRoots.delete(trackedProjectId);
+        continue;
+      }
+      if (availableProjectIds.has(trackedProjectId)) {
+        missingProjectRoots.delete(trackedProjectId);
+        resumedProjectIds.push(trackedProjectId);
+      }
+    }
+    if (resumedProjectIds.length > 0) {
+      yield* Effect.logInfo("worktree reconciliation resumed after project roots returned", {
+        projectCount: resumedProjectIds.length,
+        projectIds: resumedProjectIds,
+      });
+    }
+    const newlyMissingProjectIds = roots.missing
+      .filter((project) => !missingProjectRoots.has(project.id))
+      .map((project) => project.id);
+    for (const projectId of newlyMissingProjectIds) missingProjectRoots.add(projectId);
+    if (newlyMissingProjectIds.length > 0) {
+      yield* Effect.logWarning("worktree reconciliation skipped missing project roots", {
+        projectCount: newlyMissingProjectIds.length,
+        projectIds: newlyMissingProjectIds,
+        historyPreserved: true,
+      });
+    }
     yield* Effect.forEach(
-      snapshot.projects,
+      roots.available,
       (project) =>
         reconcileProjectWorktrees(project.id).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("worktree reconciliation failed", {
               projectId: project.id,
-              cause,
+              cause: Cause.pretty(cause),
             }),
           ),
         ),

@@ -538,14 +538,19 @@ export const makeAgentControlAutomationLive = (options?: AgentControlAutomationL
 
       if (options?.disableBackground !== true) {
         yield* Effect.forkScoped(
-          recover.pipe(
+          policy.isEnabled.pipe(
+            Effect.flatMap((enabled) => (enabled ? recover : Effect.void)),
             Effect.catch((error) =>
               Effect.logWarning("agent-control.automation-recovery-failed", { error }),
             ),
           ),
         );
         yield* Effect.forkScoped(
-          materializeDue.pipe(
+          policy.isEnabled.pipe(
+            // Disabled Agent Control is an idle scheduler state, not a failed
+            // scheduling attempt. Keep the lightweight gate check so enabling
+            // the feature at runtime takes effect without a server restart.
+            Effect.flatMap((enabled) => (enabled ? materializeDue : Effect.void)),
             Effect.catch((error) =>
               Effect.logWarning("agent-control.automation-scheduler-failed", { error }),
             ),
