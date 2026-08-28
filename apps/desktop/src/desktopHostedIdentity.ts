@@ -104,6 +104,14 @@ export interface DesktopHostedGitHubActionResult {
   readonly signedOut: boolean;
 }
 
+export function shouldEnableDesktopHubConnectorForAccountSetup(input: {
+  readonly hubOrigin: string | null;
+  readonly connectorEnabled: boolean;
+  readonly hasSessionMaterial: boolean;
+}): boolean {
+  return input.hubOrigin !== null && !input.connectorEnabled && input.hasSessionMaterial;
+}
+
 export class DesktopHostedIdentityCoordinator {
   readonly #origin: string;
   readonly #installationId: string;
@@ -186,6 +194,11 @@ export class DesktopHostedIdentityCoordinator {
 
   connect(): Promise<DesktopHostedIdentityStatus> {
     return this.#serialize(true);
+  }
+
+  /** Whether browser sign-in produced restorable, origin-scoped session material. */
+  get hasSessionMaterial(): boolean {
+    return this.#api.hasSessionMaterial;
   }
 
   async disconnect(): Promise<void> {

@@ -176,10 +176,18 @@ describe("HostedNativeAuthorizationRoute", () => {
 
     await page.getByRole("button", { name: "Continue as Ada" }).click();
 
+    await expect.element(page.getByRole("heading", { name: "Ryco is opening" })).toBeVisible();
+    await expect.element(page.getByText("Sign-in approved")).toBeVisible();
+    await expect
+      .element(page.getByText("Waiting for the Ryco app", { exact: false }))
+      .toBeVisible();
     expect(approve).toHaveBeenCalledWith(handoffId);
     expect(navigate).toHaveBeenCalledWith(
       `ryco-dev://hosted/complete?code=${code}&state=${state}&handoff_id=${handoffId}`,
     );
+
+    await page.getByRole("button", { name: "Open Ryco again" }).click();
+    expect(navigate).toHaveBeenCalledTimes(2);
   });
 
   it("returns the bounded cancellation callback and supports account switching", async () => {

@@ -1746,6 +1746,52 @@ describe("ConnectionsSettings Hub section", () => {
     await expect.element(page.getByPlaceholder("https://…")).toBeEnabled();
   });
 
+  it("uses account setup instead of a second manual enrollment on Desktop", async () => {
+    stubHubFetch({
+      status: { ...baseStatus, state: "enrolling" },
+      identity: { enrolled: "none" },
+    });
+    await renderHub(
+      { enabled: true, origin: "https://hub.example.com" },
+      {
+        getHostedIdentityState: vi.fn().mockResolvedValue({ status: "signed-out" }),
+        connectHostedIdentity: vi.fn().mockResolvedValue({ status: "ready" }),
+      },
+    );
+
+    await expect.element(page.getByText("Ready for account setup")).toBeVisible();
+    await expect
+      .element(page.getByText(/register this Mac with this Hub automatically/))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Start enrollment" }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Connect account" })).toBeVisible();
+  });
+
+  it("offers Finish setup when account login completed before the local node claim", async () => {
+    const connectHostedIdentity = vi.fn().mockResolvedValue({ status: "ready" as const });
+    stubHubFetch({
+      status: { ...baseStatus, state: "disabled" },
+      identity: { enrolled: "none" },
+    });
+    await renderHub(
+      { enabled: false, origin: "https://hub.example.com" },
+      {
+        getHostedIdentityState: vi.fn().mockResolvedValue({ status: "ready" }),
+        connectHostedIdentity,
+      },
+    );
+
+    await expect.element(page.getByText("Signed in · Node setup needed")).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Finish setup" })).toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Enable" })).not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Finish setup" }).click();
+    expect(connectHostedIdentity).toHaveBeenCalledOnce();
+  });
+
   it("restarts Desktop when the startup credential store was unavailable", async () => {
     const restartApp = vi.fn().mockResolvedValue(undefined);
     stubHubFetch({

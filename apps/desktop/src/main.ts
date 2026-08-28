@@ -144,6 +144,7 @@ import {
   createDesktopDpopSigner,
   createDesktopHostedHubApi,
   DesktopHostedIdentityCoordinator,
+  shouldEnableDesktopHubConnectorForAccountSetup,
   type DesktopHostedGitHubActionResult,
   type DesktopHostedIdentityStatus,
 } from "./desktopHostedIdentity.ts";
@@ -2745,6 +2746,25 @@ function registerIpcHandlers(): void {
       await (await ensureDesktopWorkspaceClient()).connectIdentity();
     } catch {
       await runDesktopHostedIdentity(true);
+    }
+    // Interactive account connection is the Desktop onboarding action: once
+    // browser sign-in produced a retained session, make the colocated node
+    // connector part of the same transaction. Older settings could retain
+    // trust and report the client as `ready` while this launch preference was
+    // still false, so readiness cannot gate this repair. Startup resumes the
+    // node claim after relaunch. A cancelled sign-in has no session material
+    // and therefore never enables or restarts anything.
+    if (
+      shouldEnableDesktopHubConnectorForAccountSetup({
+        hubOrigin: desktopSettings.hubOrigin,
+        connectorEnabled: desktopSettings.hubConnectorEnabled,
+        hasSessionMaterial: desktopHostedIdentityCoordinator?.hasSessionMaterial === true,
+      })
+    ) {
+      const nextSettings = setDesktopHubPreference(desktopSettings, { enabled: true });
+      writeDesktopSettings(DESKTOP_SETTINGS_PATH, nextSettings);
+      desktopSettings = nextSettings;
+      relaunchDesktopApp("hub-account-setup-enabling-connector");
     }
     return hostedIdentityView();
   });
