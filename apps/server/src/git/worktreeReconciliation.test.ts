@@ -4,6 +4,7 @@ import { ProjectId, ThreadId, WorktreeId } from "@ryco/contracts";
 
 import {
   isCaseSensitiveFileSystem,
+  partitionReconcilableProjectRoots,
   planWorktreeReconciliation,
   type PlanWorktreeReconciliationInput,
   type ReconcilableThread,
@@ -38,6 +39,22 @@ const plan = (input: Partial<PlanWorktreeReconciliationInput>) =>
     worktrees: [],
     ...input,
   });
+
+describe("partitionReconcilableProjectRoots", () => {
+  it("keeps missing project roots out of git reconciliation without discarding them", () => {
+    const missingProject = {
+      id: ProjectId.make("project-missing"),
+      workspaceRoot: "/worktrees/removed",
+    };
+    const result = partitionReconcilableProjectRoots(
+      [project, missingProject],
+      (workspaceRoot) => workspaceRoot === project.workspaceRoot,
+    );
+
+    expect(result.available).toEqual([project]);
+    expect(result.missing).toEqual([missingProject]);
+  });
+});
 
 describe("planWorktreeReconciliation", () => {
   it("adopts a live worktree that holds sessions but has no worktree row", () => {
