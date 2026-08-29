@@ -2,7 +2,8 @@ import { DownloadIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { type ProviderDriverKind, type ProviderInstanceId } from "@ryco/contracts";
 
-import { ensureLocalApi } from "../localApi";
+import { ensureEnvironmentApi } from "../environmentApi";
+import { usePrimaryEnvironmentDescriptor } from "../environments/primary";
 import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
 import { useServerProviders } from "../rpc/serverState";
 import { useSettingsDialogStore } from "../settingsDialogStore";
@@ -17,6 +18,7 @@ import {
   getProviderUpdateRejectedToastView,
   getProviderUpdateRunningToastView,
   providerUpdateNotificationKey,
+  withProviderUpdateOrigin,
   type ProviderUpdateToastView,
 } from "./ProviderUpdateLaunchNotification.logic";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -105,6 +107,7 @@ function isTerminalProviderUpdateToastView(view: ProviderUpdateToastView) {
 
 export function ProviderUpdateLaunchNotification() {
   const openSettingsDialog = useSettingsDialogStore((s) => s.openSettings);
+  const environment = usePrimaryEnvironmentDescriptor();
   const providers = useServerProviders();
   const activeToastRef = useRef<ActiveProviderUpdateToast | null>(null);
   const { dismissedNotificationKeys, dismissNotificationKey } =
@@ -112,8 +115,19 @@ export function ProviderUpdateLaunchNotification() {
 
   const updateProviders = useMemo(() => collectProviderUpdateCandidates(providers), [providers]);
   const notificationKey = useMemo(
-    () => providerUpdateNotificationKey(updateProviders),
-    [updateProviders],
+    () =>
+      providerUpdateNotificationKey(
+        updateProviders,
+        environment ? { environmentId: environment.environmentId } : undefined,
+      ),
+    [environment, updateProviders],
+  );
+  const origin = useMemo(
+    () =>
+      environment
+        ? { environmentId: environment.environmentId, nodeLabel: environment.label }
+        : null,
+    [environment],
   );
   const oneClickProviders = useMemo(
     () =>
@@ -146,10 +160,14 @@ export function ProviderUpdateLaunchNotification() {
     const activeProviders = providers.filter((provider) =>
       activeToast.providerInstanceIds.has(provider.instanceId),
     );
-    const view = getProviderUpdateProgressToastView({
-      providers: activeProviders,
-      providerCount: activeToast.providerCount,
-    });
+    if (!origin) return;
+    const view = withProviderUpdateOrigin(
+      getProviderUpdateProgressToastView({
+        providers: activeProviders,
+        providerCount: activeToast.providerCount,
+      }),
+      origin,
+    );
     updateProviderUpdateToast({
       toastId: activeToast.toastId,
       view,
@@ -159,7 +177,7 @@ export function ProviderUpdateLaunchNotification() {
     if (isTerminalProviderUpdateToastView(view)) {
       activeToastRef.current = null;
     }
-  }, [providers, openProviderSettings]);
+  }, [openProviderSettings, origin, providers]);
 
   useEffect(() => {
     const activeToast = activeToastRef.current;
@@ -170,6 +188,7 @@ export function ProviderUpdateLaunchNotification() {
 
     if (
       !notificationKey ||
+      !origin ||
       dismissedNotificationKeys.has(notificationKey) ||
       seenProviderUpdateNotificationKeys.has(notificationKey) ||
       activeToastRef.current
@@ -179,7 +198,10 @@ export function ProviderUpdateLaunchNotification() {
 
     seenProviderUpdateNotificationKeys.add(notificationKey);
 
-    const initialView = getProviderUpdateInitialToastView({ updateProviders, oneClickProviders });
+    const initialView = withProviderUpdateOrigin(
+      getProviderUpdateInitialToastView({ updateProviders, oneClickProviders }),
+      origin,
+    );
 
     let toastId!: ProviderUpdateToastId;
     let updateStarted = false;
@@ -206,17 +228,19 @@ export function ProviderUpdateLaunchNotification() {
 
       updateProviderUpdateToast({
         toastId,
-        view: getProviderUpdateRunningToastView(providerCount),
+        view: withProviderUpdateOrigin(getProviderUpdateRunningToastView(providerCount), origin),
         openSettings,
       });
 
       void Promise.allSettled(
-        oneClickProviders.map(async (provider) =>
-          ensureLocalApi().server.updateProvider({
+        oneClickProviders.map(async (provider) => {
+          const api = ensureEnvironmentApi(origin.environmentId);
+          if (!api.server) throw new Error("Node provider settings are unavailable.");
+          return api.server.updateProvider({
             provider: provider.driver,
             instanceId: provider.instanceId,
-          }),
-        ),
+          });
+        }),
       ).then((results) => {
         const activeUpdateToast = activeToastRef.current;
         if (activeUpdateToast?.kind !== "update" || activeUpdateToast.toastId !== toastId) {
@@ -227,7 +251,10 @@ export function ProviderUpdateLaunchNotification() {
         if (rejectedMessage) {
           updateProviderUpdateToast({
             toastId,
-            view: getProviderUpdateRejectedToastView(providerCount, rejectedMessage),
+            view: withProviderUpdateOrigin(
+              getProviderUpdateRejectedToastView(providerCount, rejectedMessage),
+              origin,
+            ),
             openSettings,
           });
           activeToastRef.current = null;
@@ -238,10 +265,13 @@ export function ProviderUpdateLaunchNotification() {
           results,
           providerInstanceIds,
         });
-        const view = getProviderUpdateProgressToastView({
-          providers: updatedProviderSnapshots,
-          providerCount,
-        });
+        const view = withProviderUpdateOrigin(
+          getProviderUpdateProgressToastView({
+            providers: updatedProviderSnapshots,
+            providerCount,
+          }),
+          origin,
+        );
         updateProviderUpdateToast({
           toastId,
           view,
@@ -297,6 +327,7 @@ export function ProviderUpdateLaunchNotification() {
     notificationKey,
     oneClickProviders,
     openProviderSettings,
+    origin,
     updateProviders,
   ]);
 

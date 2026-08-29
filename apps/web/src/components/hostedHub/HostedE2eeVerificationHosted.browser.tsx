@@ -86,7 +86,7 @@ async function drawn(): Promise<HTMLElement> {
 }
 
 describe("§13.5 the code is drawn for every hosted role", () => {
-  it("gives an owner the short form and the pointer at the rest of it", async () => {
+  it("gives an owner the code and no disclosure prose", async () => {
     await page.viewport(1_280, 720);
     seedRole("owner");
     applyWebE2eeVerificationCode(CODE);
@@ -95,8 +95,8 @@ describe("§13.5 the code is drawn for every hosted role", () => {
     const block = await drawn();
     expect(block.getAttribute("data-form")).toBe("inline");
     expect(block.textContent).toContain(CODE);
-    expect(block.textContent).toContain(E2EE_WEB_SAS_ADVISORY);
-    expect(block.textContent).toContain(E2EE_WEB_SAS_MORE);
+    expect(block.textContent).not.toContain(E2EE_WEB_SAS_ADVISORY);
+    expect(block.textContent).not.toContain(E2EE_WEB_SAS_MORE);
     // The long account belongs to the page the pointer leads to; drawing it here
     // as well would restore the block of prose this length exists to remove.
     expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_DETAIL);
@@ -111,19 +111,14 @@ describe("§13.5 the code is drawn for every hosted role", () => {
       mounted = await render(<HostedE2eeVerification />);
 
       const block = await drawn();
-      // No pointer, because there is nothing to point at: `security` is filtered
-      // out of both navs for this role, so the sentence would name a section
-      // that is not in their dialog.
+      // The menu never grows disclosure prose for a different role.
       expect(block.getAttribute("data-form")).toBe("settings");
       expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_MORE);
       expect(document.body.textContent).not.toContain("Settings → Security");
-      // …and nothing is lost by not sending them: they get the long account
-      // where they are standing, including §2.2's reason that needs no
-      // substituted bundle, plus the command that reads the node's end.
       expect(block.textContent).toContain(CODE);
-      expect(block.textContent).toContain(E2EE_WEB_SAS_DETAIL);
-      expect(block.textContent).toContain(E2EE_WEB_SAS_COMPARE);
-      expect(block.textContent).toContain("pins no node identity");
+      expect(block.textContent).not.toContain(E2EE_WEB_SAS_DETAIL);
+      expect(block.textContent).not.toContain(E2EE_WEB_SAS_COMPARE);
+      expect(block.textContent).not.toContain("pins no node identity");
     },
   );
 
@@ -140,6 +135,6 @@ describe("§13.5 the code is drawn for every hosted role", () => {
     const block = await drawn();
     expect(block.getAttribute("data-form")).toBe("settings");
     expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_MORE);
-    expect(block.textContent).toContain(E2EE_WEB_SAS_DETAIL);
+    expect(block.textContent).not.toContain(E2EE_WEB_SAS_DETAIL);
   });
 });

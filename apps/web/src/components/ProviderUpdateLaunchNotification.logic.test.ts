@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@ryco/contracts";
+import {
+  EnvironmentId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@ryco/contracts";
 
 import {
   canOneClickUpdateProviderCandidate,
@@ -14,6 +19,7 @@ import {
   hasOneClickUpdateProviderCandidate,
   isProviderUpdateCandidate,
   providerUpdateNotificationKey,
+  withProviderUpdateOrigin,
   type ProviderUpdateCandidate,
 } from "./ProviderUpdateLaunchNotification.logic";
 
@@ -190,8 +196,27 @@ describe("provider update launch notification logic", () => {
       latestVersion: "0.3.0",
     });
 
-    expect(providerUpdateNotificationKey([codex, cursor])).toBe("codex:1.1.0|cursor:0.3.0");
+    expect(providerUpdateNotificationKey([codex, cursor])).toBe(
+      "unknown-environment|codex:codex:1.1.0|cursor:cursor:0.3.0",
+    );
     expect(providerUpdateNotificationKey([])).toBeNull();
+  });
+
+  it("keeps dedupe and copy distinct across nodes", () => {
+    const codex = updateCandidate({ driver: driver("codex"), latestVersion: "1.1.0" });
+    const first = providerUpdateNotificationKey([codex], {
+      environmentId: EnvironmentId.make("env_first"),
+    });
+    const second = providerUpdateNotificationKey([codex], {
+      environmentId: EnvironmentId.make("env_second"),
+    });
+    expect(first).not.toBe(second);
+    const view = withProviderUpdateOrigin(
+      getProviderUpdateInitialToastView({ updateProviders: [codex], oneClickProviders: [codex] }),
+      { environmentId: EnvironmentId.make("env_first"), nodeLabel: "Studio Mac" },
+    );
+    expect(view.title).toContain("Studio Mac");
+    expect(view.description).toContain("On Studio Mac");
   });
 
   it("keeps the same notification key while the published update version is unchanged", () => {

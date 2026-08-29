@@ -110,11 +110,22 @@ export type HubConnectorStatus = typeof HubConnectorStatus.Type;
  * `active` — refuse destructive or re-pointing actions — because the alternative
  * is offering to overwrite an identity that may well exist.
  *
- * Carries no origin, no node/key/environment identifier, and no fingerprint.
+ * Carries no origin and no node/key/environment identifier. An active identity
+ * may include only its canonical public fingerprint so local recovery surfaces
+ * can compare the same bounded value outside an enrollment ceremony.
  */
 export const HubIdentitySummary = Schema.Struct({
   enrolled: Schema.Literals(["none", "pending", "active", "unknown"]),
-});
+  fingerprint: Schema.optional(
+    Schema.String.check(Schema.isPattern(/^SHA256:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/)),
+  ),
+}).check(
+  Schema.makeFilter((summary) => {
+    if (summary.fingerprint !== undefined && summary.enrolled !== "active") {
+      return "fingerprint is exposed only for an active identity";
+    }
+  }),
+);
 export type HubIdentitySummary = typeof HubIdentitySummary.Type;
 
 export const HubNodePublicKeyFingerprint = Schema.String.check(

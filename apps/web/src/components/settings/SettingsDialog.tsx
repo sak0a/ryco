@@ -27,13 +27,16 @@ import {
   hostedSettingsRoleFresh,
   hostedSettingsRoleSnapshot,
   settingsSectionReachable,
+  settingsSectionScope,
+  settingsScopeLabel,
 } from "./settingsSections.logic";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ScrollArea } from "../ui/scroll-area";
 import { ArchivedThreadsPanel, GeneralSettingsPanel, useSettingsRestore } from "./SettingsPanels";
-import { isHostedHubMode } from "../../env";
+import { isElectron, isHostedHubMode } from "../../env";
 import { useHostedHubStore } from "../../hostedHub/state";
+import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
 
 interface NavItem {
   id: SettingsSectionId;
@@ -93,6 +96,8 @@ export {
   hostedSettingsSectionAllowed,
   settingsSectionAvailable,
   settingsSectionReachable,
+  settingsSectionScope,
+  settingsScopeLabel,
 } from "./settingsSections.logic";
 
 const SECTIONS_WITH_RESTORE: ReadonlySet<SettingsSectionId> = new Set([
@@ -200,6 +205,7 @@ function SectionPanel({
 
 export function SettingsDialog() {
   const navigate = useNavigate();
+  const environment = usePrimaryEnvironmentDescriptor();
   const open = useSettingsDialogStore((s) => s.open);
   const section = useSettingsDialogStore((s) => s.section);
   const closeSettings = useSettingsDialogStore((s) => s.closeSettings);
@@ -216,6 +222,11 @@ export function SettingsDialog() {
   const effectiveSection = visibleNavItems.some((item) => item.id === section)
     ? section
     : (visibleNavItems[0]?.id ?? "appearance");
+  const activeScope = settingsSectionScope(effectiveSection);
+  const scopeLabel = settingsScopeLabel(activeScope, {
+    nativeClient: isElectron,
+    nodeLabel: environment?.label ?? null,
+  });
 
   useEffect(() => {
     if (hosted && !roleFresh) return;
@@ -268,7 +279,15 @@ export function SettingsDialog() {
       >
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-5">
           <div className="flex min-w-0 items-center gap-4">
-            <DialogTitle className="shrink-0 text-base font-semibold">Settings</DialogTitle>
+            <div className="flex shrink-0 items-baseline gap-2">
+              <DialogTitle className="text-base font-semibold">Settings</DialogTitle>
+              <span
+                data-testid="settings-scope-label"
+                className="max-w-48 truncate text-xs text-muted-foreground"
+              >
+                {scopeLabel}
+              </span>
+            </div>
             <div className="relative w-72 max-w-[40vw]">
               <SearchIcon
                 aria-hidden

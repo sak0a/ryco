@@ -6,6 +6,8 @@ export * from "./hostedIdentityState.ts";
 export * from "./logging.ts";
 export * from "./nativeHandoff.ts";
 export * from "./nativeIdentity.ts";
+export * from "./nativeTrustOnboarding.ts";
+export * from "./nodeMutationLease.ts";
 export * from "./runtime.ts";
 export * from "./state.ts";
 export * from "./types.ts";

@@ -16,6 +16,41 @@ import type { SettingsSectionId } from "../../settingsDialogStore";
 
 /** The role a hosted grant carries, or `null` when no fresh snapshot exists. */
 export type HostedSettingsRole = "viewer" | "operator" | "owner" | null;
+export type SettingsScope = "browser" | "device" | "account" | "node";
+
+const SETTINGS_SCOPE_BY_SECTION = {
+  account: "account",
+  general: "browser",
+  inbox: "browser",
+  providers: "node",
+  "opinionated-plugins": "node",
+  "mcp-servers": "node",
+  appearance: "browser",
+  keybindings: "node",
+  "source-control": "node",
+  connections: "device",
+  security: "node",
+  diagnostics: "node",
+  statistics: "node",
+  archived: "node",
+} as const satisfies Record<SettingsSectionId, SettingsScope>;
+
+export function settingsSectionScope(section: SettingsSectionId): SettingsScope {
+  return SETTINGS_SCOPE_BY_SECTION[section];
+}
+
+export function settingsScopeLabel(
+  scope: SettingsScope,
+  options: {
+    readonly nativeClient: boolean;
+    readonly nodeLabel: string | null;
+  },
+): string {
+  if (scope === "node") return `Node: ${options.nodeLabel ?? "Connecting…"}`;
+  if (scope === "account") return "Hub account";
+  if (scope === "device" || options.nativeClient) return "This device";
+  return "This browser";
+}
 
 /**
  * Sections that exist only in the hosted client. Account management is one:

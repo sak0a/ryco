@@ -8,6 +8,7 @@ export const UNIFIED_WORKSPACE_MAX_CONNECTIONS = 3;
 export const UNIFIED_WORKSPACE_SCOPE_LEASE_TTL_MS = 45_000;
 
 export type WorkspaceConnectionScope =
+  | { readonly type: "interactive" }
   | { readonly type: "thread-detail"; readonly threadId: ThreadId }
   | { readonly type: "vcs-status"; readonly cwd: string }
   | { readonly type: "provider-status"; readonly instanceId?: string };

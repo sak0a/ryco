@@ -47,6 +47,8 @@ function parseScope(value: unknown): WorkspaceConnectionScope {
   }
   const scope = value as Partial<DesktopWorkspaceScopeProjection>;
   switch (scope.type) {
+    case "interactive":
+      return { type: scope.type };
     case "thread-detail":
       if (!boundedText(scope.threadId)) throw new Error("Desktop workspace scope is invalid.");
       return { type: scope.type, threadId: ThreadId.make(scope.threadId) };

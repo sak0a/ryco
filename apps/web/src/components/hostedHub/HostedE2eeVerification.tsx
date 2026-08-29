@@ -1,4 +1,5 @@
 import { isHostedHubMode } from "../../env";
+import { CopyIcon } from "lucide-react";
 import { useHostedHubStore } from "../../hostedHub/state";
 import {
   useWebE2eeChannelStatus,
@@ -112,8 +113,13 @@ export function HostedE2eeVerification() {
       >
         {view.display}
       </p>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">{view.advisory}</p>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">{view.more}</p>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => void navigator.clipboard.writeText(view.display)}
+      >
+        <CopyIcon aria-hidden className="size-3.5" /> Copy
+      </button>
     </section>
   );
 }

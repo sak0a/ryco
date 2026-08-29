@@ -229,7 +229,10 @@ const withLiveHubCliServer = <A, E, R>(
               pollIntervalMs: 5_000,
             };
           },
-          identitySummary: async () => ({ enrolled: "pending" as const }),
+          identitySummary: async () => ({
+            enrolled: "active" as const,
+            fingerprint: `SHA256:${"A".repeat(43)}`,
+          }),
           leave: async () => waitingStatus,
           readEnrollment: async () => ({
             deviceCode: "ABCD-EFGH",
@@ -509,8 +512,23 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
             const statusOutput = yield* captureStdout(
               runCli(["hub", "status", "--base-dir", baseDir, "--json"]),
             );
-            const status = JSON.parse(statusOutput.output) as { readonly state?: string };
+            const status = JSON.parse(statusOutput.output) as {
+              readonly state?: string;
+              readonly fingerprint?: string;
+            };
             assert.equal(status.state, "awaiting_approval");
+            assert.equal(status.fingerprint, `SHA256:${"A".repeat(43)}`);
+            assert.notInclude(statusOutput.output, "publicKey");
+            assert.notInclude(statusOutput.output, "secretName");
+            assert.notInclude(statusOutput.output, baseDir);
+
+            const humanStatusOutput = yield* captureStdout(
+              runCli(["hub", "status", "--base-dir", baseDir]),
+            );
+            assert.include(humanStatusOutput.output, `Fingerprint: SHA256:${"A".repeat(43)}`);
+            assert.notInclude(humanStatusOutput.output, "publicKey");
+            assert.notInclude(humanStatusOutput.output, "secretName");
+            assert.notInclude(humanStatusOutput.output, baseDir);
 
             const enrollmentOutput = yield* captureStdout(
               runCli(["hub", "enroll", "--base-dir", baseDir, "--json"]),

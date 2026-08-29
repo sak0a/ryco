@@ -23,12 +23,7 @@ import {
   buildDiagnosticsBundle,
   serializeDiagnosticsBundle,
 } from "../settings/DiagnosticsPanel.logic";
-import {
-  E2EE_WEB_SAS_ADVISORY,
-  E2EE_WEB_SAS_DETAIL,
-  E2EE_WEB_SAS_MORE,
-  E2EE_WEB_SAS_UNAVAILABLE,
-} from "./HostedE2eeVerification.logic";
+import { E2EE_WEB_SAS_DETAIL, E2EE_WEB_SAS_UNAVAILABLE } from "./HostedE2eeVerification.logic";
 import { HostedE2eeVerification } from "./HostedE2eeVerification";
 
 /** Two well-formed §13.5 renderings, built from the constants rather than typed. */
@@ -113,31 +108,14 @@ describe("§13.5 the WebSAS is legible enough to compare", () => {
     );
   });
 
-  it("shows §13.5's advisory in the same view, never behind a disclosure", async () => {
+  it("keeps the node-menu session-code block free of explanatory prose", async () => {
     await page.viewport(320, 568);
     applyWebE2eeVerificationCode(FIRST_CODE);
     mounted = await render(<HostedE2eeVerification />);
 
     await expect.element(page.getByText(FIRST_CODE)).toBeVisible();
-    // The duty is on "the web UI text accompanying the `WebSAS`", and text a
-    // reader has to open is text most readers never see.
-    await expect.element(page.getByText(E2EE_WEB_SAS_ADVISORY)).toBeVisible();
-    // …and the pointer at the long account travels with it, so the short form is
-    // never presented as the whole of what an owner can know.
-    await expect.element(page.getByText(E2EE_WEB_SAS_MORE)).toBeVisible();
-    // Structurally, not just visually: nothing between the code and either
-    // sentence is a collapsible or a hidden container.
-    expect(section()!.querySelector("details")).toBeNull();
-    expect(section()!.querySelector("[hidden]")).toBeNull();
-    for (const text of [E2EE_WEB_SAS_ADVISORY, E2EE_WEB_SAS_MORE]) {
-      const node = [...section()!.querySelectorAll<HTMLElement>("p")].find((paragraph) =>
-        paragraph.textContent?.includes(text),
-      );
-      expect(node, "the sentence is not in the same section as the code").not.toBeUndefined();
-      const box = node!.getBoundingClientRect();
-      expect(box.width, "the sentence has no box").toBeGreaterThan(0);
-      expect(box.height, "the sentence has no box").toBeGreaterThan(0);
-    }
+    await expect.element(page.getByRole("button", { name: "Copy" })).toBeVisible();
+    expect(section()!.querySelectorAll("p")).toHaveLength(2);
   });
 
   it("draws the short form here and leaves the long account to Settings", async () => {
@@ -158,17 +136,11 @@ describe("§13.5 the WebSAS is legible enough to compare", () => {
     await expect.element(page.getByText(FIRST_CODE)).toBeVisible();
 
     expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_DETAIL);
-    // Two sentences under the code, and no third: the whole accompanying text of
-    // this surface is the advisory and the pointer.
+    // Only the label and code are paragraphs; disclosure lives in Security.
     const paragraphs = [...section()!.querySelectorAll<HTMLElement>("p")].map(
       (paragraph) => paragraph.textContent ?? "",
     );
-    expect(paragraphs).toEqual([
-      "Session code",
-      FIRST_CODE,
-      E2EE_WEB_SAS_ADVISORY,
-      E2EE_WEB_SAS_MORE,
-    ]);
+    expect(paragraphs).toEqual(["Session code", FIRST_CODE]);
   });
 });
 

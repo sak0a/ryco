@@ -53,11 +53,7 @@ import {
   WEB_HOSTED_E2EE_CHANNEL_STATUSES,
 } from "../../../test/hostedConnectionVocabulary";
 import { hostedConnectionStatusPresentation } from "./HostedConnectionControls.logic";
-import {
-  E2EE_WEB_SAS_ADVISORY,
-  E2EE_WEB_SAS_DETAIL,
-  E2EE_WEB_SAS_MORE,
-} from "./HostedE2eeVerification.logic";
+import { E2EE_WEB_SAS_DETAIL } from "./HostedE2eeVerification.logic";
 import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
@@ -76,7 +72,6 @@ import {
   HostedConnectionSheet,
   HostedNodeMenu,
 } from "./HostedConnectionControls";
-import { hostedRelayTrustDisclosure } from "./HostedRelayTrustNotice.logic";
 
 const account = {
   id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
@@ -310,7 +305,7 @@ describe("hosted connection controls", () => {
     expect(navigate).toHaveBeenCalledWith({ to: "/", replace: true });
   });
 
-  it("closes the desktop menu before navigating to account settings", async () => {
+  it("closes the desktop menu before navigating to security details", async () => {
     // The phone twin closes its sheet before leaving for account settings and
     // says why. The desktop menu did not, so the settings surface opened on top
     // of a still-open disclosure: two owners of one dismissal, and an Escape
@@ -326,7 +321,7 @@ describe("hosted connection controls", () => {
     expect(disclosure, "no desktop menu rendered").not.toBeNull();
     expect(disclosure!.open, "the menu did not open, so this proves nothing").toBe(true);
 
-    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("button", { name: "Security details" }).click();
     expect(window.location.pathname).toBe("/account/security");
     expect(disclosure!.open, "the menu stayed open behind the account page").toBe(false);
   });
@@ -374,11 +369,9 @@ describe("hosted connection controls", () => {
     await expect.element(page.getByRole("button", { name: /Second node/ })).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Refresh nodes" })).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Sign out" })).toBeVisible();
-    // No channel is open in this harness, so the disclosure is at the
-    // no-channel claim — and never the retired sentence (§2.2).
-    await expect
-      .element(page.getByText(hostedRelayTrustDisclosure("unavailable").body))
-      .toBeVisible();
+    // Detailed security prose lives in Settings, not the compact node switcher.
+    await expect.element(page.getByRole("button", { name: "Security details" })).toBeVisible();
+    expect(document.querySelector("[data-hosted-relay-trust-notice]")).toBeNull();
     expect(document.body.textContent).not.toContain(RETIRED_HOSTED_RELAY_TRUST_SENTENCE);
     // Focus is trapped inside the sheet while it is open.
     expect(sheet!.contains(document.activeElement)).toBe(true);
@@ -692,15 +685,7 @@ describe("hosted connection controls", () => {
   it.each([
     ["the desktop menu", "menu"],
     ["the phone connection sheet", "sheet"],
-  ] as const)("states the claim the live channel earns in %s", async (_name, surface) => {
-    // §12.2's duty is on EVERY user-facing surface. The disclosure used to be
-    // one constant rendered at five mount sites; these are two of them, and
-    // neither may still be showing the retired sentence while an encrypted
-    // channel is live.
-    //
-    // Mounted one at a time: the sheet's viewport is `fixed inset-0` and
-    // covers the menu, so a single render would leave one of the two
-    // unreachable and only look like it was being checked.
+  ] as const)("keeps detailed security prose out of %s", async (_name, surface) => {
     seedConnectedState();
     if (surface === "menu") {
       mounted = await render(<HostedNodeMenu />);
@@ -714,61 +699,16 @@ describe("hosted connection controls", () => {
       mounted = await render(<HostedConnectionSheet open onOpenChange={() => undefined} />);
     }
 
-    // Every channel state the tier can be in, from the runtime's own exhaustive
-    // enumeration — so a member added to the union sweeps here without an edit.
-    const drawn = new Map<string, { readonly colour: string; readonly outline: string }>();
     for (const status of WEB_HOSTED_E2EE_CHANNEL_STATUSES) {
       applyWebE2eeChannelStatus(status);
-      const expected = hostedRelayTrustDisclosure(status);
-      const notice = await vi.waitFor(() => {
-        const notices = [
-          ...document.querySelectorAll<HTMLElement>("[data-hosted-relay-trust-notice]"),
-        ];
-        expect(notices.length, `mounted notices for ${status}`).toBe(1);
-        const found = notices[0]!;
-        expect(found.getAttribute("data-e2ee-status"), status).toBe(status);
-        expect(found.getAttribute("data-tone"), status).toBe(expected.tone);
-        expect(found.textContent, status).toContain(expected.body);
-        expect(found.getBoundingClientRect().height, status).toBeGreaterThan(0);
-        return found;
+      await vi.waitFor(() => {
+        expect(document.querySelectorAll("[data-hosted-relay-trust-notice]").length, status).toBe(
+          0,
+        );
       });
       expect(document.body.textContent, status).not.toContain(RETIRED_HOSTED_RELAY_TRUST_SENTENCE);
-
-      // The TONE, as something drawn. `data-tone` is the decision; the glyph and
-      // its colour are what a reader receives, and §2.2's "MUST NOT present a
-      // stronger claim for a weaker configuration" is violated by an icon just
-      // as well as by a sentence. The `compact` variant both surfaces mount
-      // drops the frame, so the glyph is the only tonal carrier here.
-      const glyph = notice.querySelector<SVGElement>("svg");
-      expect(glyph, `notice glyph for ${status}`).not.toBeNull();
-      drawn.set(status, {
-        colour: getComputedStyle(glyph!).color,
-        // EVERY drawn segment, not the first: the caution and advisory shields
-        // share their outer outline and differ only in the marks inside it, so
-        // a first-path comparison reports two different glyphs as identical.
-        outline: [...glyph!.querySelectorAll("path,line,circle")]
-          .map((shape) => shape.getAttribute("d") ?? shape.outerHTML)
-          .join("|"),
-      });
     }
-
-    // The one state that encrypted something is drawn differently from the two
-    // that did not — in colour AND in shape, never in colour alone.
-    const encrypted = drawn.get("web-unsigned")!;
-    for (const status of ["legacy", "unavailable", "negotiating"] as const) {
-      const plain = drawn.get(status)!;
-      expect(encrypted.colour, `${status} wears the encrypted colour`).not.toBe(plain.colour);
-      expect(encrypted.outline, `${status} wears the encrypted glyph`).not.toBe(plain.outline);
-    }
-    // …and the three that claim nothing are drawn alike, because they say the
-    // same thing about who can read the payload.
-    expect(
-      new Set(
-        (["legacy", "unavailable", "negotiating"] as const).map(
-          (status) => drawn.get(status)!.colour,
-        ),
-      ).size,
-    ).toBe(1);
+    await expect.element(page.getByRole("button", { name: "Security details" })).toBeVisible();
   });
 
   it.each([
@@ -845,7 +785,7 @@ describe("hosted connection controls", () => {
     expect([...WEB_HOSTED_E2EE_CHANNEL_STATUSES]).toContain("web-unsigned");
   });
 
-  it("shows §13.5's code and its advisory in the desktop menu, and only on a locked channel", async () => {
+  it("shows the code without disclosure prose in the desktop menu, and only on a locked channel", async () => {
     // §13.5: "Shown in the web UI for the active session … the owner compares
     // the two out of band", and the accompanying text "MUST state that the
     // comparison … cannot protect against the Hub operator".
@@ -872,12 +812,9 @@ describe("hosted connection controls", () => {
       expect(verification()).not.toBeNull();
     });
     expect(verification()!.textContent).toContain(MENU_WEB_SAS);
-    // The denial is in the same view as the characters, every time — at this
-    // surface's length, with the pointer at the longer account beside it. The
-    // long form is Settings → Security's, and drawing it in a 288px popover is
-    // the block of prose this shape removed.
-    expect(verification()!.textContent).toContain(E2EE_WEB_SAS_ADVISORY);
-    expect(verification()!.textContent).toContain(E2EE_WEB_SAS_MORE);
+    expect(verification()!.querySelectorAll("p")).toHaveLength(2);
+    expect(verification()!.textContent).toContain("Copy");
+    expect(document.body.textContent).toContain("Security details");
     expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_DETAIL);
     expect(verification()!.querySelector("details")).toBeNull();
   });

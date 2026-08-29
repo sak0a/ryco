@@ -2,7 +2,7 @@ import {
   E2EE_SAFETY_NUMBER_DIGITS,
   E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS,
 } from "@ryco/shared/relayE2eeConstants";
-import { verifyCrossDeviceApprovalQr } from "@ryco/shared/relayE2eeCrossDeviceApproval";
+import { verifyNativeTrustApprovalQr } from "@ryco/client-runtime/authorization";
 
 import {
   attachMobileE2eeLocalNodeHandle,
@@ -617,7 +617,7 @@ export async function confirmE2eeApprovalQr(input: {
   ) {
     return E2EE_VERIFICATION_UNAVAILABLE;
   }
-  const approval = verifyCrossDeviceApprovalQr({
+  const verification = verifyNativeTrustApprovalQr({
     payload: input.payload,
     hubOrigin: selection.hubOrigin,
     accountId: selection.accountId,
@@ -627,8 +627,11 @@ export async function confirmE2eeApprovalQr(input: {
     nodeContinuityId: presented.continuityId,
     nodePolicyGeneration: presented.policyGeneration,
     now: input.decidedAt,
+    requiredRole: "owner",
+    requiredCapability: "ryco.rpc",
   });
-  if (approval === undefined) return E2EE_APPROVAL_QR_INVALID;
+  if (!verification.ok) return E2EE_APPROVAL_QR_INVALID;
+  const { approval } = verification;
 
   try {
     const index =

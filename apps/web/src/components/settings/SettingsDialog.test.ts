@@ -6,6 +6,8 @@ import {
   hostedSettingsSectionAllowed,
   settingsSectionAvailable,
   settingsSectionReachable,
+  settingsSectionScope,
+  settingsScopeLabel,
   SETTINGS_DIALOG_SECTION_IDS,
   SETTINGS_DIALOG_SECTION_LABELS,
 } from "./SettingsDialog";
@@ -40,6 +42,39 @@ describe("the phone surface mirrors the desktop dialog's section inventory", () 
 });
 
 describe("hosted settings capabilities", () => {
+  it("declares the ownership scope of every settings section", () => {
+    expect(
+      SETTINGS_DIALOG_SECTION_IDS.map((section) => [section, settingsSectionScope(section)]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["appearance", "browser"],
+        ["connections", "device"],
+        ["account", "account"],
+        ["providers", "node"],
+        ["source-control", "node"],
+        ["security", "node"],
+      ]),
+    );
+  });
+
+  it("uses the native device mental model for renderer-local preferences", () => {
+    expect(settingsScopeLabel("browser", { nativeClient: false, nodeLabel: null })).toBe(
+      "This browser",
+    );
+    expect(settingsScopeLabel("browser", { nativeClient: true, nodeLabel: null })).toBe(
+      "This device",
+    );
+    expect(settingsScopeLabel("device", { nativeClient: false, nodeLabel: null })).toBe(
+      "This device",
+    );
+    expect(settingsScopeLabel("account", { nativeClient: true, nodeLabel: null })).toBe(
+      "Hub account",
+    );
+    expect(settingsScopeLabel("node", { nativeClient: true, nodeLabel: "Studio Mac" })).toBe(
+      "Node: Studio Mac",
+    );
+  });
+
   it("fails closed while role state is unavailable", () => {
     expect(hostedSettingsSectionAllowed("appearance", null)).toBe(true);
     expect(hostedSettingsSectionAllowed("archived", null)).toBe(false);

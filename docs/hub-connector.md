@@ -271,6 +271,11 @@ short-lived owner credential from the local auth control plane, uses it only in 
 header to the existing local server, and revokes it after the operation. That credential is never a
 Hub credential and never enters a Hub WebSocket.
 
+`hub status` prints the active node's canonical `SHA256:<base64url>` identity fingerprint in both
+human and JSON output whenever an active identity exists. This is the stable local recovery source
+after enrollment has finished; it exposes no raw public key, private-key material, key-store name,
+local path, Hub origin, or node identifier.
+
 `hub enroll` prints the node label, platform, client version, key algorithm, the canonical
 `SHA256:<base64url>` public-key fingerprint, expiry, and a short device code — the same fields the
 Hub approval screen shows, so both can be compared item by item. `--json` returns the same bounded

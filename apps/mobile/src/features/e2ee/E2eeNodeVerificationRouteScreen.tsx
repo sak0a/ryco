@@ -41,6 +41,7 @@ export function E2eeNodeVerificationRouteScreen(props: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanningApproval, setScanningApproval] = useState(false);
   const [approvalBusy, setApprovalBusy] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [approvalRequested, setApprovalRequested] = useState(
     session.selection?.localNodeHandle !== null && session.selection?.localNodeHandle !== undefined,
   );
@@ -165,15 +166,19 @@ export function E2eeNodeVerificationRouteScreen(props: Props) {
       contentContainerStyle={{ paddingTop: 4, paddingBottom: 48 }}
       keyboardShouldPersistTaps="handled"
     >
-      <Text className="mx-5 mt-4 text-xl font-ryco-bold text-foreground">{view.title}</Text>
+      <Text className="mx-5 mt-4 text-xl font-ryco-bold text-foreground">
+        {recoveryMode ? view.title : "Verify this device"}
+      </Text>
       {view.nodeLabel ? (
         <Text className="mx-5 mt-1 font-sans text-sm text-foreground-muted">{view.nodeLabel}</Text>
       ) : null}
       <Text className="mx-5 mt-3 font-sans text-sm leading-relaxed text-foreground">
-        {view.message}
+        {recoveryMode
+          ? view.message
+          : "Ask an already trusted owner to approve this phone, then scan the one-time code it shows."}
       </Text>
 
-      {shouldShowE2eeApprovalScanner(view.stage) ? (
+      {shouldShowE2eeApprovalScanner(view.stage) && !recoveryMode ? (
         <View className="mx-5 mt-4 rounded-2xl border border-border bg-card p-4">
           <Text className="font-ryco-bold text-base text-foreground">Fastest: scan one code</Text>
           <Text className="mt-1 font-sans text-xs leading-relaxed text-foreground-muted">
@@ -239,7 +244,7 @@ export function E2eeNodeVerificationRouteScreen(props: Props) {
 
       {/* §13.2.1 situation 2 alone: the previously verified pair beside the newly
           presented one, before any pairing step proceeds. */}
-      {view.previouslyVerified && view.presented ? (
+      {recoveryMode && view.previouslyVerified && view.presented ? (
         <View className="mx-5 mt-4 flex-row gap-3">
           <E2eeIdentityColumn
             title={E2EE_PREVIOUSLY_VERIFIED_COLUMN_TITLE}
@@ -249,7 +254,7 @@ export function E2eeNodeVerificationRouteScreen(props: Props) {
         </View>
       ) : null}
 
-      {view.stage === "enrollment-fingerprint" ? (
+      {recoveryMode && view.stage === "enrollment-fingerprint" ? (
         <View className="mx-5 mt-4">
           <TextInput
             accessibilityLabel="Node enrollment fingerprint"
@@ -269,7 +274,7 @@ export function E2eeNodeVerificationRouteScreen(props: Props) {
         </View>
       ) : null}
 
-      {view.stage === "compare" ? (
+      {recoveryMode && view.stage === "compare" ? (
         <>
           <E2eeSafetyNumberCard
             groups={view.safetyNumberGroups}
@@ -307,16 +312,33 @@ export function E2eeNodeVerificationRouteScreen(props: Props) {
 
       {/* ABSENT until the owner has said they compared — never a disabled button
           that a stray press could re-enable. */}
-      {view.confirm ? (
+      {recoveryMode && view.confirm ? (
         <E2eeActionButton action={view.confirm} onConfirm={(action) => action.run()} />
       ) : null}
 
-      <Text className="mx-5 mt-6 font-sans text-xs leading-relaxed text-foreground-muted">
-        {view.nodeApprovalMessage}
-      </Text>
-      <Text className="mx-5 mt-3 font-sans text-xs leading-relaxed text-foreground-muted">
-        {view.outcomeMessage}
-      </Text>
+      {recoveryMode ? (
+        <>
+          <Text className="mx-5 mt-6 font-sans text-xs leading-relaxed text-foreground-muted">
+            {view.nodeApprovalMessage}
+          </Text>
+          <Text className="mx-5 mt-3 font-sans text-xs leading-relaxed text-foreground-muted">
+            {view.outcomeMessage}
+          </Text>
+        </>
+      ) : null}
+
+      {view.stage === "enrollment-fingerprint" ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={recoveryMode ? "Use approval QR instead" : "Use recovery setup"}
+          onPress={() => setRecoveryMode((current) => !current)}
+          className="mx-5 mt-5 h-11 items-center justify-center rounded-full px-4 active:opacity-70"
+        >
+          <Text className="font-ryco-bold text-sm text-foreground-muted">
+            {recoveryMode ? "Use approval QR instead" : "Use recovery setup"}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <E2eeActionButton
         action={view.dismiss}

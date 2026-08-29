@@ -63,6 +63,13 @@ export const MVP_ROOT_ROUTES = {
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
+  ProjectSourceControl: {
+    linking: `${PROJECT}/source-control/:worktreeId?`,
+    overlay: false,
+    headerPreset: "glass",
+    ios: { presentation: "card" },
+    android: { presentation: "card" },
+  },
   NewTask: {
     linking: "tasks/new",
     overlay: false,

@@ -24,6 +24,7 @@ describe("MVP route config", () => {
         "NewTask",
         "NotFound",
         "Project",
+        "ProjectSourceControl",
         "SettingsSheet",
         "Thread",
         "ThreadFile",
@@ -49,6 +50,9 @@ describe("MVP route config", () => {
     expect(MVP_ROOT_ROUTES.Home.linking).toBe("");
     expect(MVP_ROOT_ROUTES.AddProject.linking).toBe("projects/new");
     expect(MVP_ROOT_ROUTES.Project.linking).toBe("projects/:environmentId/:projectId");
+    expect(MVP_ROOT_ROUTES.ProjectSourceControl.linking).toBe(
+      "projects/:environmentId/:projectId/source-control/:worktreeId?",
+    );
     expect(MVP_ROOT_ROUTES.NewTask.linking).toBe("tasks/new");
     expect(MVP_ROOT_ROUTES.Thread.linking).toBe("threads/:environmentId/:threadId");
     expect(MVP_ROOT_ROUTES.ThreadReview.linking).toBe("threads/:environmentId/:threadId/review");
@@ -104,6 +108,7 @@ describe("MVP route config", () => {
       "Home",
       "NewTask",
       "Project",
+      "ProjectSourceControl",
       "Thread",
       "ThreadReview",
       "ThreadFiles",

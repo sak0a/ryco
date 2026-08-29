@@ -128,6 +128,10 @@ export function retainDesktopWorkspaceThreadScope(
   return retainDesktopWorkspaceScope(environmentId, { type: "thread-detail", threadId });
 }
 
+export function retainDesktopWorkspaceInteractiveScope(environmentId: EnvironmentId): () => void {
+  return retainDesktopWorkspaceScope(environmentId, { type: "interactive" });
+}
+
 export function retainDesktopWorkspaceVcsScope(
   environmentId: EnvironmentId,
   cwd: string,

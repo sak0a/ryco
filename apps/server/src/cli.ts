@@ -6,6 +6,7 @@ import {
   HubConnectorStatus,
   HubEnrollmentCeremonyDetail,
   HubEnrollmentStartResult,
+  HubIdentitySummary,
   OrchestrationReadModel,
   ProjectId,
   type ClientOrchestrationCommand,
@@ -1110,6 +1111,22 @@ const requestHubStatus = (origin: string, bearerToken: string) =>
     HUB_CLI_LIVE_SERVER_TIMEOUT,
   );
 
+const requestHubIdentitySummary = (origin: string, bearerToken: string) =>
+  runLiveServerRequest(
+    HttpClientRequest.get(`${origin}/api/hub/identity`).pipe(
+      HttpClientRequest.acceptJson,
+      HttpClientRequest.bearerToken(bearerToken),
+    ),
+    HttpClientResponse.matchStatus({
+      "2xx": (response) => HttpClientResponse.schemaBodyJson(HubIdentitySummary)(response),
+      orElse: (response) =>
+        readErrorMessageFromResponse(response).pipe(
+          Effect.flatMap((message) => Effect.fail(new Error(message))),
+        ),
+    }),
+    HUB_CLI_LIVE_SERVER_TIMEOUT,
+  );
+
 const requestHubEnrollment = (origin: string, bearerToken: string) =>
   runLiveServerRequest(
     HttpClientRequest.post(`${origin}/api/hub/enrollment`).pipe(
@@ -1178,10 +1195,20 @@ const requestHubResume = (origin: string, bearerToken: string) =>
     HUB_CLI_LIVE_SERVER_TIMEOUT,
   );
 
-const formatHubStatus = (status: typeof HubConnectorStatus.Type, json: boolean): string => {
-  if (json) return emitJson(status);
+const formatHubStatus = (
+  status: typeof HubConnectorStatus.Type,
+  json: boolean,
+  identity?: typeof HubIdentitySummary.Type,
+): string => {
+  if (json) {
+    return emitJson({
+      ...status,
+      ...(identity?.fingerprint === undefined ? {} : { fingerprint: identity.fingerprint }),
+    });
+  }
   const details = [
     `Hub connector: ${status.state}`,
+    identity?.fingerprint === undefined ? undefined : `Fingerprint: ${identity.fingerprint}`,
     status.failure === undefined ? undefined : `Failure: ${status.failure}`,
     status.nextRetryAt === undefined ? undefined : `Next retry: ${status.nextRetryAt}`,
     status.state === "online" ? `Active channels: ${status.activeChannels}` : undefined,
@@ -1463,9 +1490,19 @@ const hubStatusCommand = Command.make("status", {
 }).pipe(
   Command.withDescription("Show bounded local Hub connector status."),
   Command.withHandler((flags) =>
-    runHubCommand(flags, (origin, token) => requestHubStatus(origin, token), {
-      quietLogs: flags.json,
-    }).pipe(Effect.flatMap((status) => Console.log(formatHubStatus(status, flags.json)))),
+    runHubCommand(
+      flags,
+      (origin, token) =>
+        Effect.all({
+          status: requestHubStatus(origin, token),
+          identity: requestHubIdentitySummary(origin, token),
+        }),
+      { quietLogs: flags.json },
+    ).pipe(
+      Effect.flatMap(({ status, identity }) =>
+        Console.log(formatHubStatus(status, flags.json, identity)),
+      ),
+    ),
   ),
 );
 

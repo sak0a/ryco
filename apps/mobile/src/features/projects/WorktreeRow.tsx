@@ -38,6 +38,7 @@ export function WorktreeRow(props: {
   readonly onRename?: () => void;
   readonly onArchive?: () => void;
   readonly onRestore?: () => void;
+  readonly onSourceControl?: () => void;
 }) {
   const iconColor = useThemeColor("--color-icon-muted");
   const title = props.worktree.title?.trim() || props.worktree.branch;
@@ -74,6 +75,9 @@ export function WorktreeRow(props: {
         ) : (
           <>
             {props.onNewTask ? <SmallAction label="New task" onPress={props.onNewTask} /> : null}
+            {props.onSourceControl ? (
+              <SmallAction label="Source Control" onPress={props.onSourceControl} />
+            ) : null}
             {props.onRename ? <SmallAction label="Rename" onPress={props.onRename} /> : null}
             {props.onArchive ? (
               <SmallAction label="Archive" destructive onPress={props.onArchive} />
