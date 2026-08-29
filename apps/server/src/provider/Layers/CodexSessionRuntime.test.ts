@@ -356,7 +356,7 @@ describe("openCodexThread", () => {
             url: "http://127.0.0.1:3100/device",
             http_headers: { Authorization: "Bearer device-token" },
           },
-          ryco: {
+          ryco_agent_control: {
             url: "http://127.0.0.1:3200/mcp",
             http_headers: { Authorization: "Bearer agent-control-token" },
             startup_timeout_sec: 10,
