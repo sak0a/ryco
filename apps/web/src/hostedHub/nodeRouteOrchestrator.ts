@@ -12,7 +12,11 @@ import {
   type RoutedHostedNode,
 } from "./nodeRoutes";
 import { HUB_ROUTE_TOP_SEGMENTS } from "./hubRoutes";
-import { hostedHubController, useHostedHubStore } from "./state";
+import {
+  HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
+  hostedHubController,
+  useHostedHubStore,
+} from "./state";
 import { hasActiveHostedWorkspaceCoordinator } from "./hostedConnectionCoordinator";
 import { retainHostedWorkspaceThreadScope } from "./hostedConnectionScopes";
 
@@ -119,7 +123,7 @@ function isLegacyDraftPathname(pathname: string): boolean {
 let restoreRequestedNodeId: string | null = null;
 /** Node id whose current selection was initiated by URL restore (not a click). */
 let restoreOriginNodeId: string | null = null;
-/** Node id the user just picked interactively (skips the presence fail-fast). */
+/** Node id the user just picked interactively (distinguishes failure ownership). */
 let interactiveNodeId: string | null = null;
 /** Guards compound transitions so reconcile observes only their final state. */
 let reconcileSuspended = false;
@@ -285,6 +289,22 @@ function reconcile(): void {
         clearHostedNodeRoute();
         void hostedHubController.returnToDirectory({ preserveTerminalSelection: true });
       });
+      return;
+    }
+    if (
+      restoreOriginNodeId === nodeId &&
+      state.transportStatus === "terminal-failure" &&
+      state.selectionStatus === "offline" &&
+      state.errorMessage === HOSTED_SESSION_SYNC_FAILURE_MESSAGE
+    ) {
+      // An authorized node can be transiently reported offline while a cold
+      // route is restoring. Let the singular hosted lifecycle own its bounded
+      // reconnect window; only after that lifecycle terminates do we return
+      // the URL-originated attempt to the directory with an offline notice.
+      runExclusive(() => {
+        failClosed(state.selectionStatus, "offline");
+        void hostedHubController.returnToDirectory();
+      });
     }
     return;
   }
@@ -312,15 +332,14 @@ function reconcile(): void {
     return;
   }
   const interactive = interactiveNodeId === nodeId;
-  if (!node.presence.online && !interactive) {
-    failClosed(state.selectionStatus, "offline");
-    return;
-  }
   replaceRouteScope(scopedThread);
   // Scoped thread demand is acquired above. The environment-keyed
-  // coordinator owns activation and eviction; the route orchestrator must not
-  // race it through the singular compatibility controller.
-  if (scopedThread && hasActiveHostedWorkspaceCoordinator()) return;
+  // coordinator owns normal activation and eviction. Its catalog eligibility
+  // intentionally excludes offline nodes, so a URL-originated offline restore
+  // enters the same singular controller lifecycle here instead of being
+  // stranded on the pre-selection surface.
+  const urlOfflineRestore = scopedThread !== null && !node.presence.online && !interactive;
+  if (scopedThread && hasActiveHostedWorkspaceCoordinator() && !urlOfflineRestore) return;
   if (restoreRequestedNodeId === nodeId) return;
   restoreRequestedNodeId = nodeId;
   restoreOriginNodeId = interactive ? null : nodeId;
