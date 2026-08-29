@@ -4,7 +4,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sak0a/ryco.git",
+    "url": "git+https://github.com/saka-gg/ryco.git",
     "directory": "apps/server"
   },
   "bin": {
