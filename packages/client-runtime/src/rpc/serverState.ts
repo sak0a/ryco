@@ -14,6 +14,7 @@ import { Atom } from "effect/unstable/reactivity";
 
 import type { WsRpcClient } from "./wsRpcClient.ts";
 import { appAtomRegistry, resetAppAtomRegistryForTests } from "./atomRegistry.ts";
+import { projectServerConfigEvent } from "./serverConfigProjection.ts";
 
 export type ServerConfigUpdateSource = ServerConfigStreamEvent["type"];
 
@@ -88,34 +89,15 @@ export function setServerConfigSnapshot(config: ServerConfig): void {
 }
 
 export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
-  switch (event.type) {
-    case "snapshot": {
-      setServerConfigSnapshot(event.config);
-      return;
-    }
-    case "keybindingsUpdated": {
-      const latestServerConfig = getServerConfig();
-      if (!latestServerConfig) {
-        return;
-      }
-      const nextConfig = {
-        ...latestServerConfig,
-        keybindings: event.payload.keybindings,
-        issues: event.payload.issues,
-      } satisfies ServerConfig;
-      resolveServerConfig(nextConfig);
-      emitServerConfigUpdated(toServerConfigUpdatedPayload(nextConfig), event.type);
-      return;
-    }
-    case "providerStatuses": {
-      applyProvidersUpdated(event.payload);
-      return;
-    }
-    case "settingsUpdated": {
-      applySettingsUpdated(event.payload.settings);
-      return;
-    }
+  const nextConfig = projectServerConfigEvent(getServerConfig(), event);
+  if (!nextConfig) {
+    return;
   }
+  resolveServerConfig(nextConfig);
+  if (event.type === "snapshot" || event.type === "providerStatuses") {
+    emitProvidersUpdated({ providers: nextConfig.providers });
+  }
+  emitServerConfigUpdated(toServerConfigUpdatedPayload(nextConfig), event.type);
 }
 
 export function applyProvidersUpdated(payload: ServerProviderUpdatedPayload): void {

@@ -1028,7 +1028,7 @@ export async function connectDesktopWorkspaceEnvironment(input: {
       kind: "saved",
       knownEnvironment: { ...knownEnvironment, environmentId: input.environmentId },
       client: createWsRpcClient(transport),
-      onConfigSnapshot: (config) => {
+      onConfigUpdated: (config) => {
         useSavedEnvironmentRuntimeStore.getState().ensure(input.environmentId);
         useSavedEnvironmentRuntimeStore.getState().patch(input.environmentId, {
           descriptor: config.environment,
@@ -1133,7 +1133,7 @@ async function connectSavedEnvironment(
           client,
         );
       },
-      onConfigSnapshot: (config) => {
+      onConfigUpdated: (config) => {
         initialConfigSnapshot.resolve(config);
         useSavedEnvironmentRuntimeStore.getState().patch(activeRecord.environmentId, {
           descriptor: config.environment,

@@ -931,6 +931,10 @@ describe("GeneralSettingsPanel observability", () => {
         environmentId,
         label: "Ryco Multi-node QA",
       },
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        enableProviderUpdateChecks: false,
+      },
     };
 
     mounted = await render(
@@ -957,10 +961,12 @@ describe("GeneralSettingsPanel observability", () => {
         ?.getAttribute("data-setting-scope"),
     ).toBe("Node: Ryco Multi-node QA");
 
-    await page.getByLabelText("Check providers for updates").click();
+    const providerUpdateSwitch = page.getByLabelText("Check providers for updates");
+    await expect.element(providerUpdateSwitch).not.toBeChecked();
+    await providerUpdateSwitch.click();
     await vi.waitFor(() => {
       expect(mockUpdateEnvironmentServerSettings).toHaveBeenCalledWith(environmentId, {
-        enableProviderUpdateChecks: !remoteConfig.settings.enableProviderUpdateChecks,
+        enableProviderUpdateChecks: true,
       });
     });
   });

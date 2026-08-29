@@ -190,7 +190,7 @@ export function createHostedPrimaryConnection(
     kind: "primary",
     knownEnvironment,
     client,
-    onConfigSnapshot: (config) => {
+    onConfigUpdated: (config) => {
       if (!acceptsEvent()) return;
       writeEnvironmentServerConfig(descriptor.environmentId, config);
     },

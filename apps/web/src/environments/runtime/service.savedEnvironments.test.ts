@@ -244,7 +244,7 @@ describe("saved environment startup", () => {
     mockCreateEnvironmentConnection.mockImplementation((input) => {
       if (input.kind === "saved") {
         queueMicrotask(() => {
-          input.onConfigSnapshot?.(configSnapshot);
+          input.onConfigUpdated?.(configSnapshot, "snapshot");
         });
       }
 

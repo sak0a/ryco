@@ -1,14 +1,17 @@
 import type {
   EnvironmentId,
+  ExecutionEnvironmentDescriptor,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamEvent,
   ServerConfig,
+  ServerConfigStreamEvent,
   ServerLifecycleWelcomePayload,
   TerminalEvent,
 } from "@ryco/contracts";
 
 import type { KnownEnvironment } from "../knownEnvironment.ts";
 import type { WsRpcClient } from "../rpc/index.ts";
+import { projectServerConfigEvent } from "../rpc/serverConfigProjection.ts";
 import { clearWsConnectionStatusForEnvironment } from "../rpc/wsConnectionState.ts";
 import { bindDeviceConnection } from "../state/device/runtime.ts";
 
@@ -51,7 +54,10 @@ export interface EnvironmentConnectionInput extends OrchestrationHandlers {
   readonly client: WsRpcClient;
   readonly pushSequenceMonitor: PushSequenceMonitor;
   readonly refreshMetadata?: () => Promise<void>;
-  readonly onConfigSnapshot?: (config: ServerConfig) => void;
+  readonly onConfigUpdated?: (
+    config: ServerConfig,
+    source: ServerConfigStreamEvent["type"],
+  ) => void;
   readonly onWelcome?: (payload: ServerLifecycleWelcomePayload) => void;
   readonly onResubscribe?: (environmentId: EnvironmentId) => void;
   readonly onShellError?: (environmentId: EnvironmentId) => void;
@@ -106,7 +112,8 @@ export function createEnvironmentConnection(
   let disposed = false;
   const bootstrapGate = createBootstrapGate();
   const shouldObserveLifecycle = input.kind === "saved" || input.onWelcome !== undefined;
-  const shouldObserveConfig = input.kind === "saved" || input.onConfigSnapshot !== undefined;
+  const shouldObserveConfig = input.kind === "saved" || input.onConfigUpdated !== undefined;
+  let observedConfig: ServerConfig | null = null;
   const observeEnvironmentIdentity = (nextEnvironmentId: EnvironmentId, source: string) => {
     if (environmentId !== nextEnvironmentId) {
       throw new Error(
@@ -114,26 +121,65 @@ export function createEnvironmentConnection(
       );
     }
   };
+  const normalizeObservedEnvironment = (
+    descriptor: ExecutionEnvironmentDescriptor,
+    source: string,
+  ): ExecutionEnvironmentDescriptor => {
+    if (input.knownEnvironment.source !== "hub-hosted") {
+      observeEnvironmentIdentity(descriptor.environmentId, source);
+      return descriptor;
+    }
+    // A Hub enrollment owns a stable, opaque environment id independently of
+    // the node's legacy local UUID. The authenticated relay target is the
+    // authority here; normalize inner descriptors so node-owned state remains
+    // keyed to that exact Hub environment without weakening direct connections.
+    return {
+      ...descriptor,
+      environmentId,
+      label: input.knownEnvironment.label,
+    };
+  };
 
   const unsubLifecycle = shouldObserveLifecycle
     ? input.client.server.subscribeLifecycle((event) => {
         if (event.type !== "welcome") return;
-        observeEnvironmentIdentity(
-          event.payload.environment.environmentId,
-          "server lifecycle welcome",
-        );
-        input.onWelcome?.(event.payload);
+        const payload = {
+          ...event.payload,
+          environment: normalizeObservedEnvironment(
+            event.payload.environment,
+            "server lifecycle welcome",
+          ),
+        };
+        input.onWelcome?.(payload);
       })
     : () => undefined;
   const unsubConfig = shouldObserveConfig
-    ? input.client.server.subscribeConfig((event) => {
-        if (event.type !== "snapshot") return;
-        observeEnvironmentIdentity(
-          event.config.environment.environmentId,
-          "server config snapshot",
-        );
-        input.onConfigSnapshot?.(event.config);
-      })
+    ? input.client.server.subscribeConfig(
+        (event) => {
+          const normalizedEvent =
+            event.type === "snapshot"
+              ? {
+                  ...event,
+                  config: {
+                    ...event.config,
+                    environment: normalizeObservedEnvironment(
+                      event.config.environment,
+                      "server config snapshot",
+                    ),
+                  },
+                }
+              : event;
+          const nextConfig = projectServerConfigEvent(observedConfig, normalizedEvent);
+          if (!nextConfig) return;
+          observedConfig = nextConfig;
+          input.onConfigUpdated?.(nextConfig, normalizedEvent.type);
+        },
+        {
+          onResubscribe: () => {
+            observedConfig = null;
+          },
+        },
+      )
     : () => undefined;
   const unsubShell = input.client.orchestration.subscribeShell(
     (item) => {
