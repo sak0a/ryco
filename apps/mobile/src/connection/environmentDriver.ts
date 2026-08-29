@@ -315,7 +315,7 @@ export function createMobileEnvironmentDriver(
         environmentId: record.environmentId,
       },
       client,
-      onConfigSnapshot: (config) => {
+      onConfigUpdated: (config) => {
         writeEnvironmentServerConfig(record.environmentId, config);
         patchRuntime(record.environmentId, {
           descriptor: config.environment,

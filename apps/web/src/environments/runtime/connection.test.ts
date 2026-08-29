@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@ryco/contracts";
+import { DEFAULT_SERVER_SETTINGS, EnvironmentId } from "@ryco/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createEnvironmentConnection } from "./connection";
@@ -11,10 +11,12 @@ function createTestClient() {
   const shellListeners = new Set<(event: any) => void>();
   let shellResubscribe: (() => void) | undefined;
   let shellError: (() => void) | undefined;
+  let configResubscribe: (() => void) | undefined;
 
   const client = {
     dispose: vi.fn(async () => undefined),
     reconnect: vi.fn(async () => {
+      configResubscribe?.();
       shellResubscribe?.();
     }),
     server: {
@@ -23,10 +25,18 @@ function createTestClient() {
           environmentId: EnvironmentId.make("env-1"),
         },
       })),
-      subscribeConfig: vi.fn((listener: (event: any) => void) => {
-        configListeners.add(listener);
-        return () => configListeners.delete(listener);
-      }),
+      subscribeConfig: vi.fn(
+        (listener: (event: any) => void, options?: { onResubscribe?: () => void }) => {
+          configListeners.add(listener);
+          configResubscribe = options?.onResubscribe;
+          return () => {
+            configListeners.delete(listener);
+            if (configResubscribe === options?.onResubscribe) {
+              configResubscribe = undefined;
+            }
+          };
+        },
+      ),
       subscribeLifecycle: vi.fn((listener: (event: any) => void) => {
         lifecycleListeners.add(listener);
         return () => lifecycleListeners.delete(listener);
@@ -128,16 +138,9 @@ function createTestClient() {
         });
       }
     },
-    emitConfigSnapshot: (environmentId: EnvironmentId) => {
+    emitConfigEvent: (event: any) => {
       for (const listener of configListeners) {
-        listener({
-          type: "snapshot",
-          config: {
-            environment: {
-              environmentId,
-            },
-          },
-        });
+        listener(event);
       }
     },
     emitShellSnapshot: (snapshotSequence: number) => {
@@ -265,7 +268,7 @@ describe("createEnvironmentConnection", () => {
 
   it("rejects welcome/config identity drift", async () => {
     const environmentId = EnvironmentId.make("env-1");
-    const { client, emitWelcome } = createTestClient();
+    const { client, emitWelcome, emitConfigEvent } = createTestClient();
 
     const connection = createEnvironmentConnection({
       kind: "saved",
@@ -288,6 +291,193 @@ describe("createEnvironmentConnection", () => {
 
     expect(() => emitWelcome(EnvironmentId.make("env-2"))).toThrow(
       "Environment connection env-1 changed identity to env-2 via server lifecycle welcome.",
+    );
+    expect(() =>
+      emitConfigEvent({
+        type: "snapshot",
+        config: { environment: { environmentId: EnvironmentId.make("env-2") } },
+      }),
+    ).toThrow("Environment connection env-1 changed identity to env-2 via server config snapshot.");
+
+    await connection.dispose();
+  });
+
+  it("normalizes Hub-relayed inner descriptors to the authenticated outer environment", async () => {
+    const environmentId = EnvironmentId.make("env-hub");
+    const innerEnvironmentId = EnvironmentId.make("legacy-local-uuid");
+    const { client, emitWelcome, emitConfigEvent } = createTestClient();
+    const onWelcome = vi.fn();
+    const onConfigUpdated = vi.fn();
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-hub",
+        label: "Hub QA node",
+        source: "hub-hosted",
+        target: {
+          httpBaseUrl: "http://relay.invalid",
+          wsBaseUrl: "ws://relay.invalid",
+        },
+        environmentId,
+      },
+      client,
+      resetShellProjection: vi.fn(),
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+      onWelcome,
+      onConfigUpdated,
+    });
+
+    emitWelcome(innerEnvironmentId);
+    emitConfigEvent({
+      type: "snapshot",
+      config: {
+        environment: { environmentId: innerEnvironmentId, label: "Inner machine name" },
+        settings: { ...DEFAULT_SERVER_SETTINGS, enableProviderUpdateChecks: false },
+        providers: [],
+        keybindings: {},
+        issues: [],
+      },
+    });
+
+    expect(onWelcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environment: expect.objectContaining({ environmentId, label: "Hub QA node" }),
+      }),
+    );
+    expect(onConfigUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environment: expect.objectContaining({ environmentId, label: "Hub QA node" }),
+        settings: expect.objectContaining({ enableProviderUpdateChecks: false }),
+      }),
+      "snapshot",
+    );
+
+    await connection.dispose();
+  });
+
+  it("projects incremental config events onto the selected environment snapshot", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitConfigEvent } = createTestClient();
+    const onConfigUpdated = vi.fn();
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      resetShellProjection: vi.fn(),
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+      onConfigUpdated,
+    });
+
+    emitConfigEvent({
+      type: "settingsUpdated",
+      payload: { settings: DEFAULT_SERVER_SETTINGS },
+    });
+    expect(onConfigUpdated).not.toHaveBeenCalled();
+
+    emitConfigEvent({
+      type: "snapshot",
+      config: {
+        environment: { environmentId },
+        settings: { ...DEFAULT_SERVER_SETTINGS, enableProviderUpdateChecks: true },
+        providers: [],
+        keybindings: {},
+        issues: [],
+      },
+    });
+    emitConfigEvent({
+      type: "settingsUpdated",
+      payload: {
+        settings: { ...DEFAULT_SERVER_SETTINGS, enableProviderUpdateChecks: false },
+      },
+    });
+
+    expect(onConfigUpdated).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({ enableProviderUpdateChecks: false }),
+      }),
+      "settingsUpdated",
+    );
+
+    await connection.dispose();
+  });
+
+  it("requires a fresh config snapshot after reconnect before applying increments", async () => {
+    const environmentId = EnvironmentId.make("env-1");
+    const { client, emitConfigEvent, emitShellSnapshot } = createTestClient();
+    const onConfigUpdated = vi.fn();
+    const connection = createEnvironmentConnection({
+      kind: "saved",
+      knownEnvironment: {
+        id: "env-1",
+        label: "Remote env",
+        source: "manual",
+        target: {
+          httpBaseUrl: "http://example.test",
+          wsBaseUrl: "ws://example.test",
+        },
+        environmentId,
+      },
+      client,
+      resetShellProjection: vi.fn(),
+      applyShellEvent: vi.fn(),
+      syncShellSnapshot: vi.fn(),
+      applyTerminalEvent: vi.fn(),
+      onConfigUpdated,
+    });
+    await connection.ensureBootstrapped();
+    emitConfigEvent({
+      type: "snapshot",
+      config: {
+        environment: { environmentId },
+        settings: DEFAULT_SERVER_SETTINGS,
+        providers: [],
+        keybindings: {},
+        issues: [],
+      },
+    });
+    expect(onConfigUpdated).toHaveBeenCalledOnce();
+
+    const reconnectPromise = connection.reconnect();
+    await Promise.resolve();
+    emitConfigEvent({
+      type: "settingsUpdated",
+      payload: {
+        settings: { ...DEFAULT_SERVER_SETTINGS, enableProviderUpdateChecks: false },
+      },
+    });
+    expect(onConfigUpdated).toHaveBeenCalledOnce();
+
+    emitConfigEvent({
+      type: "snapshot",
+      config: {
+        environment: { environmentId },
+        settings: { ...DEFAULT_SERVER_SETTINGS, enableProviderUpdateChecks: false },
+        providers: [],
+        keybindings: {},
+        issues: [],
+      },
+    });
+    emitShellSnapshot(2);
+    await reconnectPromise;
+
+    expect(onConfigUpdated).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({ enableProviderUpdateChecks: false }),
+      }),
+      "snapshot",
     );
 
     await connection.dispose();
