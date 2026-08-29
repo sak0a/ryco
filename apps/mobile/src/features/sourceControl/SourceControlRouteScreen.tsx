@@ -8,7 +8,7 @@ import { EnvironmentId, ProjectId, WorktreeId } from "@ryco/contracts";
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
-import { ensureEnvironmentApi } from "../../connection/environmentApi";
+import { ensureEnvironmentApi, readEnvironmentApi } from "../../connection/environmentApi";
 import { uuidv4 } from "../../lib/uuid";
 import { useHomeWorkspaceData } from "../../state/homeData";
 import { useHomeEnvironments } from "../home/useHomeEnvironments";
@@ -69,7 +69,7 @@ export function SourceControlRouteScreen(props: SourceControlRouteProps) {
   const [status, setStatus] = useState<VcsStatusResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const mutable = environment?.connectionState === "connected";
+  const mutable = environment?.mutationReady === true;
   const availability = useMemo(
     () => sourceControlActionAvailability(status, mutable),
     [mutable, status],
@@ -87,13 +87,18 @@ export function SourceControlRouteScreen(props: SourceControlRouteProps) {
 
   useEffect(() => {
     if (!environmentId || !cwd) return;
+    const api = readEnvironmentApi(environmentId);
+    if (!api) {
+      setError(`Node ${environment?.label ?? environmentId} is not connected.`);
+      return;
+    }
     void refresh();
-    return ensureEnvironmentApi(environmentId).vcs.onStatus({ cwd }, setStatus, {
+    return api.vcs.onStatus({ cwd }, setStatus, {
       onResubscribe: () => void refresh(),
     });
     // The exact environment and node-owned cwd define the subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, environmentId]);
+  }, [cwd, environment?.label, environmentId, mutable]);
 
   useEffect(() => {
     navigation.setOptions({ title: worktree?.title?.trim() || "Source Control" });
