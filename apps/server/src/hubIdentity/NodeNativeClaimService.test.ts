@@ -57,7 +57,12 @@ function stateStore(initial?: Partial<LocalHubIdentityState>): LocalHubIdentityS
     current: () => value,
     readOrCreate: async () => value,
     update: async (change) => {
-      value = change(value);
+      const previous = value;
+      const proposed = change(previous);
+      if (proposed.revision !== previous.revision + 1) {
+        throw new Error("state update must advance the revision");
+      }
+      value = proposed;
       return value;
     },
     reset: async () => value,
@@ -161,6 +166,7 @@ describe("NodeNativeClaimService", () => {
         result,
       }),
     ).resolves.toMatchObject({ nodeId: result.node.id });
+    expect(states.current().revision).toBe(3);
   });
 
   it("fails closed on another origin, stale claims, or a changed Hub result", async () => {

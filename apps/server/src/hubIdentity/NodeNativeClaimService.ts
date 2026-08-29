@@ -296,7 +296,14 @@ export function makeNodeNativeClaimService(options: {
             ) {
               return claimError("native_node_claim_conflict");
             }
-            return current;
+            // `LocalHubIdentityStateStore.update` is a durable transaction and
+            // requires every accepted proposal to advance the revision. A
+            // repeated native claim is semantically idempotent, but returning
+            // `current` here makes the real store reject that retry after the
+            // Hub has already confirmed the same active node. Persist an exact
+            // revision-only acknowledgement so Desktop can continue to its
+            // local trusted introduction.
+            return { ...current, revision: current.revision + 1 };
           }
           const pending = nativePending(current, active.hubOrigin);
           if (pending.keySecretName !== active.activeKeySecretName) {

@@ -176,7 +176,14 @@ export const desktopNativeNodeClaimCommitRouteLayer = HttpRouter.add(
     // The connector may already be parked in `enrolling` from startup. The
     // native claim committed an active identity out-of-band, so wake that same
     // state machine instead of waiting for an app restart or a user retry.
-    yield* Effect.promise(() => connector.resume());
+    //
+    // The durable commit above is the transaction this endpoint acknowledges.
+    // A concurrent relay teardown or reconnect can make this opportunistic wake
+    // fail even though the identity is active. Do not turn that committed state
+    // into a 503: the Desktop would retry the already-finished claim forever and
+    // never continue to its local trusted introduction. The connector owns its
+    // own bounded reconnect lifecycle, so a failed wake is safe to leave there.
+    yield* Effect.promise(() => connector.resume().catch(() => undefined));
     return HttpServerResponse.jsonUnsafe(
       {
         protocolVersion: DESKTOP_NATIVE_NODE_CLAIM_PROTOCOL_VERSION,
