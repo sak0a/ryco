@@ -1,9 +1,15 @@
 import { DownloadIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { type ProviderDriverKind, type ProviderInstanceId } from "@ryco/contracts";
+import {
+  EnvironmentId,
+  type ProviderDriverKind,
+  type ProviderInstanceId,
+  type ServerProvider,
+} from "@ryco/contracts";
 
 import { ensureEnvironmentApi } from "../environmentApi";
 import { usePrimaryEnvironmentDescriptor } from "../environments/primary";
+import { useSavedEnvironmentRuntimeStore } from "../environments/runtime";
 import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
 import { useServerProviders } from "../rpc/serverState";
 import { useSettingsDialogStore } from "../settingsDialogStore";
@@ -27,7 +33,11 @@ const seenProviderUpdateNotificationKeys = new Set<string>();
 type ProviderUpdateToastId = ReturnType<typeof toastManager.add>;
 
 type ActiveProviderUpdateToast =
-  | { readonly kind: "prompt"; readonly key: string; readonly toastId: ProviderUpdateToastId }
+  | {
+      readonly kind: "prompt";
+      readonly key: string;
+      readonly toastId: ProviderUpdateToastId;
+    }
   | {
       readonly kind: "update";
       readonly key: string;
@@ -105,10 +115,17 @@ function isTerminalProviderUpdateToastView(view: ProviderUpdateToastView) {
   return view.phase === "failed" || view.phase === "unchanged" || view.phase === "succeeded";
 }
 
-export function ProviderUpdateLaunchNotification() {
+function ProviderUpdateLaunchNotificationForEnvironment({
+  environment,
+  providers,
+}: {
+  readonly environment: {
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+  };
+  readonly providers: ReadonlyArray<ServerProvider>;
+}) {
   const openSettingsDialog = useSettingsDialogStore((s) => s.openSettings);
-  const environment = usePrimaryEnvironmentDescriptor();
-  const providers = useServerProviders();
   const activeToastRef = useRef<ActiveProviderUpdateToast | null>(null);
   const { dismissedNotificationKeys, dismissNotificationKey } =
     useDismissedProviderUpdateNotificationKeys();
@@ -116,17 +133,16 @@ export function ProviderUpdateLaunchNotification() {
   const updateProviders = useMemo(() => collectProviderUpdateCandidates(providers), [providers]);
   const notificationKey = useMemo(
     () =>
-      providerUpdateNotificationKey(
-        updateProviders,
-        environment ? { environmentId: environment.environmentId } : undefined,
-      ),
+      providerUpdateNotificationKey(updateProviders, {
+        environmentId: environment.environmentId,
+      }),
     [environment, updateProviders],
   );
   const origin = useMemo(
-    () =>
-      environment
-        ? { environmentId: environment.environmentId, nodeLabel: environment.label }
-        : null,
+    () => ({
+      environmentId: environment.environmentId,
+      nodeLabel: environment.label,
+    }),
     [environment],
   );
   const oneClickProviders = useMemo(
@@ -146,9 +162,9 @@ export function ProviderUpdateLaunchNotification() {
       if (activeToast && (toastId === undefined || activeToast.toastId === toastId)) {
         activeToastRef.current = null;
       }
-      openSettingsDialog("providers");
+      openSettingsDialog("providers", environment.environmentId);
     },
-    [openSettingsDialog],
+    [environment.environmentId, openSettingsDialog],
   );
 
   useEffect(() => {
@@ -332,4 +348,49 @@ export function ProviderUpdateLaunchNotification() {
   ]);
 
   return null;
+}
+
+export function ProviderUpdateLaunchNotification() {
+  const primaryEnvironment = usePrimaryEnvironmentDescriptor();
+  const primaryProviders = useServerProviders();
+  const savedRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  const remoteEnvironments = Object.entries(savedRuntimeById).flatMap(
+    ([rawEnvironmentId, runtime]) => {
+      if (
+        runtime.connectionState !== "connected" ||
+        !runtime.serverConfig ||
+        rawEnvironmentId === primaryEnvironment?.environmentId
+      ) {
+        return [];
+      }
+      const environmentId = EnvironmentId.make(rawEnvironmentId);
+      return [
+        {
+          environmentId,
+          label:
+            runtime.descriptor?.label ?? runtime.serverConfig.environment.label ?? "Connected node",
+          providers: runtime.serverConfig.providers,
+        },
+      ];
+    },
+  );
+
+  return (
+    <>
+      {primaryEnvironment ? (
+        <ProviderUpdateLaunchNotificationForEnvironment
+          key={primaryEnvironment.environmentId}
+          environment={primaryEnvironment}
+          providers={primaryProviders}
+        />
+      ) : null}
+      {remoteEnvironments.map((environment) => (
+        <ProviderUpdateLaunchNotificationForEnvironment
+          key={environment.environmentId}
+          environment={environment}
+          providers={environment.providers}
+        />
+      ))}
+    </>
+  );
 }

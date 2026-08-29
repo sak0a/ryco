@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "~/rpc/queryClient";
 import { invalidateAtlassian, useAtlassianConnections } from "~/rpc/useAtlassian";
 import type {
   AtlassianConnectionSummary,
+  EnvironmentId,
   SourceControlProviderKind,
   SourceControlDiscoveryResult,
   SourceControlProviderAuth,
@@ -48,7 +49,9 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Spinner } from "../ui/spinner";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-import { getPrimaryEnvironmentConnection } from "~/environments/runtime";
+import { readEnvironmentConnection } from "~/environments/runtime";
+import { usePrimaryEnvironmentId } from "~/environments/primary";
+import { useSettingsTarget } from "../../settingsTarget";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -339,7 +342,11 @@ function AtlassianProductIcon(props: {
   return <AtlassianJiraIcon className={props.className} aria-hidden />;
 }
 
-function AtlassianConfiguration() {
+function AtlassianConfiguration({
+  environmentId,
+}: {
+  readonly environmentId: EnvironmentId | null;
+}) {
   const queryClient = useQueryClient();
   const [bitbucketLabel, setBitbucketLabel] = useState("Bitbucket");
   const [bitbucketEmail, setBitbucketEmail] = useState("");
@@ -349,9 +356,8 @@ function AtlassianConfiguration() {
   const [jiraSiteUrl, setJiraSiteUrl] = useState("");
   const [jiraToken, setJiraToken] = useState("");
 
-  const connection = getPrimaryEnvironmentConnection();
+  const connection = environmentId ? readEnvironmentConnection(environmentId) : null;
   const client = connection?.client ?? null;
-  const environmentId = connection?.environmentId ?? null;
   const connectionsQuery = useAtlassianConnections({
     environmentId,
     enabled: client !== null,
@@ -372,8 +378,10 @@ function AtlassianConfiguration() {
       setBitbucketEmail("");
       setBitbucketToken("");
       invalidateAtlassian({ environmentId });
-      void queryClient.invalidateQueries({ queryKey: atlassianConnectionQueryKey });
-      void refreshSourceControlDiscovery();
+      void queryClient.invalidateQueries({
+        queryKey: atlassianConnectionQueryKey,
+      });
+      void refreshSourceControlDiscovery({ environmentId });
       toastManager.add(
         stackedThreadToast({
           type: "success",
@@ -410,7 +418,9 @@ function AtlassianConfiguration() {
       setJiraSiteUrl("");
       setJiraToken("");
       invalidateAtlassian({ environmentId });
-      void queryClient.invalidateQueries({ queryKey: atlassianConnectionQueryKey });
+      void queryClient.invalidateQueries({
+        queryKey: atlassianConnectionQueryKey,
+      });
       toastManager.add(
         stackedThreadToast({
           type: "success",
@@ -437,8 +447,10 @@ function AtlassianConfiguration() {
     },
     onSuccess: () => {
       invalidateAtlassian({ environmentId });
-      void queryClient.invalidateQueries({ queryKey: atlassianConnectionQueryKey });
-      void refreshSourceControlDiscovery();
+      void queryClient.invalidateQueries({
+        queryKey: atlassianConnectionQueryKey,
+      });
+      void refreshSourceControlDiscovery({ environmentId });
     },
     onError: (error) => {
       toastManager.add(
@@ -683,12 +695,15 @@ function AtlassianConfiguration() {
 }
 
 export function SourceControlSettingsPanel() {
-  const discovery = useSourceControlDiscovery();
+  const settingsTarget = useSettingsTarget();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = settingsTarget?.environmentId ?? primaryEnvironmentId;
+  const discovery = useSourceControlDiscovery({ environmentId });
 
   const result = discovery.data ?? EMPTY_DISCOVERY_RESULT;
   const isInitialScanPending = discovery.isPending && discovery.data === null;
   const handleScan = () => {
-    void refreshSourceControlDiscovery();
+    void refreshSourceControlDiscovery({ environmentId });
   };
   const scanButton = (
     <Tooltip>
@@ -745,7 +760,7 @@ export function SourceControlSettingsPanel() {
               </Button>
             </EmptyContent>
           </Empty>
-          <AtlassianConfiguration />
+          <AtlassianConfiguration environmentId={environmentId} />
         </SettingsSection>
       )}
 
@@ -774,7 +789,7 @@ export function SourceControlSettingsPanel() {
               </p>
             </div>
           )}
-          <AtlassianConfiguration />
+          <AtlassianConfiguration environmentId={environmentId} />
         </SettingsSection>
       ) : null}
     </SettingsPageContainer>

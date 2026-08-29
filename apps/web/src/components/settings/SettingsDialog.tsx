@@ -37,6 +37,17 @@ import { ArchivedThreadsPanel, GeneralSettingsPanel, useSettingsRestore } from "
 import { isElectron, isHostedHubMode } from "../../env";
 import { useHostedHubStore } from "../../hostedHub/state";
 import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
+import {
+  useSavedEnvironmentRegistryStore,
+  useSavedEnvironmentRuntimeStore,
+} from "../../environments/runtime";
+import { useServerConfig } from "../../rpc/serverState";
+import { useStore } from "../../store";
+import {
+  resolveSettingsTargetEnvironmentId,
+  SettingsTargetProvider,
+  type SettingsTarget,
+} from "../../settingsTarget";
 
 interface NavItem {
   id: SettingsSectionId;
@@ -107,7 +118,9 @@ const SECTIONS_WITH_RESTORE: ReadonlySet<SettingsSectionId> = new Set([
 ]);
 
 const LazyAccountSettingsPanel = lazy(() =>
-  import("./AccountSettings").then((module) => ({ default: module.AccountSettingsPanel })),
+  import("./AccountSettings").then((module) => ({
+    default: module.AccountSettingsPanel,
+  })),
 );
 const LazyProvidersSettingsPanel = lazy(() =>
   import("./ProvidersSettingsPanel").then((module) => ({
@@ -115,7 +128,9 @@ const LazyProvidersSettingsPanel = lazy(() =>
   })),
 );
 const LazyAiFocusSettings = lazy(() =>
-  import("./AiFocusSettings").then((module) => ({ default: module.AiFocusSettings })),
+  import("./AiFocusSettings").then((module) => ({
+    default: module.AiFocusSettings,
+  })),
 );
 const LazyOpinionatedPluginsSettingsPanel = lazy(() =>
   import("./OpinionatedPluginsSettings").then((module) => ({
@@ -128,7 +143,9 @@ const LazyIntegrationsSettings = lazy(() =>
   })),
 );
 const LazyAppearanceSettingsPanel = lazy(() =>
-  import("./AppearanceSettings").then((module) => ({ default: module.AppearanceSettingsPanel })),
+  import("./AppearanceSettings").then((module) => ({
+    default: module.AppearanceSettingsPanel,
+  })),
 );
 const LazyKeybindingsSettingsPanel = lazy(() =>
   import("./KeybindingsSettings").then((module) => ({
@@ -141,13 +158,19 @@ const LazySourceControlSettingsPanel = lazy(() =>
   })),
 );
 const LazyConnectionsSettings = lazy(() =>
-  import("./ConnectionsSettings").then((module) => ({ default: module.ConnectionsSettings })),
+  import("./ConnectionsSettings").then((module) => ({
+    default: module.ConnectionsSettings,
+  })),
 );
 const LazyNodeSecuritySettings = lazy(() =>
-  import("./NodeSecuritySettings").then((module) => ({ default: module.NodeSecuritySettings })),
+  import("./NodeSecuritySettings").then((module) => ({
+    default: module.NodeSecuritySettings,
+  })),
 );
 const LazyDiagnosticsSettings = lazy(() =>
-  import("./DiagnosticsSettings").then((module) => ({ default: module.DiagnosticsSettings })),
+  import("./DiagnosticsSettings").then((module) => ({
+    default: module.DiagnosticsSettings,
+  })),
 );
 const LazyStatisticsPanel = lazy(() =>
   import("./StatisticsSettingsLink").then((module) => ({
@@ -205,11 +228,47 @@ function SectionPanel({
 
 export function SettingsDialog() {
   const navigate = useNavigate();
-  const environment = usePrimaryEnvironmentDescriptor();
+  const primaryEnvironment = usePrimaryEnvironmentDescriptor();
+  const primaryServerConfig = useServerConfig();
+  const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const open = useSettingsDialogStore((s) => s.open);
   const section = useSettingsDialogStore((s) => s.section);
+  const requestedEnvironmentId = useSettingsDialogStore((s) => s.targetEnvironmentId);
   const closeSettings = useSettingsDialogStore((s) => s.closeSettings);
   const setSection = useSettingsDialogStore((s) => s.setSection);
+  const targetEnvironmentId = resolveSettingsTargetEnvironmentId({
+    requestedEnvironmentId,
+    activeEnvironmentId,
+    primaryEnvironmentId: primaryEnvironment?.environmentId ?? null,
+  });
+  const savedEnvironment = useSavedEnvironmentRegistryStore((state) =>
+    targetEnvironmentId ? (state.byId[targetEnvironmentId] ?? null) : null,
+  );
+  const savedEnvironmentRuntime = useSavedEnvironmentRuntimeStore((state) =>
+    targetEnvironmentId ? (state.byId[targetEnvironmentId] ?? null) : null,
+  );
+  const targetIsPrimary =
+    targetEnvironmentId !== null && targetEnvironmentId === primaryEnvironment?.environmentId;
+  const targetServerConfig = targetIsPrimary
+    ? primaryServerConfig
+    : (savedEnvironmentRuntime?.serverConfig ?? null);
+  const targetNodeLabel = targetIsPrimary
+    ? (primaryEnvironment?.label ?? targetServerConfig?.environment.label ?? "Current node")
+    : (savedEnvironmentRuntime?.descriptor?.label ??
+      targetServerConfig?.environment.label ??
+      savedEnvironment?.label ??
+      "Selected node");
+  const settingsTarget: SettingsTarget | null = targetEnvironmentId
+    ? {
+        environmentId: targetEnvironmentId,
+        nodeLabel: targetNodeLabel,
+        serverConfig: targetServerConfig,
+        primary: targetIsPrimary,
+        connected: targetIsPrimary
+          ? targetServerConfig !== null
+          : savedEnvironmentRuntime?.connectionState === "connected",
+      }
+    : null;
   const hostedRole = useHostedHubStore((state) => state.effectiveRole);
   const hostedDirectoryStatus = useHostedHubStore((state) => state.directoryStatus);
   const hostedTransportStatus = useHostedHubStore((state) => state.transportStatus);
@@ -225,7 +284,7 @@ export function SettingsDialog() {
   const activeScope = settingsSectionScope(effectiveSection);
   const scopeLabel = settingsScopeLabel(activeScope, {
     nativeClient: isElectron,
-    nodeLabel: environment?.label ?? null,
+    nodeLabel: settingsTarget?.nodeLabel ?? null,
   });
 
   useEffect(() => {
@@ -271,137 +330,143 @@ export function SettingsDialog() {
         if (!nextOpen) closeSettings();
       }}
     >
-      <DialogPopup
-        className="project-glass-surface h-[min(88dvh,880px)] max-w-[1180px] overflow-hidden p-0"
-        bottomStickOnMobile={false}
-        showCloseButton={true}
-        surface="glass"
-      >
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-5">
-          <div className="flex min-w-0 items-center gap-4">
-            <div className="flex shrink-0 items-baseline gap-2">
-              <DialogTitle className="text-base font-semibold">Settings</DialogTitle>
-              <span
-                data-testid="settings-scope-label"
-                className="max-w-48 truncate text-xs text-muted-foreground"
-              >
-                {scopeLabel}
-              </span>
-            </div>
-            <div className="relative w-72 max-w-[40vw]">
-              <SearchIcon
-                aria-hidden
-                className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/60"
-              />
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(event) => {
-                  setSearchTargetId(null);
-                  setSearchQuery(event.target.value);
-                }}
-                placeholder="Search settings…"
-                aria-label="Search settings"
-                className="h-8 w-full rounded-md border border-input bg-muted/40 pr-3 pl-8 text-[13px] outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
-              />
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2 pr-9">
-            {showRestore ? <RestoreDefaultsButton onRestored={handleRestored} /> : null}
-          </div>
-        </header>
-
-        <div className="flex min-h-0 flex-1 flex-row">
-          <nav className="relative isolate flex w-12 shrink-0 flex-col gap-1 border-r border-border p-2 sm:w-48">
-            <span
-              className="pointer-events-none absolute top-2 right-2 left-2 z-0 h-9 rounded-md bg-accent transition-transform duration-[240ms] ease-out"
-              style={{ transform: `translateY(${activeSectionIndex * 2.5}rem)` }}
-              aria-hidden
-            />
-            {visibleNavItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = effectiveSection === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setSearchTargetId(null);
-                    setSection(item.id);
-                  }}
-                  className={cn(
-                    "relative z-10 flex h-9 items-center gap-2.5 rounded-md px-2 text-left text-[13px] outline-hidden ring-ring transition-colors duration-150 focus-visible:ring-2",
-                    isActive
-                      ? "font-medium text-foreground"
-                      : "text-muted-foreground/70 hover:text-foreground/80",
-                  )}
-                  aria-label={item.label}
-                  aria-current={isActive ? "page" : undefined}
+      <SettingsTargetProvider value={settingsTarget}>
+        <DialogPopup
+          className="project-glass-surface h-[min(88dvh,880px)] max-w-[1180px] overflow-hidden p-0"
+          bottomStickOnMobile={false}
+          showCloseButton={true}
+          surface="glass"
+        >
+          <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-5">
+            <div className="flex min-w-0 items-center gap-4">
+              <div className="flex shrink-0 items-baseline gap-2">
+                <DialogTitle className="text-base font-semibold">Settings</DialogTitle>
+                <span
+                  data-testid="settings-scope-label"
+                  className="max-w-48 truncate text-xs text-muted-foreground"
                 >
-                  <Icon
-                    className={cn(
-                      "size-4 shrink-0",
-                      isActive ? "text-foreground" : "text-muted-foreground/60",
-                    )}
-                  />
-                  <span className="hidden truncate sm:inline">{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
+                  {scopeLabel}
+                </span>
+              </div>
+              <div className="relative w-72 max-w-[40vw]">
+                <SearchIcon
+                  aria-hidden
+                  className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/60"
+                />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => {
+                    setSearchTargetId(null);
+                    setSearchQuery(event.target.value);
+                  }}
+                  placeholder="Search settings…"
+                  aria-label="Search settings"
+                  className="h-8 w-full rounded-md border border-input bg-muted/40 pr-3 pl-8 text-[13px] outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+                />
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 pr-9">
+              {showRestore ? <RestoreDefaultsButton onRestored={handleRestored} /> : null}
+            </div>
+          </header>
 
-          <ScrollArea className="min-h-0 min-w-0 flex-1">
-            {normalizedQuery.length > 0 ? (
-              <div className="p-4">
-                <div className="flex flex-col gap-0.5 rounded-xl border border-border bg-card p-1.5 shadow-sm/4">
-                  {searchResults.length === 0 ? (
-                    <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-                      No settings match “{searchQuery.trim()}”.
-                    </p>
-                  ) : (
-                    searchResults.map((entry) => {
-                      const sectionLabel = visibleNavItems.find(
-                        (item) => item.id === entry.section,
-                      )?.label;
-                      return (
-                        <button
-                          key={`${entry.section}:${entry.title}`}
-                          type="button"
-                          onClick={() => {
-                            if (entry.section === "statistics") {
-                              closeSettings();
-                              void navigate({ to: "/statistics" });
-                              return;
-                            }
-                            setSearchTargetId(entry.targetId ?? null);
-                            setSection(entry.section);
-                            setSearchQuery("");
-                          }}
-                          className="flex flex-col gap-0.5 rounded-md px-3 py-2.5 text-left outline-hidden ring-ring transition-colors hover:bg-accent focus-visible:ring-2"
-                        >
-                          <span className="flex items-baseline gap-2">
-                            <span className="text-sm font-medium">{entry.title}</span>
-                            {sectionLabel ? (
-                              <span className="text-[11px] text-muted-foreground/70">
-                                {sectionLabel}
-                              </span>
-                            ) : null}
-                          </span>
-                          <span className="text-xs text-muted-foreground">{entry.description}</span>
-                        </button>
-                      );
-                    })
-                  )}
+          <div className="flex min-h-0 flex-1 flex-row">
+            <nav className="relative isolate flex w-12 shrink-0 flex-col gap-1 border-r border-border p-2 sm:w-48">
+              <span
+                className="pointer-events-none absolute top-2 right-2 left-2 z-0 h-9 rounded-md bg-accent transition-transform duration-[240ms] ease-out"
+                style={{
+                  transform: `translateY(${activeSectionIndex * 2.5}rem)`,
+                }}
+                aria-hidden
+              />
+              {visibleNavItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = effectiveSection === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setSearchTargetId(null);
+                      setSection(item.id);
+                    }}
+                    className={cn(
+                      "relative z-10 flex h-9 items-center gap-2.5 rounded-md px-2 text-left text-[13px] outline-hidden ring-ring transition-colors duration-150 focus-visible:ring-2",
+                      isActive
+                        ? "font-medium text-foreground"
+                        : "text-muted-foreground/70 hover:text-foreground/80",
+                    )}
+                    aria-label={item.label}
+                    aria-current={isActive ? "page" : undefined}
+                  >
+                    <Icon
+                      className={cn(
+                        "size-4 shrink-0",
+                        isActive ? "text-foreground" : "text-muted-foreground/60",
+                      )}
+                    />
+                    <span className="hidden truncate sm:inline">{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            <ScrollArea className="min-h-0 min-w-0 flex-1">
+              {normalizedQuery.length > 0 ? (
+                <div className="p-4">
+                  <div className="flex flex-col gap-0.5 rounded-xl border border-border bg-card p-1.5 shadow-sm/4">
+                    {searchResults.length === 0 ? (
+                      <p className="px-2 py-8 text-center text-sm text-muted-foreground">
+                        No settings match “{searchQuery.trim()}”.
+                      </p>
+                    ) : (
+                      searchResults.map((entry) => {
+                        const sectionLabel = visibleNavItems.find(
+                          (item) => item.id === entry.section,
+                        )?.label;
+                        return (
+                          <button
+                            key={`${entry.section}:${entry.title}`}
+                            type="button"
+                            onClick={() => {
+                              if (entry.section === "statistics") {
+                                closeSettings();
+                                void navigate({ to: "/statistics" });
+                                return;
+                              }
+                              setSearchTargetId(entry.targetId ?? null);
+                              setSection(entry.section);
+                              setSearchQuery("");
+                            }}
+                            className="flex flex-col gap-0.5 rounded-md px-3 py-2.5 text-left outline-hidden ring-ring transition-colors hover:bg-accent focus-visible:ring-2"
+                          >
+                            <span className="flex items-baseline gap-2">
+                              <span className="text-sm font-medium">{entry.title}</span>
+                              {sectionLabel ? (
+                                <span className="text-[11px] text-muted-foreground/70">
+                                  {sectionLabel}
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {entry.description}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div key={restoreSignal} className="flex flex-col">
-                <SectionPanel section={effectiveSection} searchTargetId={searchTargetId} />
-              </div>
-            )}
-          </ScrollArea>
-        </div>
-      </DialogPopup>
+              ) : (
+                <div key={restoreSignal} className="flex flex-col">
+                  <SectionPanel section={effectiveSection} searchTargetId={searchTargetId} />
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        </DialogPopup>
+      </SettingsTargetProvider>
     </Dialog>
   );
 }

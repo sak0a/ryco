@@ -423,7 +423,11 @@ export interface DesktopWorkspaceConnectionCommand {
 /** Opaque main-owned relay transport. Payloads are authorized RPC bytes, never credentials. */
 export type DesktopWorkspaceTransportEvent =
   | { readonly type: "open"; readonly transportId: string }
-  | { readonly type: "message"; readonly transportId: string; readonly data: Uint8Array }
+  | {
+      readonly type: "message";
+      readonly transportId: string;
+      readonly data: Uint8Array;
+    }
   | { readonly type: "error"; readonly transportId: string }
   | {
       readonly type: "close";
@@ -590,7 +594,10 @@ export interface DesktopBridge {
   retainDesktopWorkspaceScope?: (input: {
     readonly environmentId: EnvironmentId;
     readonly scope: DesktopWorkspaceScopeProjection;
-  }) => Promise<{ readonly leaseId: string; readonly state: DesktopWorkspaceStateProjection }>;
+  }) => Promise<{
+    readonly leaseId: string;
+    readonly state: DesktopWorkspaceStateProjection;
+  }>;
   renewDesktopWorkspaceScope?: (leaseId: string) => Promise<DesktopWorkspaceStateProjection>;
   releaseDesktopWorkspaceScope?: (leaseId: string) => Promise<DesktopWorkspaceStateProjection>;
   setDesktopWorkspaceBackgrounded?: (
@@ -767,6 +774,21 @@ export interface EnvironmentApi {
     updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdatedPayload>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+    upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
+    getDiagnosticsSnapshot: () => Promise<DiagnosticsSnapshot>;
+    discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
+    listOpinionatedPlugins: () => Promise<OpinionatedPluginListResult>;
+    checkOpinionatedPlugins: (
+      input?: OpinionatedPluginCheckInput,
+    ) => Promise<OpinionatedPluginStatusResult>;
+    installOpinionatedPlugin: (
+      input: OpinionatedPluginInstallInput,
+    ) => Promise<OpinionatedPluginInstallResult>;
+  };
+  keybindings?: {
+    replaceCustom: (
+      input: KeybindingsReplaceCustomInput,
+    ) => Promise<KeybindingsReplaceCustomResult>;
   };
   device?: {
     list: (input?: DeviceListInput) => Promise<DeviceListResult>;
@@ -847,7 +869,9 @@ export interface EnvironmentApi {
   git: {
     runStackedAction: (
       input: GitRunStackedActionInput,
-      options?: { readonly onProgress?: (event: GitActionProgressEvent) => void },
+      options?: {
+        readonly onProgress?: (event: GitActionProgressEvent) => void;
+      },
     ) => Promise<GitRunStackedActionResult>;
     resolvePullRequest: (input: GitPullRequestRefInput) => Promise<GitResolvePullRequestResult>;
     preparePullRequestThread: (

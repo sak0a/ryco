@@ -9,7 +9,20 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       updateProvider: rpcClient.server.updateProvider,
       getSettings: rpcClient.server.getSettings,
       updateSettings: rpcClient.server.updateSettings,
+      upsertKeybinding: rpcClient.server.upsertKeybinding,
+      getDiagnosticsSnapshot: rpcClient.server.getDiagnosticsSnapshot,
+      discoverSourceControl: rpcClient.server.discoverSourceControl,
+      listOpinionatedPlugins: rpcClient.server.listOpinionatedPlugins,
+      checkOpinionatedPlugins: rpcClient.server.checkOpinionatedPlugins,
+      installOpinionatedPlugin: rpcClient.server.installOpinionatedPlugin,
     },
+    ...(rpcClient.keybindings
+      ? {
+          keybindings: {
+            replaceCustom: rpcClient.keybindings.replaceCustom,
+          },
+        }
+      : {}),
     ...(rpcClient.device ? { device: rpcClient.device } : {}),
     terminal: {
       open: (input) => rpcClient.terminal.open(input as never),

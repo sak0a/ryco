@@ -21,6 +21,8 @@ import type {
 } from "@ryco/contracts";
 import { useCallback, useRef } from "react";
 
+import { useSettingsTarget } from "../settingsTarget";
+
 export * from "@ryco/client-runtime/rpc";
 
 function useLatestAtomSubscription<A>(
@@ -41,31 +43,33 @@ function useLatestAtomSubscription<A>(
 }
 
 export function useServerConfig(): ServerConfig | null {
-  return useAtomValue(serverConfigAtom);
+  const primaryConfig = useAtomValue(serverConfigAtom);
+  const target = useSettingsTarget();
+  return target ? target.serverConfig : primaryConfig;
 }
 
 export function useServerSettings(): ServerSettings {
-  return useAtomValue(serverConfigAtom, selectSettings);
+  return selectSettings(useServerConfig());
 }
 
 export function useServerProviders(): ReadonlyArray<ServerProvider> {
-  return useAtomValue(serverConfigAtom, selectProviders);
+  return selectProviders(useServerConfig());
 }
 
 export function useServerKeybindings(): ServerConfig["keybindings"] {
-  return useAtomValue(serverConfigAtom, selectKeybindings);
+  return selectKeybindings(useServerConfig());
 }
 
 export function useServerAvailableEditors(): ReadonlyArray<EditorId> {
-  return useAtomValue(serverConfigAtom, selectAvailableEditors);
+  return selectAvailableEditors(useServerConfig());
 }
 
 export function useServerKeybindingsConfigPath(): string | null {
-  return useAtomValue(serverConfigAtom, selectKeybindingsConfigPath);
+  return selectKeybindingsConfigPath(useServerConfig());
 }
 
 export function useServerObservability(): ServerConfig["observability"] | null {
-  return useAtomValue(serverConfigAtom, selectObservability);
+  return selectObservability(useServerConfig());
 }
 
 export function useServerWelcomeSubscription(

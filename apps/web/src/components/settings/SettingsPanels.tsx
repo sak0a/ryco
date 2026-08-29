@@ -28,7 +28,6 @@ import {
 } from "../../editorPreferences";
 import { isElectron } from "../../env";
 import { useHostedRpcCapability } from "../../hostedHub/capabilities";
-import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
 import { useLongPress } from "../../hooks/useLongPress";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useTheme } from "../../hooks/useTheme";
@@ -62,6 +61,7 @@ import { RycoLetterMark } from "../RycoLetterMark";
 import { useServerAvailableEditors, useServerObservability } from "../../rpc/serverState";
 import { EDITOR_ICONS, getEditorLabel } from "./SettingsPanels.editor";
 import { settingsScopeLabel } from "./settingsSections.logic";
+import { useSettingsTarget } from "../../settingsTarget";
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -278,7 +278,10 @@ function AboutVersionSection({ scopeLabel }: { readonly scopeLabel: string }) {
       ? !canCheckForUpdate(updateState)
       : isDesktopUpdateButtonDisabled(updateState);
 
-  const actionLabel: Record<string, string> = { download: "Download", install: "Install" };
+  const actionLabel: Record<string, string> = {
+    download: "Download",
+    install: "Install",
+  };
   const statusLabel: Record<string, string> = {
     checking: "Checking…",
     downloading: "Downloading…",
@@ -536,7 +539,9 @@ function LegacyFeaturesSection({
                             ].join("\n"),
                           );
                           if (confirmed) {
-                            updateSettings({ enableLegacyTokenStreaming: true });
+                            updateSettings({
+                              enableLegacyTokenStreaming: true,
+                            });
                           }
                         })();
                       }}
@@ -561,10 +566,10 @@ export function GeneralSettingsPanel({
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const isPhoneTier = usePresentationTier() === "phone";
-  const environment = usePrimaryEnvironmentDescriptor();
+  const settingsTarget = useSettingsTarget();
   const scopeOptions = {
     nativeClient: isElectron,
-    nodeLabel: environment?.label ?? null,
+    nodeLabel: settingsTarget?.nodeLabel ?? null,
   };
   const localScopeLabel = settingsScopeLabel("browser", scopeOptions);
   const deviceScopeLabel = settingsScopeLabel("device", scopeOptions);
@@ -579,6 +584,7 @@ export function GeneralSettingsPanel({
   const availableEditors = useServerAvailableEditors();
   const observability = useServerObservability();
   const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
+  const canOpenNodePathLocally = !settingsTarget || settingsTarget.primary;
   const diagnosticsDescription = (() => {
     const exports: string[] = [];
     if (observability?.otlpTracesEnabled && observability.otlpTracesUrl) {
@@ -603,7 +609,10 @@ export function GeneralSettingsPanel({
           ...existing,
           [target]: "No available editors found.",
         }));
-        setOpeningPathByTarget((existing) => ({ ...existing, [target]: false }));
+        setOpeningPathByTarget((existing) => ({
+          ...existing,
+          [target]: false,
+        }));
         return;
       }
 
@@ -616,7 +625,10 @@ export function GeneralSettingsPanel({
           }));
         })
         .finally(() => {
-          setOpeningPathByTarget((existing) => ({ ...existing, [target]: false }));
+          setOpeningPathByTarget((existing) => ({
+            ...existing,
+            [target]: false,
+          }));
         });
     },
     [availableEditors],
@@ -1080,7 +1092,9 @@ export function GeneralSettingsPanel({
               <Switch
                 checked={settings.notifyOnTurnCompleteWhenUnfocused}
                 onCheckedChange={(checked) =>
-                  updateSettings({ notifyOnTurnCompleteWhenUnfocused: Boolean(checked) })
+                  updateSettings({
+                    notifyOnTurnCompleteWhenUnfocused: Boolean(checked),
+                  })
                 }
                 aria-label="Notify when a turn completes while unfocused"
               />
@@ -1115,6 +1129,10 @@ export function GeneralSettingsPanel({
               </span>
               {openDiagnosticsError ? (
                 <span className="mt-1 block text-destructive">{openDiagnosticsError}</span>
+              ) : !canOpenNodePathLocally ? (
+                <span className="mt-1 block">
+                  This path is on {settingsTarget?.nodeLabel}; open it from that machine.
+                </span>
               ) : null}
             </>
           }
@@ -1122,7 +1140,7 @@ export function GeneralSettingsPanel({
             <Button
               size="xs"
               variant="outline"
-              disabled={!logsDirectoryPath || isOpeningLogsDirectory}
+              disabled={!canOpenNodePathLocally || !logsDirectoryPath || isOpeningLogsDirectory}
               onClick={openLogsDirectory}
             >
               {isOpeningLogsDirectory ? "Opening..." : "Open logs folder"}

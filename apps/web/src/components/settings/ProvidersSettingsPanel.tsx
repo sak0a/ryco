@@ -25,6 +25,9 @@ import {
 } from "../../providerInstances";
 import { ensureLocalApi } from "../../localApi";
 import { applyProvidersUpdated } from "../../rpc/serverState";
+import { readEnvironmentApi } from "../../environmentApi";
+import { useSavedEnvironmentRuntimeStore } from "../../environments/runtime";
+import { useSettingsTarget } from "../../settingsTarget";
 import { formatRelativeTime } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -64,7 +67,10 @@ function withoutProviderInstanceKey<V>(
 }
 
 function withoutProviderInstanceFavorites(
-  favorites: ReadonlyArray<{ readonly provider: ProviderInstanceId; readonly model: string }>,
+  favorites: ReadonlyArray<{
+    readonly provider: ProviderInstanceId;
+    readonly model: string;
+  }>,
   instanceId: ProviderInstanceId,
 ) {
   return favorites.filter((favorite) => favorite.provider !== instanceId);
@@ -95,6 +101,7 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
 export function ProvidersSettingsPanel() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const settingsTarget = useSettingsTarget();
   // The read-only mutation capability again, not a connectivity probe: the
   // text-generation model and its traits are settings writes, so they are
   // gated by the settings-update method rather than by sensing the transport.
@@ -116,12 +123,36 @@ export function ProvidersSettingsPanel() {
   // the legacy/unified render swap.
   const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({});
   const refreshingRef = useRef(false);
+  const applyProviderSnapshot = useCallback(
+    (providers: typeof serverProviders) => {
+      if (!settingsTarget || settingsTarget.primary) {
+        applyProvidersUpdated({ providers });
+        return;
+      }
+      const current =
+        useSavedEnvironmentRuntimeStore.getState().byId[settingsTarget.environmentId]?.serverConfig;
+      if (current) {
+        useSavedEnvironmentRuntimeStore.getState().patch(settingsTarget.environmentId, {
+          serverConfig: { ...current, providers },
+        });
+      }
+    },
+    [settingsTarget],
+  );
+  const readTargetServer = useCallback(() => {
+    if (!settingsTarget) return ensureLocalApi().server;
+    const server = readEnvironmentApi(settingsTarget.environmentId)?.server;
+    if (!server)
+      throw new Error(`Provider settings are unavailable on ${settingsTarget.nodeLabel}.`);
+    return server;
+  }, [settingsTarget]);
   const refreshProviders = useCallback(() => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setIsRefreshingProviders(true);
-    void ensureLocalApi()
-      .server.refreshProviders()
+    void readTargetServer()
+      .refreshProviders()
+      .then((payload) => applyProviderSnapshot(payload.providers))
       .catch((error: unknown) => {
         toastManager.add(
           stackedThreadToast({
@@ -135,7 +166,7 @@ export function ProvidersSettingsPanel() {
         refreshingRef.current = false;
         setIsRefreshingProviders(false);
       });
-  }, []);
+  }, [applyProviderSnapshot, readTargetServer]);
 
   const visibleProviderSettings = PROVIDER_SETTINGS.filter(
     (providerSettings) =>
@@ -266,7 +297,12 @@ export function ProvidersSettingsPanel() {
     // Non-default customs for this driver kind follow their default.
     for (const [id, instance] of instancesByDriver.get(providerSettings.provider) ?? []) {
       if (id === defaultInstanceId) continue;
-      rows.push({ instanceId: id, instance, driver: instance.driver, isDefault: false });
+      rows.push({
+        instanceId: id,
+        instance,
+        driver: instance.driver,
+        isDefault: false,
+      });
     }
   }
   // Orphan instances: drivers the visible-defaults list doesn't cover
@@ -354,33 +390,36 @@ export function ProvidersSettingsPanel() {
     });
   };
 
-  const runProviderUpdate = useCallback((provider: ProviderUpdateCandidate) => {
-    setUpdatingProviderInstanceIds((existing) => new Set(existing).add(provider.instanceId));
-    void ensureLocalApi()
-      .server.updateProvider({
-        provider: provider.driver,
-        instanceId: provider.instanceId,
-      })
-      .then((payload) => {
-        applyProvidersUpdated(payload);
-      })
-      .catch((error: unknown) => {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Provider update failed",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      })
-      .finally(() => {
-        setUpdatingProviderInstanceIds((existing) => {
-          const next = new Set(existing);
-          next.delete(provider.instanceId);
-          return next;
+  const runProviderUpdate = useCallback(
+    (provider: ProviderUpdateCandidate) => {
+      setUpdatingProviderInstanceIds((existing) => new Set(existing).add(provider.instanceId));
+      void readTargetServer()
+        .updateProvider({
+          provider: provider.driver,
+          instanceId: provider.instanceId,
+        })
+        .then((payload) => {
+          applyProviderSnapshot(payload.providers);
+        })
+        .catch((error: unknown) => {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Provider update failed",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        })
+        .finally(() => {
+          setUpdatingProviderInstanceIds((existing) => {
+            const next = new Set(existing);
+            next.delete(provider.instanceId);
+            return next;
+          });
         });
-      });
-  }, []);
+    },
+    [applyProviderSnapshot, readTargetServer],
+  );
 
   /**
    * Reset a built-in default slot back to factory defaults. Clears both

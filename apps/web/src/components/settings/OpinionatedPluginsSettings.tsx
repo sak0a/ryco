@@ -18,7 +18,9 @@ import { DEFAULT_AGENT_TOKEN_MODE } from "@ryco/contracts";
 
 import { cn } from "../../lib/utils";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { readEnvironmentApi } from "../../environmentApi";
 import { ensureLocalApi } from "../../localApi";
+import { useSettingsTarget } from "../../settingsTarget";
 import { tokenModeOptions, tokenModePresentation } from "../../tokenModePresentation";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -166,6 +168,7 @@ function PluginTargetRow({
 export function OpinionatedPluginsSettingsPanel() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const settingsTarget = useSettingsTarget();
   const selectedTokenMode = settings.defaultAgentTokenMode ?? DEFAULT_AGENT_TOKEN_MODE;
   const selectedTokenModeOption = tokenModePresentation[selectedTokenMode];
   const SelectedTokenModeIcon = selectedTokenModeOption.icon;
@@ -179,8 +182,15 @@ export function OpinionatedPluginsSettingsPanel() {
     if (loadingRef.current) return;
     loadingRef.current = true;
     setIsLoading(true);
-    const api = ensureLocalApi();
-    void Promise.all([api.server.listOpinionatedPlugins(), api.server.checkOpinionatedPlugins()])
+    const server = settingsTarget
+      ? readEnvironmentApi(settingsTarget.environmentId)?.server
+      : ensureLocalApi().server;
+    if (!server) {
+      setIsLoading(false);
+      loadingRef.current = false;
+      return;
+    }
+    void Promise.all([server.listOpinionatedPlugins(), server.checkOpinionatedPlugins()])
       .then(([catalog, statusResult]) => {
         setPlugins(
           catalog.plugins.toSorted((a, b) => pluginSortValue(a.id) - pluginSortValue(b.id)),
@@ -200,7 +210,7 @@ export function OpinionatedPluginsSettingsPanel() {
         loadingRef.current = false;
         setIsLoading(false);
       });
-  }, []);
+  }, [settingsTarget]);
 
   useEffect(() => {
     loadPlugins();
@@ -239,9 +249,22 @@ export function OpinionatedPluginsSettingsPanel() {
   };
 
   const install = (status: OpinionatedPluginStatus) => {
-    const api = ensureLocalApi();
+    const localApi = ensureLocalApi();
+    const server = settingsTarget
+      ? readEnvironmentApi(settingsTarget.environmentId)?.server
+      : localApi.server;
+    if (!server) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Plugin install unavailable",
+          description: `Node ${settingsTarget?.nodeLabel ?? "server"} is not connected.`,
+        }),
+      );
+      return;
+    }
     const label = targetLabel(status);
-    void api.dialogs
+    void localApi.dialogs
       .confirm(
         `Install ${status.pluginId === "rtk" ? "RTK" : "Caveman"} for ${label}?\n\nThis may run networked CLI installation commands on this machine.`,
       )
@@ -249,7 +272,7 @@ export function OpinionatedPluginsSettingsPanel() {
         if (!confirmed) return;
         const key = pluginStatusKey(status);
         setInstallingKey(key);
-        return api.server
+        return server
           .installOpinionatedPlugin({
             pluginId: status.pluginId,
             ...(status.providerInstanceId ? { providerInstanceId: status.providerInstanceId } : {}),
@@ -299,7 +322,9 @@ export function OpinionatedPluginsSettingsPanel() {
             <Select
               value={selectedTokenMode}
               onValueChange={(value) =>
-                updateSettings({ defaultAgentTokenMode: value as AgentTokenMode })
+                updateSettings({
+                  defaultAgentTokenMode: value as AgentTokenMode,
+                })
               }
             >
               <SelectTrigger className="w-full sm:w-52" aria-label="Default token mode">

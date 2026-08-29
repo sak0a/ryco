@@ -28,6 +28,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { readEnvironmentApi } from "../../environmentApi";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { useSettingsTarget } from "../../settingsTarget";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -346,7 +347,9 @@ export function AgentControlIntegrationFormFields({
 }
 
 export function ExternalIntegrationsSettings() {
-  const environmentId = usePrimaryEnvironmentId();
+  const settingsTarget = useSettingsTarget();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = settingsTarget?.environmentId ?? primaryEnvironmentId;
   const [state, setState] = useState(emptyExternalIntegrationSettingsState);
   const [form, setForm] = useState(createAgentControlIntegrationForm);
   const [creating, setCreating] = useState(false);

@@ -22,6 +22,8 @@ import { ensureLocalApi } from "~/localApi";
 import { Struct } from "effect";
 import { applyServerSettingsPatch } from "@ryco/shared/serverSettings";
 import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/serverState";
+import { updateEnvironmentServerSettings } from "~/environments/runtime";
+import { useSettingsTarget } from "~/settingsTarget";
 import {
   __resetClientSettingsPersistenceForTests,
   addClientSettingsHydrationListener,
@@ -62,7 +64,10 @@ async function hydrateClientSettings(): Promise<void> {
     try {
       const persistedSettings = await ensureLocalApi().persistence.getClientSettings();
       if (persistedSettings) {
-        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+        replaceClientSettingsSnapshot({
+          ...DEFAULT_CLIENT_SETTINGS,
+          ...persistedSettings,
+        });
       }
     } catch (error) {
       console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} hydrate failed`, error);
@@ -161,25 +166,48 @@ export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings)
  * persisted via RPC. Client keys go through client persistence.
  */
 export function useUpdateSettings() {
-  const updateSettings = useCallback((patch: Partial<UnifiedSettings>) => {
-    const { serverPatch, clientPatch } = splitPatch(patch);
+  const target = useSettingsTarget();
+  const targetEnvironmentId = target?.environmentId ?? null;
+  const targetIsPrimary = target?.primary ?? true;
+  const targetConnected = target?.connected ?? true;
+  const updateSettings = useCallback(
+    (patch: Partial<UnifiedSettings>) => {
+      const { serverPatch, clientPatch } = splitPatch(patch);
 
-    if (Object.keys(serverPatch).length > 0) {
-      const currentServerConfig = getServerConfig();
-      if (currentServerConfig) {
-        applySettingsUpdated(applyServerSettingsPatch(currentServerConfig.settings, serverPatch));
+      if (Object.keys(serverPatch).length > 0) {
+        if (targetEnvironmentId && !targetIsPrimary) {
+          if (!targetConnected) {
+            console.error(
+              `[SETTINGS] Refused a node setting write while ${targetEnvironmentId} is disconnected.`,
+            );
+          } else {
+            void updateEnvironmentServerSettings(targetEnvironmentId, serverPatch).catch(
+              (error) => {
+                console.error(`[SETTINGS] update failed for ${targetEnvironmentId}`, error);
+              },
+            );
+          }
+        } else {
+          const currentServerConfig = getServerConfig();
+          if (currentServerConfig) {
+            applySettingsUpdated(
+              applyServerSettingsPatch(currentServerConfig.settings, serverPatch),
+            );
+          }
+          // Fire-and-forget RPC — push will reconcile on success
+          void ensureLocalApi().server.updateSettings(serverPatch);
+        }
       }
-      // Fire-and-forget RPC — push will reconcile on success
-      void ensureLocalApi().server.updateSettings(serverPatch);
-    }
 
-    if (Object.keys(clientPatch).length > 0) {
-      persistClientSettings({
-        ...getClientSettingsSnapshot(),
-        ...clientPatch,
-      });
-    }
-  }, []);
+      if (Object.keys(clientPatch).length > 0) {
+        persistClientSettings({
+          ...getClientSettingsSnapshot(),
+          ...clientPatch,
+        });
+      }
+    },
+    [targetConnected, targetEnvironmentId, targetIsPrimary],
+  );
 
   const resetSettings = useCallback(() => {
     updateSettings(DEFAULT_UNIFIED_SETTINGS);

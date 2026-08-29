@@ -46,6 +46,7 @@ import {
   serializeShortcut,
 } from "../../lib/shortcutCapture";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
+import { readEnvironmentApi } from "../../environmentApi";
 import { ensureLocalApi } from "../../localApi";
 import {
   useServerAvailableEditors,
@@ -53,6 +54,7 @@ import {
   useServerKeybindingsConfigPath,
 } from "../../rpc/serverState";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import { useSettingsTarget } from "../../settingsTarget";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -165,6 +167,7 @@ interface PanelContextValue {
 }
 
 export function KeybindingsSettingsPanel() {
+  const settingsTarget = useSettingsTarget();
   const serverConfig = useServerConfig();
   const keybindingsConfigPath = useServerKeybindingsConfigPath();
   const availableEditors = useServerAvailableEditors();
@@ -172,9 +175,19 @@ export function KeybindingsSettingsPanel() {
   const isMac = isMacPlatform(platform);
   const [isOpeningKeybindingsFile, setIsOpeningKeybindingsFile] = useState(false);
   const [openKeybindingsFileError, setOpenKeybindingsFileError] = useState<string | null>(null);
+  const canOpenKeybindingsFile = !settingsTarget || settingsTarget.primary;
+  const keybindingsApi = settingsTarget
+    ? readEnvironmentApi(settingsTarget.environmentId)?.keybindings
+    : ensureLocalApi().keybindings;
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
+    if (!canOpenKeybindingsFile) {
+      setOpenKeybindingsFileError(
+        `This file lives on ${settingsTarget?.nodeLabel ?? "the selected node"} and cannot be opened in a local editor.`,
+      );
+      return;
+    }
     setOpenKeybindingsFileError(null);
     setIsOpeningKeybindingsFile(true);
 
@@ -195,7 +208,7 @@ export function KeybindingsSettingsPanel() {
       .finally(() => {
         setIsOpeningKeybindingsFile(false);
       });
-  }, [availableEditors, keybindingsConfigPath]);
+  }, [availableEditors, canOpenKeybindingsFile, keybindingsConfigPath, settingsTarget?.nodeLabel]);
 
   // Subscribe to the project list with shallow-equal compare (the array
   // identity is unstable across renders but its element references are stable
@@ -238,7 +251,8 @@ export function KeybindingsSettingsPanel() {
     async (nextDraft: ReadonlyArray<DraftRule>) => {
       draftDirtyRef.current = true;
       try {
-        await ensureLocalApi().keybindings.replaceCustom({
+        if (!keybindingsApi) throw new Error("Keybinding settings are unavailable on this node.");
+        await keybindingsApi.replaceCustom({
           rules: stripDraftIds(nextDraft),
         });
       } catch (error: unknown) {
@@ -255,7 +269,7 @@ export function KeybindingsSettingsPanel() {
         draftDirtyRef.current = false;
       }
     },
-    [resolvedKeybindings],
+    [keybindingsApi, resolvedKeybindings],
   );
 
   const handleRebind = useCallback(
@@ -361,7 +375,10 @@ export function KeybindingsSettingsPanel() {
         const next = current.filter((rule) => rule.command !== command);
         if (DEFAULT_COMMANDS.has(command)) {
           for (const defaultRule of defaultRulesFor(command)) {
-            next.push({ ...defaultRule, __id: `default-${command}-${genId()}` });
+            next.push({
+              ...defaultRule,
+              __id: `default-${command}-${genId()}`,
+            });
           }
         }
         void persistDraft(next);
@@ -374,7 +391,8 @@ export function KeybindingsSettingsPanel() {
   const handleRestoreAllDefaults = useCallback(async () => {
     setDraft([]);
     try {
-      await ensureLocalApi().keybindings.replaceCustom({ rules: [] });
+      if (!keybindingsApi) throw new Error("Keybinding settings are unavailable on this node.");
+      await keybindingsApi.replaceCustom({ rules: [] });
     } catch (error: unknown) {
       toastManager.add(
         stackedThreadToast({
@@ -385,7 +403,7 @@ export function KeybindingsSettingsPanel() {
       );
       setDraft(snapshotToDraft(resolvedKeybindings));
     }
-  }, [resolvedKeybindings]);
+  }, [keybindingsApi, resolvedKeybindings]);
 
   const rowRefs = useRef(new Map<KeybindingCommand, HTMLDivElement | null>());
   const scrollToCommand = useCallback((command: KeybindingCommand) => {
@@ -427,7 +445,11 @@ export function KeybindingsSettingsPanel() {
       const status = commandStatus(command, rules);
 
       // Search filter — match against any associated rule, or the title/command id.
-      const placeholderRule: KeybindingRule = { key: "", command, when: undefined };
+      const placeholderRule: KeybindingRule = {
+        key: "",
+        command,
+        when: undefined,
+      };
       const matches =
         deferredSearch.length === 0 ||
         matchesSearch(placeholderRule, meta.title, deferredSearch) ||
@@ -534,9 +556,11 @@ export function KeybindingsSettingsPanel() {
                 <span className="mt-1 block text-destructive">{openKeybindingsFileError}</span>
               ) : (
                 <span className="mt-1 block">
-                  {hasAvailableEditors
-                    ? "Opens in your preferred editor."
-                    : "No available editors found."}
+                  {!canOpenKeybindingsFile
+                    ? `Stored on ${settingsTarget?.nodeLabel ?? "the selected node"}; use an editor on that machine.`
+                    : hasAvailableEditors
+                      ? "Opens in your preferred editor."
+                      : "No available editors found."}
                 </span>
               )}
             </>
@@ -545,7 +569,12 @@ export function KeybindingsSettingsPanel() {
             <Button
               size="xs"
               variant="outline"
-              disabled={!keybindingsConfigPath || !hasAvailableEditors || isOpeningKeybindingsFile}
+              disabled={
+                !canOpenKeybindingsFile ||
+                !keybindingsConfigPath ||
+                !hasAvailableEditors ||
+                isOpeningKeybindingsFile
+              }
               onClick={openKeybindingsFile}
             >
               {isOpeningKeybindingsFile ? "Opening..." : "Open file"}
