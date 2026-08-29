@@ -267,4 +267,40 @@ it.layer(NodeServices.layer)("Desktop automatic native node-claim HTTP control",
       },
     );
   });
+
+  it.effect("acknowledges a durable claim when the opportunistic connector wake fails", () => {
+    let committed = false;
+    return withRoutes(
+      stubNativeNodeClaimService({
+        commit: async () => {
+          committed = true;
+          return {
+            hubOrigin: HUB_ORIGIN,
+            nodeId: result.node.id,
+            activeKeyId: result.node.activeKeyId,
+            activeKeySecretName: "node-key.fixture",
+            cleanupPollingSecretName: null,
+            enrolledAt: claim.issuedAt,
+          };
+        },
+      }),
+      (origin) =>
+        Effect.gen(function* () {
+          const response = yield* post(origin, DESKTOP_NATIVE_NODE_CLAIM_COMMIT_PATH, {
+            claim,
+            result,
+          });
+          assert.isTrue(committed);
+          assert.equal(response.status, 200);
+          assert.deepEqual(yield* Effect.promise(() => response.json()), {
+            protocolVersion: 1,
+            status: "active",
+            result,
+          });
+        }),
+      () => {
+        throw new Error("concurrent relay reconnect");
+      },
+    );
+  });
 });
