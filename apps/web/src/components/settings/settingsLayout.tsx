@@ -58,6 +58,7 @@ export function SettingsSection({
 export function SettingsRow({
   title,
   description,
+  scope,
   status,
   resetAction,
   control,
@@ -65,6 +66,7 @@ export function SettingsRow({
 }: {
   title: ReactNode;
   description: ReactNode;
+  scope?: string;
   status?: ReactNode;
   resetAction?: ReactNode;
   control?: ReactNode;
@@ -72,6 +74,7 @@ export function SettingsRow({
 }) {
   return (
     <div
+      data-setting-scope={scope}
       className={cn(
         "border-t border-border/60 px-4 first:border-t-0 sm:px-5",
         children ? "pt-3.5 pb-0" : "py-3.5",
@@ -83,6 +86,14 @@ export function SettingsRow({
             <h3 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">
               {title}
             </h3>
+            {scope ? (
+              <span
+                aria-label={`Setting scope: ${scope}`}
+                className="rounded-full border border-border/70 bg-muted/45 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              >
+                {scope}
+              </span>
+            ) : null}
             <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
               {resetAction}
             </span>

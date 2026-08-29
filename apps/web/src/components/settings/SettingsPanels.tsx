@@ -28,6 +28,7 @@ import {
 } from "../../editorPreferences";
 import { isElectron } from "../../env";
 import { useHostedRpcCapability } from "../../hostedHub/capabilities";
+import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
 import { useLongPress } from "../../hooks/useLongPress";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useTheme } from "../../hooks/useTheme";
@@ -60,6 +61,7 @@ import { ProjectFavicon } from "../ProjectFavicon";
 import { RycoLetterMark } from "../RycoLetterMark";
 import { useServerAvailableEditors, useServerObservability } from "../../rpc/serverState";
 import { EDITOR_ICONS, getEditorLabel } from "./SettingsPanels.editor";
+import { settingsScopeLabel } from "./settingsSections.logic";
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -154,7 +156,7 @@ function AboutBrandingHeader() {
   );
 }
 
-function AboutVersionSection() {
+function AboutVersionSection({ scopeLabel }: { readonly scopeLabel: string }) {
   const updateState = useDesktopUpdateState();
   const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
 
@@ -294,6 +296,7 @@ function AboutVersionSection() {
       <SettingsRow
         title={<AboutVersionTitle />}
         description={description}
+        scope={scopeLabel}
         control={
           <Tooltip>
             <TooltipTrigger
@@ -315,6 +318,7 @@ function AboutVersionSection() {
       <SettingsRow
         title="Update track"
         description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+        scope={scopeLabel}
         control={
           <Select
             value={selectedUpdateChannel}
@@ -452,7 +456,13 @@ export function useSettingsRestore(onRestored?: () => void) {
   };
 }
 
-function LegacyFeaturesSection({ searchTargetId }: { searchTargetId: string | null }) {
+function LegacyFeaturesSection({
+  searchTargetId,
+  nodeScopeLabel,
+}: {
+  searchTargetId: string | null;
+  nodeScopeLabel: string;
+}) {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const targeted = searchTargetId === "legacy-token-streaming";
@@ -494,6 +504,7 @@ function LegacyFeaturesSection({ searchTargetId }: { searchTargetId: string | nu
                 <SettingsRow
                   title="Stream token by token (legacy)"
                   description="Paint assistant output token by token instead of in complete chunks. This legacy mode is significantly slower and makes long responses harder to follow."
+                  scope={nodeScopeLabel}
                   resetAction={
                     settings.enableLegacyTokenStreaming !==
                     DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming ? (
@@ -550,6 +561,14 @@ export function GeneralSettingsPanel({
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const isPhoneTier = usePresentationTier() === "phone";
+  const environment = usePrimaryEnvironmentDescriptor();
+  const scopeOptions = {
+    nativeClient: isElectron,
+    nodeLabel: environment?.label ?? null,
+  };
+  const localScopeLabel = settingsScopeLabel("browser", scopeOptions);
+  const deviceScopeLabel = settingsScopeLabel("device", scopeOptions);
+  const nodeScopeLabel = settingsScopeLabel("node", scopeOptions);
   const [openingPathByTarget, setOpeningPathByTarget] = useState({
     logsDirectory: false,
   });
@@ -616,6 +635,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="Time format"
           description="System default follows your browser or OS clock preference."
+          scope={localScopeLabel}
           resetAction={
             settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat ? (
               <SettingResetButton
@@ -662,6 +682,7 @@ export function GeneralSettingsPanel({
               ? "Pin which editor opens directories and files. Auto uses your last selection from the Open menu."
               : "No installed editors detected. Install a supported IDE to pick a default."
           }
+          scope={localScopeLabel}
           resetAction={
             settings.preferredEditor !== DEFAULT_UNIFIED_SETTINGS.preferredEditor ? (
               <SettingResetButton
@@ -723,6 +744,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="Diff line wrapping"
           description="Set the default wrap state when the diff panel opens."
+          scope={localScopeLabel}
           resetAction={
             settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap ? (
               <SettingResetButton
@@ -747,6 +769,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="Hide whitespace changes"
           description="Set whether the diff panel ignores whitespace-only edits by default."
+          scope={localScopeLabel}
           resetAction={
             settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace ? (
               <SettingResetButton
@@ -773,6 +796,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="Remote Git status"
           description="Refresh remote branch and pull request metadata while a repository is open."
+          scope={localScopeLabel}
           resetAction={
             settings.gitStatusPollIntervalMs !==
             DEFAULT_UNIFIED_SETTINGS.gitStatusPollIntervalMs ? (
@@ -815,6 +839,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="PR & workflow updates"
           description="Control automatic pull request and workflow refreshes. Automatic is fast after pushes and stops when checks settle."
+          scope={localScopeLabel}
           resetAction={
             settings.sourceControlRefreshMode !==
             DEFAULT_UNIFIED_SETTINGS.sourceControlRefreshMode ? (
@@ -855,6 +880,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="Provider update checks"
           description="Check installed provider CLIs for newer versions. Disable if you install providers with Nix or another package manager."
+          scope={nodeScopeLabel}
           resetAction={
             settings.enableProviderUpdateChecks !==
             DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks ? (
@@ -882,6 +908,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="Auto-open overview"
           description="Open the overview automatically when plans, progress, or implementation steps appear."
+          scope={localScopeLabel}
           resetAction={
             settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar ? (
               <SettingResetButton
@@ -908,6 +935,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="New threads"
           description="Pick the default workspace mode for newly created draft threads."
+          scope={nodeScopeLabel}
           resetAction={
             settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
               <SettingResetButton
@@ -949,6 +977,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="Add project starts in"
           description='Leave empty to use "~/" when the Add Project browser opens.'
+          scope={nodeScopeLabel}
           resetAction={
             settings.addProjectBaseDirectory !==
             DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
@@ -977,6 +1006,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="Archive confirmation"
           description="Require a second click on the inline archive action before a thread is archived."
+          scope={localScopeLabel}
           resetAction={
             settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
               <SettingResetButton
@@ -1003,6 +1033,7 @@ export function GeneralSettingsPanel({
         <SettingsRow
           title="Delete confirmation"
           description="Ask before deleting a thread and its chat history."
+          scope={localScopeLabel}
           resetAction={
             settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
               <SettingResetButton
@@ -1030,6 +1061,7 @@ export function GeneralSettingsPanel({
           <SettingsRow
             title="Turn-complete notifications"
             description="Show a desktop notification when an agent finishes a turn while the Ryco window is unfocused."
+            scope={deviceScopeLabel}
             resetAction={
               settings.notifyOnTurnCompleteWhenUnfocused !==
               DEFAULT_UNIFIED_SETTINGS.notifyOnTurnCompleteWhenUnfocused ? (
@@ -1057,21 +1089,25 @@ export function GeneralSettingsPanel({
         ) : null}
       </SettingsSection>
 
-      {!isPhoneTier ? <LegacyFeaturesSection searchTargetId={searchTargetId} /> : null}
+      {!isPhoneTier ? (
+        <LegacyFeaturesSection searchTargetId={searchTargetId} nodeScopeLabel={nodeScopeLabel} />
+      ) : null}
 
       <SettingsSection title="About">
         <AboutBrandingHeader />
         {isElectron ? (
-          <AboutVersionSection />
+          <AboutVersionSection scopeLabel={deviceScopeLabel} />
         ) : (
           <SettingsRow
             title={<AboutVersionTitle />}
             description="Current version of the application."
+            scope={localScopeLabel}
           />
         )}
         <SettingsRow
           title="Diagnostics"
           description={diagnosticsDescription}
+          scope={nodeScopeLabel}
           status={
             <>
               <span className="block break-all font-mono text-[11px] text-foreground">

@@ -16,11 +16,11 @@ import type { SettingsSectionId } from "../../settingsDialogStore";
 
 /** The role a hosted grant carries, or `null` when no fresh snapshot exists. */
 export type HostedSettingsRole = "viewer" | "operator" | "owner" | null;
-export type SettingsScope = "browser" | "device" | "account" | "node";
+export type SettingsScope = "browser" | "device" | "account" | "node" | "mixed";
 
 const SETTINGS_SCOPE_BY_SECTION = {
   account: "account",
-  general: "browser",
+  general: "mixed",
   inbox: "browser",
   providers: "node",
   "opinionated-plugins": "node",
@@ -48,6 +48,10 @@ export function settingsScopeLabel(
 ): string {
   if (scope === "node") return `Node: ${options.nodeLabel ?? "Connecting…"}`;
   if (scope === "account") return "Hub account";
+  if (scope === "mixed") {
+    const local = options.nativeClient ? "This device" : "This browser";
+    return `${local} + Node: ${options.nodeLabel ?? "Connecting…"}`;
+  }
   if (scope === "device" || options.nativeClient) return "This device";
   return "This browser";
 }

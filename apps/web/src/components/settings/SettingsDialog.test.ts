@@ -47,6 +47,7 @@ describe("hosted settings capabilities", () => {
       SETTINGS_DIALOG_SECTION_IDS.map((section) => [section, settingsSectionScope(section)]),
     ).toEqual(
       expect.arrayContaining([
+        ["general", "mixed"],
         ["appearance", "browser"],
         ["connections", "device"],
         ["account", "account"],
@@ -72,6 +73,12 @@ describe("hosted settings capabilities", () => {
     );
     expect(settingsScopeLabel("node", { nativeClient: true, nodeLabel: "Studio Mac" })).toBe(
       "Node: Studio Mac",
+    );
+    expect(settingsScopeLabel("mixed", { nativeClient: false, nodeLabel: "Studio Mac" })).toBe(
+      "This browser + Node: Studio Mac",
+    );
+    expect(settingsScopeLabel("mixed", { nativeClient: true, nodeLabel: "Studio Mac" })).toBe(
+      "This device + Node: Studio Mac",
     );
   });
 
