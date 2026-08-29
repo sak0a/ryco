@@ -20,11 +20,16 @@ export interface SettingsTarget {
 
 export function resolveSettingsTargetEnvironmentId(input: {
   readonly requestedEnvironmentId: EnvironmentId | null;
+  readonly routedEnvironmentId: EnvironmentId | null;
   readonly activeEnvironmentId: EnvironmentId | null;
   readonly primaryEnvironmentId: EnvironmentId | null;
 }): EnvironmentId | null {
   return (
-    input.requestedEnvironmentId ?? input.activeEnvironmentId ?? input.primaryEnvironmentId ?? null
+    input.requestedEnvironmentId ??
+    input.routedEnvironmentId ??
+    input.activeEnvironmentId ??
+    input.primaryEnvironmentId ??
+    null
   );
 }
 

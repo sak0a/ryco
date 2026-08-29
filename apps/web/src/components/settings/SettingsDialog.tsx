@@ -1,6 +1,6 @@
 // apps/web/src/components/settings/SettingsDialog.tsx
 import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   ActivityIcon,
   ArchiveIcon,
@@ -43,6 +43,8 @@ import {
 } from "../../environments/runtime";
 import { useServerConfig } from "../../rpc/serverState";
 import { useStore } from "../../store";
+import { useDesktopWorkspaceState } from "../../platform/desktopWorkspace";
+import { resolveThreadRouteRef } from "../../threadRoutes";
 import {
   resolveSettingsTargetEnvironmentId,
   SettingsTargetProvider,
@@ -228,9 +230,14 @@ function SectionPanel({
 
 export function SettingsDialog() {
   const navigate = useNavigate();
+  const routedEnvironmentId = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteRef(params)?.environmentId ?? null,
+  });
   const primaryEnvironment = usePrimaryEnvironmentDescriptor();
   const primaryServerConfig = useServerConfig();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
+  const desktopWorkspace = useDesktopWorkspaceState();
   const open = useSettingsDialogStore((s) => s.open);
   const section = useSettingsDialogStore((s) => s.section);
   const requestedEnvironmentId = useSettingsDialogStore((s) => s.targetEnvironmentId);
@@ -238,6 +245,7 @@ export function SettingsDialog() {
   const setSection = useSettingsDialogStore((s) => s.setSection);
   const targetEnvironmentId = resolveSettingsTargetEnvironmentId({
     requestedEnvironmentId,
+    routedEnvironmentId,
     activeEnvironmentId,
     primaryEnvironmentId: primaryEnvironment?.environmentId ?? null,
   });
@@ -249,6 +257,10 @@ export function SettingsDialog() {
   );
   const targetIsPrimary =
     targetEnvironmentId !== null && targetEnvironmentId === primaryEnvironment?.environmentId;
+  const desktopWorkspaceMachine = targetEnvironmentId
+    ? (desktopWorkspace.machines.find((machine) => machine.environmentId === targetEnvironmentId) ??
+      null)
+    : null;
   const targetServerConfig = targetIsPrimary
     ? primaryServerConfig
     : (savedEnvironmentRuntime?.serverConfig ?? null);
@@ -257,6 +269,7 @@ export function SettingsDialog() {
     : (savedEnvironmentRuntime?.descriptor?.label ??
       targetServerConfig?.environment.label ??
       savedEnvironment?.label ??
+      desktopWorkspaceMachine?.label ??
       "Selected node");
   const settingsTarget: SettingsTarget | null = targetEnvironmentId
     ? {
@@ -266,7 +279,8 @@ export function SettingsDialog() {
         primary: targetIsPrimary,
         connected: targetIsPrimary
           ? targetServerConfig !== null
-          : savedEnvironmentRuntime?.connectionState === "connected",
+          : savedEnvironmentRuntime?.connectionState === "connected" ||
+            desktopWorkspaceMachine?.connectionState === "connected",
       }
     : null;
   const hostedRole = useHostedHubStore((state) => state.effectiveRole);

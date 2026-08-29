@@ -189,10 +189,13 @@ export function HubSection({
       });
   }, [desktopBridge]);
 
-  useEffect(() => () => {
-    for (const release of interactiveWorkspaceReleasesRef.current.values()) release();
-    interactiveWorkspaceReleasesRef.current.clear();
-  });
+  useEffect(
+    () => () => {
+      for (const release of interactiveWorkspaceReleasesRef.current.values()) release();
+      interactiveWorkspaceReleasesRef.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!desktopBridge?.getHostedIdentityState) return;
