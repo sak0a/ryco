@@ -9,6 +9,7 @@
  * prefers-reduced-motion.
  */
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Github, Download, Menu, X } from "lucide-react";
 import { RycoWordmark, RycoMark } from "@/assets/RycoLogo";
 import { SITE } from "@/data/content";
@@ -180,6 +181,17 @@ export function SiteNav() {
               {l.label}
             </a>
           ))}
+          <Link
+            to="/changelog"
+            data-id="changelog"
+            onMouseEnter={() => slideTo("changelog")}
+            className={cn(
+              "relative z-10 rounded-full px-3.5 py-1.5 transition-colors hover:text-white",
+              focusRing,
+            )}
+          >
+            Changelog
+          </Link>
         </nav>
 
         {/* actions */}
@@ -255,6 +267,16 @@ export function SiteNav() {
                 {l.label}
               </a>
             ))}
+            <Link
+              to="/changelog"
+              onClick={() => setOpen(false)}
+              className={cn(
+                "rounded-2xl px-4 py-3 text-white/75 transition hover:bg-white/[0.06] hover:text-white",
+                focusRing,
+              )}
+            >
+              Changelog
+            </Link>
           </nav>
         </div>
       </div>
