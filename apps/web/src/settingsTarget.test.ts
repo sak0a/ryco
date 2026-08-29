@@ -5,6 +5,7 @@ import { resolveSettingsTargetEnvironmentId } from "./settingsTarget";
 
 describe("resolveSettingsTargetEnvironmentId", () => {
   const primaryEnvironmentId = EnvironmentId.make("environment-local");
+  const routedEnvironmentId = EnvironmentId.make("environment-routed");
   const activeEnvironmentId = EnvironmentId.make("environment-qa");
   const requestedEnvironmentId = EnvironmentId.make("environment-notification");
 
@@ -12,6 +13,7 @@ describe("resolveSettingsTargetEnvironmentId", () => {
     expect(
       resolveSettingsTargetEnvironmentId({
         requestedEnvironmentId: null,
+        routedEnvironmentId: null,
         activeEnvironmentId,
         primaryEnvironmentId,
       }),
@@ -22,9 +24,21 @@ describe("resolveSettingsTargetEnvironmentId", () => {
     expect(
       resolveSettingsTargetEnvironmentId({
         requestedEnvironmentId,
+        routedEnvironmentId,
         activeEnvironmentId,
         primaryEnvironmentId,
       }),
     ).toBe(requestedEnvironmentId);
+  });
+
+  it("keeps settings on the routed thread when the shell's active fallback changes", () => {
+    expect(
+      resolveSettingsTargetEnvironmentId({
+        requestedEnvironmentId: null,
+        routedEnvironmentId,
+        activeEnvironmentId: primaryEnvironmentId,
+        primaryEnvironmentId,
+      }),
+    ).toBe(routedEnvironmentId);
   });
 });
