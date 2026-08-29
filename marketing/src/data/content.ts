@@ -12,8 +12,8 @@ export const SITE = {
     "Run Codex, Claude, GitHub Copilot, OpenCode, Cursor and Grok side by side — fast local workflows, per-provider control, and full visibility into what each agent does.",
   longDescription:
     "Ryco is a small, practical workspace for AI coding agents. It ships as a cross-platform desktop app and a local web CLI backed by an Effect/TypeScript server and a React/TanStack UI.",
-  repo: "https://github.com/sak0a/ryco",
-  releases: "https://github.com/sak0a/ryco/releases",
+  repo: "https://github.com/saka-gg/ryco",
+  releases: "https://github.com/saka-gg/ryco/releases",
   discord: "https://discord.com",
   npx: "npx ryco-cli",
   license: "MIT",

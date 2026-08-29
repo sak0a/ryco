@@ -16,7 +16,7 @@
 import { useEffect, useState } from "react";
 import { SITE } from "@/data/content";
 
-const REPO = "sak0a/ryco";
+const REPO = "saka-gg/ryco";
 const API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const CACHE_KEY = "ryco:latest-release";
 const CACHE_TTL = 6 * 60 * 60 * 1000; // 6h

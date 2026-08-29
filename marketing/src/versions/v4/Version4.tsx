@@ -1402,6 +1402,9 @@ export default function Version4() {
                 >
                   Releases
                 </a>
+                <a href="/changelog" className="text-white/65 transition hover:text-white">
+                  Changelog
+                </a>
                 <a
                   href={SITE.discord}
                   target="_blank"

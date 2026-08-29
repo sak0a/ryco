@@ -7,6 +7,7 @@ import "./index.css";
 // the gitignored .archive/versions/ — move a folder back into src/versions and
 // re-add a route here to bring one back. They still reference the shared @/ modules.
 const Version4 = lazy(() => import("@/versions/v4/Version4"));
+const ChangelogPage = lazy(() => import("@/pages/ChangelogPage"));
 
 function Shell() {
   return (
@@ -29,6 +30,7 @@ const router = createBrowserRouter([
     children: [
       { path: "/", element: <Version4 /> },
       { path: "/4", element: <Version4 /> },
+      { path: "/changelog", element: <ChangelogPage /> },
     ],
   },
 ]);
