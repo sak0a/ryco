@@ -99,7 +99,11 @@ export interface CodexAgentControlInjection {
   readonly instructions: string;
 }
 
-export const CODEX_AGENT_CONTROL_SERVER_NAME = "ryco";
+// Keep this distinct from the user-installed `mcp_servers.ryco` external
+// integration. Codex merges per-thread MCP config with the user's global
+// config by server name, so reusing `ryco` would combine the external stdio
+// command with this runtime-scoped URL and reject the entry as invalid.
+export const CODEX_AGENT_CONTROL_SERVER_NAME = "ryco_agent_control";
 
 /**
  * Session-flags config record advertising the private MCP endpoint to this
