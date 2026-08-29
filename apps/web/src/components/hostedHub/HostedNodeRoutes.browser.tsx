@@ -191,6 +191,66 @@ describe("hosted node route surfaces", () => {
     expect(fakeWindow!.location.search).toBe("?workspaceTab=diff");
   });
 
+  it("preserves an offline deep link while its bounded session restore recovers", async () => {
+    const target = node("node_aaaaaaaaaaaaaaaaaaaaaa", false);
+    const threadId = ThreadId.make("t_1");
+    installRoute(`/node/${target.id}/${target.environmentId}/${threadId}?workspaceTab=diff`);
+    const selectNode = vi
+      .spyOn(hostedHubController, "selectNode")
+      .mockImplementation(async (nodeId: string) => {
+        const found = useHostedHubStore.getState().nodes.find((entry) => entry.id === nodeId);
+        useHostedHubStore.setState({
+          selectedNode: found ?? null,
+          selectionStatus: "offline",
+          transportStatus: "reconnecting",
+          sessionStatus: "synchronizing",
+          sessionEstablished: false,
+        });
+      });
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      nodes: [target],
+    });
+    useStore.setState({
+      activeEnvironmentId: target.environmentId,
+      environmentStateById: {
+        [target.environmentId]: {
+          threadShellById: { [threadId]: {} },
+        } as unknown as EnvironmentState,
+      },
+    });
+
+    mounted = await render(<HostedHubRoot />);
+
+    // Cached content survives, but the auth gate remains explicitly read-only
+    // until the current shell snapshot establishes mutation readiness.
+    await expect.element(page.getByTestId("root-app-shell")).toHaveTextContent("hosted-cached");
+    expect(selectNode).toHaveBeenCalledWith(target.id);
+    expect(fakeWindow!.location.pathname).toBe(
+      `/node/${target.id}/${target.environmentId}/${threadId}`,
+    );
+    expect(fakeWindow!.location.search).toBe("?workspaceTab=diff");
+
+    const recovered = node(target.id, true);
+    useHostedHubStore.setState({
+      nodes: [recovered],
+      selectedNode: recovered,
+      selectionStatus: "online",
+      transportStatus: "online",
+      sessionStatus: "ready",
+      sessionEstablished: true,
+    });
+
+    await expect.element(page.getByTestId("root-app-shell")).toHaveTextContent("hosted-hub");
+    expect(fakeWindow!.location.pathname).toBe(
+      `/node/${target.id}/${target.environmentId}/${threadId}`,
+    );
+    expect(fakeWindow!.location.search).toBe("?workspaceTab=diff");
+  });
+
   it("fails an unknown routed node closed to the directory with a bounded explanation", async () => {
     const other = node("node_bbbbbbbbbbbbbbbbbbbbbb");
     installRoute("/node/node_gone");

@@ -265,7 +265,7 @@ describe("hosted node route restore pipeline", () => {
     expect(getHostedNodeRouteNotice()).toMatch(/was revoked/);
   });
 
-  it("fails a routed offline node closed while interactive selection still connects", async () => {
+  it("routes an authorized offline deep link through the bounded activation lifecycle", async () => {
     const offline = node("node_aaaaaaaaaaaaaaaaaaaaaa", {
       presence: { online: false, lastHeartbeatAt: null },
     });
@@ -274,19 +274,129 @@ describe("hosted node route restore pipeline", () => {
     const { win, flush } = setup(`/node/${offline.id}`);
 
     await hostedHubController.bootstrap();
-    flush();
-    expect(activateHostedNode).not.toHaveBeenCalled();
-    expect(win.location.pathname).toBe("/");
-    expect(getHostedNodeRouteNotice()).toMatch(/is offline/);
-
-    // The directory keeps its existing behavior: an explicit tap on an
-    // offline node still attempts the connection with bounded retries.
-    expect(selectHostedNodeRoute(offline.id)).toBe(true);
     await vi.waitFor(() => expect(activateHostedNode).toHaveBeenCalledOnce());
     flush();
+
     expect(useHostedHubStore.getState().selectedNode?.id).toBe(offline.id);
+    expect(useHostedHubStore.getState().selectionStatus).toBe("offline");
+    expect(useHostedHubStore.getState().sessionEstablished).toBe(false);
     expect(win.location.pathname).toBe(`/node/${offline.id}`);
     expect(getHostedNodeRouteNotice()).toBeNull();
+
+    hostedHubController.markSessionReady(offline.environmentId);
+    await settle();
+    flush();
+
+    expect(useHostedHubStore.getState().sessionEstablished).toBe(true);
+    expect(win.location.pathname).toBe(`/node/${offline.id}`);
+    expect(getHostedNodeRouteNotice()).toBeNull();
+  });
+
+  it("returns a URL-restored offline node to the directory when sync expires", async () => {
+    vi.useFakeTimers();
+    const offline = node("node_aaaaaaaaaaaaaaaaaaaaaa", {
+      presence: { online: false, lastHeartbeatAt: null },
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([offline]);
+    const { win, flush } = setup(`/node/${offline.id}`);
+
+    await hostedHubController.bootstrap();
+    await settle();
+    expect(activateHostedNode).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await settle();
+    flush();
+    await settle();
+
+    expect(deactivateHostedNode).toHaveBeenCalledWith(offline.environmentId);
+    expect(useHostedHubStore.getState().selectedNode).toBeNull();
+    expect(win.location.pathname).toBe("/");
+    expect(getHostedNodeRouteNotice()).toMatch(/is offline/);
+  });
+
+  it("keeps an interactive offline selection on its existing failure surface", async () => {
+    vi.useFakeTimers();
+    const offline = node("node_aaaaaaaaaaaaaaaaaaaaaa", {
+      presence: { online: false, lastHeartbeatAt: null },
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([offline]);
+    const { win, flush } = setup("/");
+
+    await hostedHubController.bootstrap();
+    expect(selectHostedNodeRoute(offline.id)).toBe(true);
+    await settle();
+    expect(activateHostedNode).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await settle();
+    flush();
+
+    const state = useHostedHubStore.getState();
+    expect(state.selectedNode?.id).toBe(offline.id);
+    expect(state.selectionStatus).toBe("offline");
+    expect(state.transportStatus).toBe("terminal-failure");
+    expect(state.errorMessage).toBe(HOSTED_SESSION_SYNC_FAILURE_MESSAGE);
+    expect(win.location.pathname).toBe(`/node/${offline.id}`);
+    expect(getHostedNodeRouteNotice()).toBeNull();
+  });
+
+  it("keeps a non-timeout offline URL failure on the detailed failure surface", async () => {
+    const offline = node("node_aaaaaaaaaaaaaaaaaaaaaa", {
+      presence: { online: false, lastHeartbeatAt: null },
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([offline]);
+    const { win, flush } = setup(`/node/${offline.id}`);
+
+    await hostedHubController.bootstrap();
+    await vi.waitFor(() => expect(activateHostedNode).toHaveBeenCalledOnce());
+    hostedHubController.failure(useHostedHubStore.getState().generation, {
+      kind: "authentication",
+      retryable: false,
+    });
+    await settle();
+    flush();
+
+    const state = useHostedHubStore.getState();
+    expect(state.selectedNode?.id).toBe(offline.id);
+    expect(state.selectionStatus).toBe("offline");
+    expect(state.transportStatus).toBe("terminal-failure");
+    expect(state.errorMessage).toMatch(/authentication attempt/);
+    expect(win.location.pathname).toBe(`/node/${offline.id}`);
+    expect(getHostedNodeRouteNotice()).toBeNull();
+  });
+
+  it("tears down a pending offline URL restore on Back and fences late readiness", async () => {
+    const offline = node("node_aaaaaaaaaaaaaaaaaaaaaa", {
+      presence: { online: false, lastHeartbeatAt: null },
+    });
+    vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([offline]);
+    const { win, history, flush } = setup("/");
+
+    await hostedHubController.bootstrap();
+    history.push(`/node/${offline.id}`);
+    flush();
+    await vi.waitFor(() => expect(activateHostedNode).toHaveBeenCalledOnce());
+    const generation = useHostedHubStore.getState().generation;
+
+    win.history.back();
+    await vi.waitFor(() =>
+      expect(deactivateHostedNode).toHaveBeenCalledWith(offline.environmentId),
+    );
+    await settle();
+    flush();
+
+    expect(useHostedHubStore.getState().selectedNode).toBeNull();
+    expect(useHostedHubStore.getState().generation).toBeGreaterThan(generation);
+    expect(win.location.pathname).toBe("/");
+
+    hostedHubController.markSessionReady(offline.environmentId);
+    expect(useHostedHubStore.getState().selectedNode).toBeNull();
+    expect(useHostedHubStore.getState().sessionEstablished).toBe(false);
   });
 
   it("normalizes malformed node routes fail-closed before authentication", async () => {
@@ -665,11 +775,13 @@ describe("hosted node route restore pipeline", () => {
     await settle();
     flush();
 
-    // The forward re-entry is a URL restore of an offline node: fail closed.
-    expect(activateHostedNode).not.toHaveBeenCalled();
-    expect(useHostedHubStore.getState().selectedNode).toBeNull();
-    expect(getHostedNodeRouteNotice()).toMatch(/is offline/);
-    expect(win.location.pathname).toBe("/");
+    // The forward re-entry is now a URL restore, not leaked interactive
+    // intent, but still enters the same bounded activation lifecycle.
+    expect(activateHostedNode).toHaveBeenCalledOnce();
+    expect(useHostedHubStore.getState().selectedNode?.id).toBe(offline.id);
+    expect(useHostedHubStore.getState().selectionStatus).toBe("offline");
+    expect(getHostedNodeRouteNotice()).toBeNull();
+    expect(win.location.pathname).toBe(`/node/${offline.id}`);
   });
 
   it("keeps the terminal explanation when Back leaves a failed interactive node", async () => {
