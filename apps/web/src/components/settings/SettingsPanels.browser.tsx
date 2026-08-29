@@ -884,6 +884,31 @@ describe("GeneralSettingsPanel observability", () => {
       .toBeInTheDocument();
   });
 
+  it("labels browser and node settings independently inside General", async () => {
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    expect(
+      page
+        .getByText("Time format", { exact: true })
+        .element()
+        .closest("[data-setting-scope]")
+        ?.getAttribute("data-setting-scope"),
+    ).toBe("This browser");
+    expect(
+      page
+        .getByText("Provider update checks", { exact: true })
+        .element()
+        .closest("[data-setting-scope]")
+        ?.getAttribute("data-setting-scope"),
+    ).toBe("Node: Connecting…");
+  });
+
   it("reveals and focuses legacy token streaming when settings search targets it", async () => {
     useTierOverrideStore.setState({ override: "desktop" });
     syncDocumentPresentationTier();
