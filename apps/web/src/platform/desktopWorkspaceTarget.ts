@@ -38,8 +38,20 @@ export function resolveWorkspaceDefaultProjectRef(input: {
   }>;
   readonly ready: boolean;
   readonly localEnvironmentId: EnvironmentId | null;
+  readonly preferredEnvironmentId?: EnvironmentId | null;
   readonly logicalKey: (project: Project) => string;
 }): ScopedProjectRef | null {
+  if (input.preferredEnvironmentId !== undefined && input.preferredEnvironmentId !== null) {
+    if (!input.ready) return null;
+    const machine = input.machines.find(
+      (candidate) => candidate.environmentId === input.preferredEnvironmentId,
+    );
+    if (!machine?.online || !machine.canMutate) return null;
+    const preferred = input.orderedProjects.find(
+      (project) => project.environmentId === input.preferredEnvironmentId,
+    );
+    return preferred === undefined ? null : scopeProjectRef(preferred.environmentId, preferred.id);
+  }
   const first = input.orderedProjects[0];
   if (!first) return null;
   if (!input.ready) {

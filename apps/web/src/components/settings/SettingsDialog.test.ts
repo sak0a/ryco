@@ -6,6 +6,7 @@ import {
   hostedSettingsSectionAllowed,
   settingsSectionAvailable,
   settingsSectionReachable,
+  settingsSectionScope,
   SETTINGS_DIALOG_SECTION_IDS,
   SETTINGS_DIALOG_SECTION_LABELS,
 } from "./SettingsDialog";
@@ -40,6 +41,21 @@ describe("the phone surface mirrors the desktop dialog's section inventory", () 
 });
 
 describe("hosted settings capabilities", () => {
+  it("declares the ownership scope of every settings section", () => {
+    expect(
+      SETTINGS_DIALOG_SECTION_IDS.map((section) => [section, settingsSectionScope(section)]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["appearance", "browser"],
+        ["connections", "device"],
+        ["account", "account"],
+        ["providers", "node"],
+        ["source-control", "node"],
+        ["security", "node"],
+      ]),
+    );
+  });
+
   it("fails closed while role state is unavailable", () => {
     expect(hostedSettingsSectionAllowed("appearance", null)).toBe(true);
     expect(hostedSettingsSectionAllowed("archived", null)).toBe(false);

@@ -30,6 +30,7 @@ import { AddProjectRouteScreen } from "./features/projects/AddProjectRouteScreen
 import { ProjectRouteScreen } from "./features/projects/ProjectRouteScreen";
 import { ReviewCommentComposerSheet } from "./features/review/ReviewCommentComposerSheet";
 import { ReviewSheet } from "./features/review/ReviewSheet";
+import { SourceControlRouteScreen } from "./features/sourceControl/SourceControlRouteScreen";
 import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppearanceRouteScreen";
 import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
 import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsClientStorageRouteScreen";
@@ -340,6 +341,11 @@ export const ROOT_STACK_SCREENS = {
     screen: ProjectRouteScreen,
     linking: MVP_ROOT_ROUTES.Project.linking,
     options: routeOptions("Project", { title: "Project" }),
+  }),
+  ProjectSourceControl: createNativeStackScreen({
+    screen: SourceControlRouteScreen,
+    linking: MVP_ROOT_ROUTES.ProjectSourceControl.linking,
+    options: routeOptions("ProjectSourceControl", { title: "Source Control" }),
   }),
   NewTask: createNativeStackScreen({
     screen: NewTaskRouteScreen,

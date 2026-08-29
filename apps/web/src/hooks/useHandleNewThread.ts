@@ -24,9 +24,12 @@ import { useDesktopWorkspaceState } from "../platform/desktopWorkspace";
 import { resolveWorkspaceDefaultProjectRef } from "../platform/desktopWorkspaceTarget";
 import {
   nodeIdForHostedEnvironment,
+  readHostedNodeMutationLease,
   useHostedWorkspaceState,
+  waitForHostedNodeMutationLease,
 } from "../hostedHub/hostedConnectionCoordinator";
 import { adoptRoutedHostedNode } from "../hostedHub/nodeRoutes";
+import { useHostedHubStore } from "../hostedHub/state";
 
 function useNewThreadState() {
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
@@ -45,7 +48,14 @@ function useNewThreadState() {
     return resolveThreadRouteTarget(currentRouteParams);
   }, [router]);
 
-  return useCallback(
+  const handleNewThread: (
+    projectRef: ScopedProjectRef,
+    options?: {
+      branch?: string | null;
+      worktreePath?: string | null;
+      envMode?: DraftThreadEnvMode;
+    },
+  ) => Promise<void> = useCallback(
     (
       projectRef: ScopedProjectRef,
       options?: {
@@ -54,6 +64,16 @@ function useNewThreadState() {
         envMode?: DraftThreadEnvMode;
       },
     ): Promise<void> => {
+      const hostedNodeId = nodeIdForHostedEnvironment(projectRef.environmentId);
+      if (hostedNodeId !== null) {
+        adoptHostedTarget(projectRef.environmentId);
+        if (readHostedNodeMutationLease(projectRef.environmentId) === null) {
+          return waitForHostedNodeMutationLease(projectRef.environmentId).then((lease) => {
+            if (lease === null) return;
+            return handleNewThread(projectRef, options);
+          });
+        }
+      }
       const {
         getDraftSessionByLogicalProjectKey,
         getDraftSession,
@@ -156,6 +176,7 @@ function useNewThreadState() {
     },
     [adoptHostedTarget, getCurrentRouteTarget, projectGroupingSettings, router, projects],
   );
+  return handleNewThread;
 }
 
 export function useNewThreadHandler() {
@@ -199,6 +220,9 @@ export function useHandleNewThread() {
   const handleNewThread = useNewThreadState();
   const desktopWorkspace = useDesktopWorkspaceState();
   const hostedWorkspace = useHostedWorkspaceState();
+  const selectedHostedEnvironmentId = useHostedHubStore(
+    (state) => state.selectedNode?.environmentId ?? null,
+  );
   const workspace = useMemo(
     () =>
       hostedWorkspace.status === "signed-out"
@@ -224,13 +248,33 @@ export function useHandleNewThread() {
         ...workspace,
         logicalKey: (project) =>
           deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
+        ...(hostedWorkspace.status === "signed-out"
+          ? {}
+          : { preferredEnvironmentId: selectedHostedEnvironmentId }),
       }),
-    [orderedProjects, projectGroupingSettings, workspace],
+    [
+      hostedWorkspace.status,
+      orderedProjects,
+      projectGroupingSettings,
+      selectedHostedEnvironmentId,
+      workspace,
+    ],
   );
 
+  const actionActiveThread =
+    selectedHostedEnvironmentId !== null &&
+    activeThread?.environmentId !== selectedHostedEnvironmentId
+      ? undefined
+      : activeThread;
+  const actionActiveDraftThread =
+    selectedHostedEnvironmentId !== null &&
+    activeDraftThread?.environmentId !== selectedHostedEnvironmentId
+      ? null
+      : activeDraftThread;
+
   return {
-    activeDraftThread,
-    activeThread,
+    activeDraftThread: actionActiveDraftThread,
+    activeThread: actionActiveThread,
     defaultProjectRef,
     handleNewThread,
     routeThreadRef,

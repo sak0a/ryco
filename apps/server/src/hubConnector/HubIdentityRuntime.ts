@@ -3,7 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { Context, Effect, Layer } from "effect";
 
 import type { RelayNodeAuthHandshake } from "@ryco/contracts/relay";
-import { canonicalizeHubOrigin } from "@ryco/shared/nodeIdentity";
+import { canonicalizeHubOrigin, formatNodePublicKeyFingerprint } from "@ryco/shared/nodeIdentity";
 import type { NodeIdentityContinuityChainEntry } from "@ryco/shared/relayE2eeTranscripts";
 
 import { ServerConfig } from "../config.ts";
@@ -201,6 +201,8 @@ export type NodeE2eeAuthorizationAdmin = Pick<
 export interface HubIdentityRuntimeShape {
   readonly backend: ProtectedSecretStoreBackend;
   readonly readState: () => Promise<LocalHubIdentityState>;
+  /** The active public-key fingerprint only; no raw key or custody metadata. */
+  readonly readActiveFingerprint?: () => Promise<string | null>;
   /**
    * Erase this node's Hub identity and mint a fresh `EnvironmentId`.
    *
@@ -1310,6 +1312,15 @@ export async function makeHubIdentityRuntime(options: {
   return {
     backend: secretStore.backend,
     readState: () => bounded("identity_unavailable", () => stateStore.readOrCreate()),
+    readActiveFingerprint: () =>
+      bounded("identity_unavailable", async () => {
+        const state = await stateStore.readOrCreate();
+        if (state.pendingTeardown !== null || state.activeNode === null) return null;
+        const descriptor = await signingIdentity.getPublicDescriptor(
+          state.activeNode.activeKeySecretName,
+        );
+        return formatNodePublicKeyFingerprint(descriptor.fingerprint);
+      }),
     leave: () =>
       bounded("identity_unavailable", async () => {
         const state = await stateStore.readOrCreate();

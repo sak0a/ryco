@@ -29,6 +29,9 @@ import type {
   VcsPullResult,
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
+  GitRunStackedActionInput,
+  GitRunStackedActionResult,
+  GitActionProgressEvent,
   VcsStatusInput,
   VcsStatusResult,
   VcsCreateRefResult,
@@ -406,6 +409,7 @@ export interface DesktopWorkspaceStateProjection {
 }
 
 export type DesktopWorkspaceScopeProjection =
+  | { readonly type: "interactive" }
   | { readonly type: "thread-detail"; readonly threadId: ThreadId }
   | { readonly type: "vcs-status"; readonly cwd: string }
   | { readonly type: "provider-status"; readonly instanceId?: string };
@@ -755,6 +759,15 @@ export interface LocalApi {
  * `environmentId` rather than reaching through the local desktop bridge.
  */
 export interface EnvironmentApi {
+  /** Node-scoped provider/settings operations, resolved by environment. */
+  server?: {
+    refreshProviders: (input?: {
+      readonly instanceId?: ProviderInstanceId;
+    }) => Promise<ServerProviderUpdatedPayload>;
+    updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdatedPayload>;
+    getSettings: () => Promise<ServerSettings>;
+    updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+  };
   device?: {
     list: (input?: DeviceListInput) => Promise<DeviceListResult>;
     getThreadState: (input: DeviceThreadInput) => Promise<ThreadDeviceState>;
@@ -832,6 +845,10 @@ export interface EnvironmentApi {
     ) => () => void;
   };
   git: {
+    runStackedAction: (
+      input: GitRunStackedActionInput,
+      options?: { readonly onProgress?: (event: GitActionProgressEvent) => void },
+    ) => Promise<GitRunStackedActionResult>;
     resolvePullRequest: (input: GitPullRequestRefInput) => Promise<GitResolvePullRequestResult>;
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,

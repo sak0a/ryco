@@ -1,5 +1,9 @@
 import type { HostedHubNode } from "@ryco/client-runtime/authorization";
 import {
+  createNodeMutationLeaseAuthority,
+  type NodeMutationLease,
+} from "@ryco/client-runtime/authorization";
+import {
   buildUnifiedWorkspaceIndex,
   createWorkspaceConnectionDemandState,
   planWorkspaceConnectionDemand,
@@ -211,6 +215,36 @@ let hostedWorkspaceSnapshot: HostedWorkspaceSnapshot = {
 };
 const hostedWorkspaceListeners = new Set<() => void>();
 let activeCoordinator: HostedConnectionCoordinator | null = null;
+const hostedMutationLeaseAuthority = createNodeMutationLeaseAuthority();
+
+export function readHostedNodeMutationLease(
+  environmentId: EnvironmentId,
+): NodeMutationLease | null {
+  return hostedMutationLeaseAuthority.lease(environmentId);
+}
+
+export function waitForHostedNodeMutationLease(
+  environmentId: EnvironmentId,
+  timeoutMs = 30_000,
+): Promise<NodeMutationLease | null> {
+  const current = readHostedNodeMutationLease(environmentId);
+  if (current) return Promise.resolve(current);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (lease: NodeMutationLease | null) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timer);
+      unsubscribe();
+      resolve(lease);
+    };
+    const unsubscribe = hostedMutationLeaseAuthority.subscribe(() => {
+      const lease = readHostedNodeMutationLease(environmentId);
+      if (lease) finish(lease);
+    });
+    const timer = globalThis.setTimeout(() => finish(null), timeoutMs);
+  });
+}
 
 function publishHostedWorkspace(next: HostedWorkspaceSnapshot): void {
   hostedWorkspaceSnapshot = next;
@@ -343,6 +377,27 @@ export function startHostedWorkspaceCoordinator(input?: {
           : state.directoryStatus === "stale"
             ? "stale"
             : "loading";
+    const selectedEnvironmentId = state.selectedNode?.environmentId ?? null;
+    const selectedSnapshot =
+      selectedEnvironmentId === null ? undefined : snapshots.get(selectedEnvironmentId);
+    hostedMutationLeaseAuthority.update({
+      environmentId: selectedEnvironmentId,
+      snapshotGeneration: selectedSnapshot?.capturedAt ?? 0,
+      effectiveRole: state.effectiveRole,
+      directoryReady: state.directoryStatus === "ready" && state.browserStatus === "current",
+      relayReady:
+        state.transportStatus === "online" &&
+        state.sessionEstablished &&
+        selectedEnvironmentId !== null,
+      shellReady:
+        selectedSnapshot !== undefined &&
+        machines.some(
+          (machine) =>
+            machine.environmentId === selectedEnvironmentId &&
+            machine.connectionState === "connected" &&
+            machine.canMutate,
+        ),
+    });
     publishHostedWorkspace({
       status,
       accountId: state.account?.id ?? null,
@@ -484,6 +539,14 @@ export function startHostedWorkspaceCoordinator(input?: {
     coordinator.dispose();
     if (activeCoordinator === coordinator) {
       activeCoordinator = null;
+      hostedMutationLeaseAuthority.update({
+        environmentId: null,
+        snapshotGeneration: 0,
+        effectiveRole: null,
+        directoryReady: false,
+        relayReady: false,
+        shellReady: false,
+      });
       publishHostedWorkspace({
         status: "signed-out",
         accountId: null,

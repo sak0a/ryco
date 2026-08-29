@@ -4,6 +4,12 @@ import type { WsRpcClient } from "../rpc/index.ts";
 
 export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
   return {
+    server: {
+      refreshProviders: rpcClient.server.refreshProviders,
+      updateProvider: rpcClient.server.updateProvider,
+      getSettings: rpcClient.server.getSettings,
+      updateSettings: rpcClient.server.updateSettings,
+    },
     ...(rpcClient.device ? { device: rpcClient.device } : {}),
     terminal: {
       open: (input) => rpcClient.terminal.open(input as never),
@@ -42,6 +48,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       init: rpcClient.vcs.init,
     },
     git: {
+      runStackedAction: rpcClient.git.runStackedAction,
       resolvePullRequest: rpcClient.git.resolvePullRequest,
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,
       createWorktreeForProject: rpcClient.git.createWorktreeForProject,

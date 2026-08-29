@@ -95,6 +95,47 @@ describe("Desktop new-work target", () => {
 });
 
 describe("Hosted Web new-work target", () => {
+  it("uses the newly selected environment and never the previous node's cached project", () => {
+    const previous = project("previous");
+    const selected = project("selected");
+    const machines = [
+      {
+        environmentId: previous.environmentId,
+        label: "Previous",
+        online: true,
+        canMutate: true,
+        nativeTrust: "not-required" as const,
+      },
+      {
+        environmentId: selected.environmentId,
+        label: "Selected",
+        online: true,
+        canMutate: true,
+        nativeTrust: "not-required" as const,
+      },
+    ];
+    expect(
+      resolveWorkspaceDefaultProjectRef({
+        orderedProjects: [previous, selected],
+        machines,
+        ready: true,
+        localEnvironmentId: null,
+        preferredEnvironmentId: selected.environmentId,
+        logicalKey: () => "logical-ryco",
+      }),
+    ).toEqual({ environmentId: selected.environmentId, projectId: selected.id });
+    expect(
+      resolveWorkspaceDefaultProjectRef({
+        orderedProjects: [previous, selected],
+        machines,
+        ready: false,
+        localEnvironmentId: null,
+        preferredEnvironmentId: selected.environmentId,
+        logicalKey: () => "logical-ryco",
+      }),
+    ).toBeNull();
+  });
+
   it("selects only the eligible variant and never a locked, offline, or unrelated machine", () => {
     const eligible = project("eligible");
     const locked = project("locked");

@@ -44,7 +44,6 @@ import {
 } from "./HostedConnectionControls.logic";
 import { HostedE2eeVerification } from "./HostedE2eeVerification";
 import { HostedPwaControls } from "./HostedPwaControls";
-import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 
 /**
  * The one place a glyph name becomes a glyph. Everything that DECIDES which name
@@ -275,7 +274,7 @@ export function HostedNodeMenu() {
                 navigateHub({ kind: "account", section: "security" });
               }}
             >
-              <UserRoundIcon aria-hidden /> Account
+              <UserRoundIcon aria-hidden /> Security details
             </Button>
           </div>
           <div className="mt-3 space-y-3 border-t border-border pt-3">
@@ -285,7 +284,6 @@ export function HostedNodeMenu() {
                 other state, so this mount site carries no condition of its own
                 that could disagree with the projection. */}
             <HostedE2eeVerification />
-            <HostedRelayTrustNotice compact />
             <HostedPwaControls compact />
           </div>
         </div>
@@ -299,7 +297,7 @@ export function HostedNodeMenu() {
  * bottom sheet — node status and effective role, delivery-unknown
  * acknowledgment, "All nodes" (close the browser relay session and return to
  * the directory), node switching with the directory's fail-closed disables,
- * directory refresh, install/update controls, the relay-trust disclosure, and
+ * directory refresh, install/update controls, security navigation, and
  * sign out. Sign out stays available in every state.
  */
 export function HostedConnectionSheet({
@@ -360,7 +358,7 @@ export function HostedConnectionSheet({
         <DeliveryUnknownAcknowledgement />
         <div className="mt-3 space-y-1 border-t border-border pt-3">
           <MobileListRow
-            label="Account"
+            label="Security details"
             icon={<UserRoundIcon aria-hidden className="size-4 shrink-0" />}
             onClick={() => {
               // Close first: the settings surface is its own full-screen sheet
@@ -423,7 +421,6 @@ export function HostedConnectionSheet({
           </Button>
         </div>
         <div className="mt-3 space-y-3 border-t border-border pt-3">
-          <HostedRelayTrustNotice compact />
           <HostedPwaControls compact />
         </div>
       </MobileSheetPanel>

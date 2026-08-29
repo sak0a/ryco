@@ -190,4 +190,3 @@
 8. Verify human and JSON Hub status show the same recovery fingerprint.
 9. Recheck production repository status byte-for-byte against the baseline.
 10. Record only sanitized qualification results; never commit private identifiers, credentials, fingerprints, or infrastructure details.
-

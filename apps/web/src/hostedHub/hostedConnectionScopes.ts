@@ -16,6 +16,8 @@ export interface RetainedHostedWebScope {
 
 function scopeKey(environmentId: EnvironmentId, scope: WorkspaceConnectionScope): string {
   switch (scope.type) {
+    case "interactive":
+      return JSON.stringify([environmentId, scope.type]);
     case "thread-detail":
       return JSON.stringify([environmentId, scope.type, scope.threadId]);
     case "vcs-status":

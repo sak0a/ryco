@@ -101,22 +101,31 @@ describe("HubConnectorStatus", () => {
 describe("HubIdentitySummary", () => {
   const decodeSummary = Schema.decodeUnknownSync(HubIdentitySummary);
 
-  it("reports only whether an identity exists", () => {
+  it("reports whether an identity exists and the active public fingerprint", () => {
     for (const enrolled of ["none", "pending", "active", "unknown"] as const) {
       expect(decodeSummary({ enrolled })).toEqual({ enrolled });
     }
+    expect(decodeSummary({ enrolled: "active", fingerprint: `SHA256:${"A".repeat(43)}` })).toEqual({
+      enrolled: "active",
+      fingerprint: `SHA256:${"A".repeat(43)}`,
+    });
   });
 
-  it("admits no origin, identifier, or fingerprint", () => {
+  it("admits no origin, identifier, or non-canonical fingerprint", () => {
     const decoded = decodeSummary({
       enrolled: "active",
       hubOrigin: "https://sensitive.example",
       nodeId: "node_sensitive",
       fingerprint: `SHA256:${"A".repeat(43)}`,
     });
-    expect(decoded).toEqual({ enrolled: "active" });
+    expect(decoded).toEqual({ enrolled: "active", fingerprint: `SHA256:${"A".repeat(43)}` });
     expect(JSON.stringify(decoded)).not.toContain("sensitive");
-    expect(JSON.stringify(decoded)).not.toContain("SHA256");
+    expect(() =>
+      decodeSummary({ enrolled: "active", fingerprint: `sha256:${"A".repeat(43)}` }),
+    ).toThrow();
+    expect(() =>
+      decodeSummary({ enrolled: "pending", fingerprint: `SHA256:${"A".repeat(43)}` }),
+    ).toThrow();
   });
 
   it("rejects an unknown enrollment phase", () => {

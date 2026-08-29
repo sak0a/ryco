@@ -1,5 +1,6 @@
 import * as Crypto from "node:crypto";
 
+import { verifyNativeTrustApprovalQr } from "@ryco/client-runtime/authorization";
 import { decodeBase64Url, encodeBase64Url } from "@ryco/client-runtime/relay";
 import {
   e2eeBytesEqual,
@@ -12,7 +13,6 @@ import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapab
 import {
   decodeCrossDeviceApprovalQr,
   decodeCrossDeviceApprovalTbs,
-  verifyCrossDeviceApprovalQr,
 } from "@ryco/shared/relayE2eeCrossDeviceApproval";
 
 import type { DesktopProtectedRecordStore } from "./protectedRecordStore.ts";
@@ -301,7 +301,7 @@ export class DesktopE2eeTrustStore {
     } catch {
       return fail("trust_conflict");
     }
-    const approval = verifyCrossDeviceApprovalQr({
+    const verification = verifyNativeTrustApprovalQr({
       payload: input.payload,
       hubOrigin: input.hubOrigin,
       accountId: input.accountId,
@@ -311,14 +311,11 @@ export class DesktopE2eeTrustStore {
       nodeContinuityId: advertised.nodeContinuityId,
       nodePolicyGeneration: advertised.nodePolicyGeneration,
       now: input.now,
+      requiredRole: "owner",
+      requiredCapability: "ryco.rpc",
     });
-    if (
-      approval === undefined ||
-      approval.maxRole !== "owner" ||
-      !approval.capabilitySet.includes("ryco.rpc")
-    ) {
-      return fail("trust_conflict");
-    }
+    if (!verification.ok) return fail("trust_conflict");
+    const { approval } = verification;
     return this.#promote({
       hubOrigin: input.hubOrigin,
       accountId: input.accountId,

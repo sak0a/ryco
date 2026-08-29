@@ -336,6 +336,20 @@ export function ProjectDetailScreen(props: {
           </Pressable>
         </View>
 
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open project Source Control"
+          onPress={() =>
+            navigation.navigate("ProjectSourceControl", {
+              environmentId: props.environmentId,
+              projectId: props.projectId,
+            })
+          }
+          className="h-12 items-center justify-center rounded-full bg-card px-4 active:bg-card-alt"
+        >
+          <Text className="text-sm font-ryco-bold text-foreground">Source Control</Text>
+        </Pressable>
+
         <View className="gap-3">
           <Text className="px-1 text-sm font-ryco-bold text-foreground-muted">Worktrees</Text>
           {visiblePendingWorktree ? (
@@ -369,6 +383,13 @@ export function ProjectDetailScreen(props: {
                         })
                 }
                 onArchive={readOnly ? undefined : () => archiveWorktree(group.worktree)}
+                onSourceControl={() =>
+                  navigation.navigate("ProjectSourceControl", {
+                    environmentId: props.environmentId,
+                    projectId: props.projectId,
+                    worktreeId: group.worktree.id,
+                  })
+                }
               />
               {group.threads.map((thread) => (
                 <View key={thread.id} className="pl-4">

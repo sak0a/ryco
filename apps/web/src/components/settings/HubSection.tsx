@@ -15,9 +15,12 @@ import {
 } from "../../lib/visibilityPolling";
 import { webAppLifecycle } from "../../platform/appLifecycle";
 import {
+  retainDesktopWorkspaceInteractiveScope,
   retainDesktopWorkspaceProviderScope,
   useDesktopWorkspaceState,
 } from "../../platform/desktopWorkspace";
+import { useSettingsDialogStore } from "../../settingsDialogStore";
+import { useStore } from "../../store";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
@@ -87,6 +90,8 @@ export function HubSection({
   const desktopWorkspace = useDesktopWorkspaceState();
   const [snapshot, setSnapshot] = useState<HubSnapshot | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const interactiveWorkspaceReleasesRef = useRef(new Map<string, () => void>());
+  const closeSettings = useSettingsDialogStore((state) => state.closeSettings);
   const [verificationTarget, setVerificationTarget] = useState<{
     readonly nodeId: string;
     readonly environmentId: string;
@@ -184,6 +189,11 @@ export function HubSection({
       });
   }, [desktopBridge]);
 
+  useEffect(() => () => {
+    for (const release of interactiveWorkspaceReleasesRef.current.values()) release();
+    interactiveWorkspaceReleasesRef.current.clear();
+  });
+
   useEffect(() => {
     if (!desktopBridge?.getHostedIdentityState) return;
     void desktopBridge
@@ -237,6 +247,32 @@ export function HubSection({
       setWorkspaceError("Unable to refresh this account's machine directory.");
     }
   }, [desktopBridge]);
+
+  useEffect(() => {
+    if (hostedIdentity?.status === "ready") void refreshDesktopWorkspace();
+  }, [hostedIdentity?.status, refreshDesktopWorkspace]);
+
+  const connectDesktopMachine = useCallback((environmentId: EnvironmentId) => {
+    if (interactiveWorkspaceReleasesRef.current.has(environmentId)) return;
+    interactiveWorkspaceReleasesRef.current.set(
+      environmentId,
+      retainDesktopWorkspaceInteractiveScope(environmentId),
+    );
+  }, []);
+
+  const disconnectDesktopMachine = useCallback((environmentId: EnvironmentId) => {
+    interactiveWorkspaceReleasesRef.current.get(environmentId)?.();
+    interactiveWorkspaceReleasesRef.current.delete(environmentId);
+  }, []);
+
+  const openDesktopMachine = useCallback(
+    (environmentId: EnvironmentId) => {
+      connectDesktopMachine(environmentId);
+      useStore.getState().setActiveEnvironmentId(environmentId);
+      closeSettings();
+    },
+    [closeSettings, connectDesktopMachine],
+  );
 
   const verifyDesktopMachine = useCallback(async () => {
     if (!desktopBridge?.verifyDesktopWorkspaceApproval || !verificationTarget) return;
@@ -720,7 +756,7 @@ export function HubSection({
       {hostedIdentity?.status === "ready" && desktopBridge?.getDesktopWorkspaceState ? (
         <SettingsRow
           title="Workspace machines"
-          description="The Desktop client keeps each machine scoped independently. Cached lists do not open connections."
+          description="Connect, open, and manage each machine independently. Cached lists remain read-only until connected."
           status={
             workspaceError ??
             `${desktopWorkspace.machines.filter((machine) => machine.online).length} online · ${desktopWorkspace.activeConnectionCount} connected`
@@ -737,27 +773,56 @@ export function HubSection({
                 key={`${machine.nodeId ?? "unknown"}:${machine.environmentId}`}
                 term={machine.label}
                 action={
-                  machine.nodeId &&
-                  machine.online &&
-                  (machine.nativeTrust === "unverified" || machine.nativeTrust === "unknown") ? (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() => {
-                        void beginDesktopMachineVerification({
-                          nodeId: machine.nodeId!,
-                          environmentId: machine.environmentId,
-                        });
-                      }}
-                    >
-                      Verify this machine
-                    </Button>
-                  ) : null
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    {machine.nodeId &&
+                    machine.online &&
+                    (machine.nativeTrust === "unverified" || machine.nativeTrust === "unknown") ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => {
+                          void beginDesktopMachineVerification({
+                            nodeId: machine.nodeId!,
+                            environmentId: machine.environmentId,
+                          });
+                        }}
+                      >
+                        Verify
+                      </Button>
+                    ) : machine.nativeTrust === "verified" && machine.online ? (
+                      machine.connectionState === "connected" ? (
+                        <>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            onClick={() => openDesktopMachine(machine.environmentId)}
+                          >
+                            Open
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => disconnectDesktopMachine(machine.environmentId)}
+                          >
+                            Disconnect
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => connectDesktopMachine(machine.environmentId)}
+                        >
+                          Connect
+                        </Button>
+                      )
+                    ) : null}
+                  </div>
                 }
               >
                 {machine.nativeTrust === "verified"
                   ? machine.online
-                    ? "Verified · Online"
+                    ? `Verified · ${machine.connectionState === "connected" ? "Connected" : "Online"}`
                     : "Verified · Offline"
                   : machine.nativeTrust === "identity-conflict"
                     ? "Identity changed · Locked"

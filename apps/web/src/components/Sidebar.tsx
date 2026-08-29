@@ -30,6 +30,7 @@ import { getQueuedThreadKeys } from "@ryco/client-runtime/state/message-queue";
 import { isWorkspaceMetadataSnapshot } from "@ryco/client-runtime/state/workspace";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
+import { useHostedHubStore } from "../hostedHub/state";
 import { isElectron } from "../env";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { PREFERS_REDUCED_MOTION_QUERY, shouldEnableAutoAnimate } from "../lib/perf/motion";
@@ -293,6 +294,9 @@ export default function Sidebar() {
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
   const desktopWorkspace = useDesktopWorkspaceState();
   const hostedWorkspace = useHostedWorkspaceState();
+  const selectedHostedEnvironmentId = useHostedHubStore(
+    (state) => state.selectedNode?.environmentId ?? null,
+  );
   const queuesByThreadKey = useMessageQueueStore((state) => state.queuesByThreadKey);
   const localQueuedThreadKeys = useMemo(
     () => getQueuedThreadKeys(queuesByThreadKey),
@@ -465,11 +469,20 @@ export default function Sidebar() {
   // fresh install so the button is never a dead end.
   const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
   const newThreadTargetProject = useMemo(() => {
+    const targetProjects =
+      selectedHostedEnvironmentId === null
+        ? orderedProjects
+        : orderedProjects.filter(
+            (project) => project.environmentId === selectedHostedEnvironmentId,
+          );
     const projectKeyOf = (project: (typeof orderedProjects)[number]) =>
       scopedProjectKey(scopeProjectRef(project.environmentId, project.id));
     const targetKey = resolveNewThreadProjectKey({
-      orderedProjectKeys: orderedProjects.map(projectKeyOf),
-      threads: sidebarThreads,
+      orderedProjectKeys: targetProjects.map(projectKeyOf),
+      threads:
+        selectedHostedEnvironmentId === null
+          ? sidebarThreads
+          : sidebarThreads.filter((thread) => thread.environmentId === selectedHostedEnvironmentId),
       lastVisitedAtByThreadKey: new Map(
         Object.entries(threadLastVisitedAtById).map(([key, visitedAt]) => {
           const parsed = Date.parse(visitedAt);
@@ -481,9 +494,9 @@ export default function Sidebar() {
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
     });
     return targetKey
-      ? (orderedProjects.find((project) => projectKeyOf(project) === targetKey) ?? null)
+      ? (targetProjects.find((project) => projectKeyOf(project) === targetKey) ?? null)
       : null;
-  }, [orderedProjects, sidebarThreads, threadLastVisitedAtById]);
+  }, [orderedProjects, selectedHostedEnvironmentId, sidebarThreads, threadLastVisitedAtById]);
   const startNewThreadFromSidebar = useCallback(() => {
     if (!newThreadTargetProject) return;
     if (isMobile) {

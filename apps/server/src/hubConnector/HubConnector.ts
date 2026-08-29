@@ -277,7 +277,13 @@ export class HubConnector {
       // present an enrollment with nothing behind it, lock the Hub address, and
       // leave no in-panel way to correct it.
       if (state.pendingTeardown !== null) return { enrolled: "none" };
-      if (state.activeNode !== null) return { enrolled: "active" };
+      if (state.activeNode !== null) {
+        const fingerprint = await this.#identity.readActiveFingerprint?.();
+        return {
+          enrolled: "active",
+          ...(fingerprint === null || fingerprint === undefined ? {} : { fingerprint }),
+        };
+      }
       if (state.pendingEnrollment !== null) return { enrolled: "pending" };
       return { enrolled: "none" };
     } catch {

@@ -1587,4 +1587,23 @@ describe("HubConnector", () => {
 
     expect(await connector.identitySummary()).toEqual({ enrolled: "none" });
   });
+
+  it("reports only the canonical active fingerprint for local recovery", async () => {
+    const fingerprint = `SHA256:${"A".repeat(43)}`;
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({ readActiveFingerprint: async () => fingerprint }),
+      transport: { open: () => new FakeSocket() },
+      channels: {
+        open: async () => {
+          throw new Error("unused");
+        },
+      },
+      enrollmentMetadata,
+    });
+
+    expect(await connector.identitySummary()).toEqual({ enrolled: "active", fingerprint });
+    expect(JSON.stringify(await connector.identitySummary())).not.toContain("publicKey");
+    expect(JSON.stringify(await connector.identitySummary())).not.toContain("secretName");
+  });
 });

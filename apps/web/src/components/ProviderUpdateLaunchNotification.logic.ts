@@ -1,6 +1,7 @@
 import {
   defaultInstanceIdForDriver,
   PROVIDER_DISPLAY_NAMES,
+  type EnvironmentId,
   type ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
@@ -22,6 +23,11 @@ export interface ProviderUpdateToastView {
   readonly title: string;
   readonly description: string;
   readonly dismissAfterVisibleMs?: number;
+}
+
+export interface EnvironmentNotificationOrigin {
+  readonly environmentId: EnvironmentId;
+  readonly nodeLabel: string;
 }
 
 export type ProviderUpdateSidebarPillTone = "loading" | "warning" | "error" | "success";
@@ -174,19 +180,33 @@ export function canOneClickUpdateProviderCandidate(
 
 export function providerUpdateNotificationKey(
   providers: ReadonlyArray<ProviderUpdateCandidate>,
+  origin?: Pick<EnvironmentNotificationOrigin, "environmentId">,
 ): string | null {
   const parts = dedupeProvidersByDriver(providers)
     .map((provider) => {
       const advisory = provider.versionAdvisory;
-      return [provider.driver, advisory.latestVersion].join(":");
+      return [provider.instanceId, provider.driver, advisory.latestVersion].join(":");
     })
     .toSorted();
 
-  return parts.length > 0 ? parts.join("|") : null;
+  return parts.length > 0
+    ? [origin?.environmentId ?? "unknown-environment", ...parts].join("|")
+    : null;
 }
 
 export function providerUpdateCandidateKey(provider: ProviderUpdateCandidate): string {
   return providerUpdateNotificationKey([provider])!;
+}
+
+export function withProviderUpdateOrigin(
+  view: ProviderUpdateToastView,
+  origin: EnvironmentNotificationOrigin,
+): ProviderUpdateToastView {
+  return {
+    ...view,
+    title: `${view.title} · ${origin.nodeLabel}`,
+    description: `On ${origin.nodeLabel}. ${view.description}`,
+  };
 }
 
 export function formatProviderList(providers: ReadonlyArray<Pick<ServerProvider, "driver">>) {
