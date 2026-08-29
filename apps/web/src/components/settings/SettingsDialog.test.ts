@@ -7,6 +7,7 @@ import {
   settingsSectionAvailable,
   settingsSectionReachable,
   settingsSectionScope,
+  settingsScopeLabel,
   SETTINGS_DIALOG_SECTION_IDS,
   SETTINGS_DIALOG_SECTION_LABELS,
 } from "./SettingsDialog";
@@ -53,6 +54,24 @@ describe("hosted settings capabilities", () => {
         ["source-control", "node"],
         ["security", "node"],
       ]),
+    );
+  });
+
+  it("uses the native device mental model for renderer-local preferences", () => {
+    expect(settingsScopeLabel("browser", { nativeClient: false, nodeLabel: null })).toBe(
+      "This browser",
+    );
+    expect(settingsScopeLabel("browser", { nativeClient: true, nodeLabel: null })).toBe(
+      "This device",
+    );
+    expect(settingsScopeLabel("device", { nativeClient: false, nodeLabel: null })).toBe(
+      "This device",
+    );
+    expect(settingsScopeLabel("account", { nativeClient: true, nodeLabel: null })).toBe(
+      "Hub account",
+    );
+    expect(settingsScopeLabel("node", { nativeClient: true, nodeLabel: "Studio Mac" })).toBe(
+      "Node: Studio Mac",
     );
   });
 

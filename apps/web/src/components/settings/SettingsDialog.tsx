@@ -28,12 +28,13 @@ import {
   hostedSettingsRoleSnapshot,
   settingsSectionReachable,
   settingsSectionScope,
+  settingsScopeLabel,
 } from "./settingsSections.logic";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ScrollArea } from "../ui/scroll-area";
 import { ArchivedThreadsPanel, GeneralSettingsPanel, useSettingsRestore } from "./SettingsPanels";
-import { isHostedHubMode } from "../../env";
+import { isElectron, isHostedHubMode } from "../../env";
 import { useHostedHubStore } from "../../hostedHub/state";
 import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
 
@@ -96,6 +97,7 @@ export {
   settingsSectionAvailable,
   settingsSectionReachable,
   settingsSectionScope,
+  settingsScopeLabel,
 } from "./settingsSections.logic";
 
 const SECTIONS_WITH_RESTORE: ReadonlySet<SettingsSectionId> = new Set([
@@ -221,14 +223,10 @@ export function SettingsDialog() {
     ? section
     : (visibleNavItems[0]?.id ?? "appearance");
   const activeScope = settingsSectionScope(effectiveSection);
-  const scopeLabel =
-    activeScope === "node"
-      ? `Node: ${environment?.label ?? "Connecting…"}`
-      : activeScope === "browser"
-        ? "This browser"
-        : activeScope === "device"
-          ? "This device"
-          : "Hub account";
+  const scopeLabel = settingsScopeLabel(activeScope, {
+    nativeClient: isElectron,
+    nodeLabel: environment?.label ?? null,
+  });
 
   useEffect(() => {
     if (hosted && !roleFresh) return;

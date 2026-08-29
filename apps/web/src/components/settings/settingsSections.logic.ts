@@ -39,6 +39,19 @@ export function settingsSectionScope(section: SettingsSectionId): SettingsScope 
   return SETTINGS_SCOPE_BY_SECTION[section];
 }
 
+export function settingsScopeLabel(
+  scope: SettingsScope,
+  options: {
+    readonly nativeClient: boolean;
+    readonly nodeLabel: string | null;
+  },
+): string {
+  if (scope === "node") return `Node: ${options.nodeLabel ?? "Connecting…"}`;
+  if (scope === "account") return "Hub account";
+  if (scope === "device" || options.nativeClient) return "This device";
+  return "This browser";
+}
+
 /**
  * Sections that exist only in the hosted client. Account management is one:
  * there is no Hub account to manage in the standard (local-server) mode, so the
