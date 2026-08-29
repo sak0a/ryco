@@ -135,8 +135,8 @@ socket). See `src/test/WsTestClient.test.ts` and the migrated cases in
 
 ## Links
 
-- Repository: https://github.com/sak0a/ryco
-- Releases: https://github.com/sak0a/ryco/releases
+- Repository: https://github.com/saka-gg/ryco
+- Releases: https://github.com/saka-gg/ryco/releases
 - Discord: https://discord.gg/jn4EGJjrvv
 
 ## License
