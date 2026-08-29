@@ -28,6 +28,7 @@ import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/ser
 import { useUiStateStore } from "../../uiStateStore";
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import { useTierOverrideStore } from "../../tierOverrideStore";
+import { SettingsTargetProvider } from "../../settingsTarget";
 import { DEFAULT_CLIENT_SETTINGS } from "@ryco/contracts/settings";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
@@ -126,6 +127,7 @@ const authAccessHarness = vi.hoisted(() => {
 });
 
 const mockConnectDesktopSshEnvironment = vi.hoisted(() => vi.fn());
+const mockUpdateEnvironmentServerSettings = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const originalNavigatorPlatform = navigator.platform;
 
 vi.mock("../../environments/runtime", () => {
@@ -179,6 +181,7 @@ vi.mock("../../environments/runtime", () => {
     resetEnvironmentServiceForTests: () => undefined,
     startEnvironmentConnectionService: () => undefined,
     subscribeEnvironmentConnections: () => () => {},
+    updateEnvironmentServerSettings: mockUpdateEnvironmentServerSettings,
     useSavedEnvironmentRegistryStore: (
       selector: (state: { byId: Record<string, never> }) => unknown,
     ) => selector({ byId: {} }),
@@ -422,8 +425,13 @@ const createDesktopBridgeStub = (overrides?: {
       : { disconnectHostedGitHub: overrides.disconnectHostedGitHub }),
     ...(overrides?.cancelHostedGitHubConnection === undefined
       ? {}
-      : { cancelHostedGitHubConnection: overrides.cancelHostedGitHubConnection }),
-    validateHubOrigin: async () => ({ ok: false as const, reason: "empty" as const }),
+      : {
+          cancelHostedGitHubConnection: overrides.cancelHostedGitHubConnection,
+        }),
+    validateHubOrigin: async () => ({
+      ok: false as const,
+      reason: "empty" as const,
+    }),
     getAppBranding: vi.fn().mockReturnValue(null),
     getLocalEnvironmentBootstrap: () => ({
       label: "Local environment",
@@ -525,12 +533,16 @@ const createDesktopBridgeStub = (overrides?: {
         channel,
       })),
     checkForUpdate: vi.fn().mockResolvedValue({ checked: false, state: idleUpdateState }),
-    downloadUpdate: vi
-      .fn()
-      .mockResolvedValue({ accepted: false, completed: false, state: idleUpdateState }),
-    installUpdate: vi
-      .fn()
-      .mockResolvedValue({ accepted: false, completed: false, state: idleUpdateState }),
+    downloadUpdate: vi.fn().mockResolvedValue({
+      accepted: false,
+      completed: false,
+      state: idleUpdateState,
+    }),
+    installUpdate: vi.fn().mockResolvedValue({
+      accepted: false,
+      completed: false,
+      state: idleUpdateState,
+    }),
     onUpdateState: () => () => {},
     notifyTurnComplete: vi.fn().mockResolvedValue(undefined),
     onTurnCompleteNotificationActivated: () => () => {},
@@ -553,6 +565,7 @@ describe("GeneralSettingsPanel observability", () => {
     authAccessHarness.reset();
     useTierOverrideStore.setState({ override: null });
     mockConnectDesktopSshEnvironment.mockReset();
+    mockUpdateEnvironmentServerSettings.mockClear();
   });
 
   afterEach(async () => {
@@ -909,6 +922,49 @@ describe("GeneralSettingsPanel observability", () => {
     ).toBe("Node: Connecting…");
   });
 
+  it("labels and writes node settings against the explicitly selected remote node", async () => {
+    const environmentId = EnvironmentId.make("environment-qa");
+    const remoteConfig = {
+      ...createBaseServerConfig(),
+      environment: {
+        ...createBaseServerConfig().environment,
+        environmentId,
+        label: "Ryco Multi-node QA",
+      },
+    };
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <SettingsTargetProvider
+          value={{
+            environmentId,
+            nodeLabel: "Ryco Multi-node QA",
+            serverConfig: remoteConfig,
+            primary: false,
+            connected: true,
+          }}
+        >
+          <GeneralSettingsPanel />
+        </SettingsTargetProvider>
+      </AppAtomRegistryProvider>,
+    );
+
+    expect(
+      page
+        .getByText("Provider update checks", { exact: true })
+        .element()
+        .closest("[data-setting-scope]")
+        ?.getAttribute("data-setting-scope"),
+    ).toBe("Node: Ryco Multi-node QA");
+
+    await page.getByLabelText("Check providers for updates").click();
+    await vi.waitFor(() => {
+      expect(mockUpdateEnvironmentServerSettings).toHaveBeenCalledWith(environmentId, {
+        enableProviderUpdateChecks: !remoteConfig.settings.enableProviderUpdateChecks,
+      });
+    });
+  });
+
   it("reveals and focuses legacy token streaming when settings search targets it", async () => {
     useTierOverrideStore.setState({ override: "desktop" });
     syncDocumentPresentationTier();
@@ -966,13 +1022,17 @@ describe("GeneralSettingsPanel observability", () => {
     await tokenStreamingSwitch.click();
     await vi.waitFor(() => {
       expect(confirm).toHaveBeenCalledTimes(2);
-      expect(updateSettings).toHaveBeenLastCalledWith({ enableLegacyTokenStreaming: true });
+      expect(updateSettings).toHaveBeenLastCalledWith({
+        enableLegacyTokenStreaming: true,
+      });
     });
     await expect.element(tokenStreamingSwitch).toBeChecked();
 
     await tokenStreamingSwitch.click();
     await vi.waitFor(() =>
-      expect(updateSettings).toHaveBeenLastCalledWith({ enableLegacyTokenStreaming: false }),
+      expect(updateSettings).toHaveBeenLastCalledWith({
+        enableLegacyTokenStreaming: false,
+      }),
     );
     expect(confirm).toHaveBeenCalledTimes(2);
   });
@@ -1398,9 +1458,16 @@ describe("GeneralSettingsPanel observability", () => {
     );
 
     await page.getByRole("button", { name: "Add environment", exact: true }).click();
-    const addEnvironmentDialog = page.getByRole("dialog", { name: "Add Environment" });
+    const addEnvironmentDialog = page.getByRole("dialog", {
+      name: "Add Environment",
+    });
     await expect
-      .element(addEnvironmentDialog.getByRole("heading", { name: "Add Environment", exact: true }))
+      .element(
+        addEnvironmentDialog.getByRole("heading", {
+          name: "Add Environment",
+          exact: true,
+        }),
+      )
       .toBeInTheDocument();
     await addEnvironmentDialog.getByRole("button", { name: /^SSH\b/ }).click();
     await vi.waitFor(() => {
@@ -1948,7 +2015,9 @@ describe("ConnectionsSettings Hub section", () => {
     await expect.element(input).toHaveValue("Build node");
     await input.fill("  Release node  ");
     await page.getByRole("button", { name: "Save and restart" }).click();
-    expect(setHubLaunchConfig).toHaveBeenCalledWith({ nodeName: "Release node" });
+    expect(setHubLaunchConfig).toHaveBeenCalledWith({
+      nodeName: "Release node",
+    });
   });
 
   it("resets a configured node name to automatic", async () => {
@@ -2083,7 +2152,11 @@ describe("ConnectionsSettings Hub section", () => {
 
   it("says a revoked node will not retry, rather than looking stuck", async () => {
     stubHubFetch({
-      status: { ...baseStatus, state: "revoked", failure: "authentication_failed" },
+      status: {
+        ...baseStatus,
+        state: "revoked",
+        failure: "authentication_failed",
+      },
       identity: { enrolled: "active" },
     });
     await renderHub({ enabled: true, origin: "https://hub.example.com" });
@@ -2095,7 +2168,11 @@ describe("ConnectionsSettings Hub section", () => {
 
   it("warns before erasing the key, and names what leaving does not do", async () => {
     stubHubFetch({
-      status: { ...baseStatus, state: "revoked", failure: "authentication_failed" },
+      status: {
+        ...baseStatus,
+        state: "revoked",
+        failure: "authentication_failed",
+      },
       identity: { enrolled: "active" },
     });
     await renderHub({ enabled: true, origin: "https://hub.example.com" });
@@ -2140,7 +2217,11 @@ describe("ConnectionsSettings Hub section", () => {
 
     await expect.element(page.getByText("Protected key fallback")).toBeVisible();
     await expect
-      .element(page.getByRole("switch", { name: "Allow permissioned-file Hub key storage" }))
+      .element(
+        page.getByRole("switch", {
+          name: "Allow permissioned-file Hub key storage",
+        }),
+      )
       .toBeEnabled();
     await expect.element(page.getByText(/--hub-connector-enabled/, { exact: false })).toBeVisible();
   });
@@ -2160,7 +2241,9 @@ describe("ConnectionsSettings Hub section", () => {
     expect(confirm).toHaveBeenCalledWith(
       expect.stringContaining("Ryco will restart. Existing keys are not moved."),
     );
-    expect(setHubLaunchConfig).toHaveBeenCalledWith({ allowFileSecretStore: true });
+    expect(setHubLaunchConfig).toHaveBeenCalledWith({
+      allowFileSecretStore: true,
+    });
   });
 
   it("locks key custody after enrollment and explains why", async () => {
@@ -2173,7 +2256,11 @@ describe("ConnectionsSettings Hub section", () => {
     await page.getByRole("button", { name: /Show advanced options/ }).click();
 
     await expect
-      .element(page.getByRole("switch", { name: "Allow permissioned-file Hub key storage" }))
+      .element(
+        page.getByRole("switch", {
+          name: "Allow permissioned-file Hub key storage",
+        }),
+      )
       .toBeDisabled();
     await expect.element(page.getByText(/Locked while this machine holds/)).toBeVisible();
   });

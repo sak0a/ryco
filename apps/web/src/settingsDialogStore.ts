@@ -1,3 +1,4 @@
+import type { EnvironmentId } from "@ryco/contracts";
 import { create } from "zustand";
 
 export type SettingsSectionId =
@@ -19,7 +20,8 @@ export type SettingsSectionId =
 interface SettingsDialogStore {
   open: boolean;
   section: SettingsSectionId;
-  openSettings: (section?: SettingsSectionId) => void;
+  targetEnvironmentId: EnvironmentId | null;
+  openSettings: (section?: SettingsSectionId, environmentId?: EnvironmentId | null) => void;
   closeSettings: () => void;
   setSection: (section: SettingsSectionId) => void;
 }
@@ -27,7 +29,13 @@ interface SettingsDialogStore {
 export const useSettingsDialogStore = create<SettingsDialogStore>((set) => ({
   open: false,
   section: "general",
-  openSettings: (section) => set((state) => ({ open: true, section: section ?? state.section })),
-  closeSettings: () => set({ open: false }),
+  targetEnvironmentId: null,
+  openSettings: (section, environmentId) =>
+    set((state) => ({
+      open: true,
+      section: section ?? state.section,
+      targetEnvironmentId: environmentId ?? null,
+    })),
+  closeSettings: () => set({ open: false, targetEnvironmentId: null }),
   setSection: (section) => set({ section }),
 }));

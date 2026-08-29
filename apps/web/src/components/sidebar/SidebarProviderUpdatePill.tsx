@@ -4,6 +4,9 @@ import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 import { useServerProviders } from "../../rpc/serverState";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
+import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
+import { useSavedEnvironmentRuntimeStore } from "../../environments/runtime";
+import { useStore } from "../../store";
 import {
   getProviderUpdateSidebarPillView,
   type ProviderUpdateSidebarPillView,
@@ -39,7 +42,16 @@ function latestProviderCheckedAt(
 
 export function SidebarProviderUpdatePill() {
   const openSettingsDialog = useSettingsDialogStore((s) => s.openSettings);
-  const providers = useServerProviders();
+  const primaryEnvironment = usePrimaryEnvironmentDescriptor();
+  const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
+  const primaryProviders = useServerProviders();
+  const remoteProviders = useSavedEnvironmentRuntimeStore((state) =>
+    activeEnvironmentId ? state.byId[activeEnvironmentId]?.serverConfig?.providers : undefined,
+  );
+  const providers =
+    activeEnvironmentId && activeEnvironmentId !== primaryEnvironment?.environmentId
+      ? (remoteProviders ?? [])
+      : primaryProviders;
   const [dismissedKeys, setDismissedKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [renderedView, setRenderedView] = useState<ProviderUpdateSidebarPillView | null>(null);
   const [pendingView, setPendingView] = useState<ProviderUpdateSidebarPillView | null>(null);
@@ -61,8 +73,8 @@ export function SidebarProviderUpdatePill() {
   }, [effectiveVisibleAfterIso, visibleAfterIso]);
 
   const openProviderSettings = useCallback(() => {
-    openSettingsDialog("providers");
-  }, [openSettingsDialog]);
+    openSettingsDialog("providers", activeEnvironmentId ?? undefined);
+  }, [activeEnvironmentId, openSettingsDialog]);
   const displayedView = renderedView ?? view;
   const dismissAfterVisibleMs = displayedView?.dismissAfterVisibleMs;
   const viewKey = displayedView?.key ?? null;

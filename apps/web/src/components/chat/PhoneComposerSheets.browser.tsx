@@ -63,6 +63,7 @@ vi.mock("../../environments/runtime", () => {
     resetEnvironmentServiceForTests: vi.fn(),
     startEnvironmentConnectionService: vi.fn(),
     subscribeEnvironmentConnections: () => () => {},
+    updateEnvironmentServerSettings: vi.fn().mockResolvedValue(undefined),
     useSavedEnvironmentRegistryStore: (
       selector: (state: { byId: Record<string, never> }) => unknown,
     ) => selector({ byId: {} }),

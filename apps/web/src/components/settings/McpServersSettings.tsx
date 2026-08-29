@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  type EnvironmentApi,
   McpServerName,
   McpWorkspaceId,
   type McpListServersResult,
@@ -26,7 +27,9 @@ import {
 } from "@ryco/contracts";
 
 import { cn } from "../../lib/utils";
+import { readEnvironmentApi } from "../../environmentApi";
 import { ensureLocalApi } from "../../localApi";
+import { useSettingsTarget } from "../../settingsTarget";
 import {
   configFromMcpServerForm,
   createEmptyMcpServerForm,
@@ -56,12 +59,11 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { getDriverOption } from "./providerDriverMeta";
 
-type McpApi = NonNullable<ReturnType<typeof ensureLocalApi>["mcp"]>;
+type McpApi = NonNullable<EnvironmentApi["mcp"]>;
 const EMPTY_WORKSPACES: readonly McpWorkspace[] = [];
 const EMPTY_PROVIDERS: readonly McpProviderSupport[] = [];
 
-function getMcpApi(): McpApi {
-  const api = ensureLocalApi().mcp;
+function requireMcpApi(api: McpApi | undefined): McpApi {
   if (!api) {
     throw new Error("MCP settings are unavailable before a backend is paired.");
   }
@@ -764,6 +766,12 @@ function McpServerCard({
 }
 
 export function McpServersSettings() {
+  const settingsTarget = useSettingsTarget();
+  const mcpApi = useMemo(
+    () =>
+      settingsTarget ? readEnvironmentApi(settingsTarget.environmentId)?.mcp : ensureLocalApi().mcp,
+    [settingsTarget],
+  );
   const [workspacesResult, setWorkspacesResult] = useState<McpListWorkspacesResult | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<McpListServersResult | null>(null);
@@ -783,28 +791,31 @@ export function McpServersSettings() {
   const selectedCapabilities = selectedWorkspace?.capabilities;
   const selectedProviderName = workspaceProviderDisplayName(selectedWorkspace);
 
-  const loadServers = useCallback(async (workspaceId: string, options?: { quiet?: boolean }) => {
-    if (!options?.quiet) setRefreshing(true);
-    setError(null);
-    try {
-      const result = await getMcpApi().listServers({
-        workspaceId: McpWorkspaceId.make(workspaceId),
-        detail: "full",
-      });
-      setSnapshot(result);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to load MCP servers.");
-      showErrorToast("Failed to load MCP servers", cause);
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
+  const loadServers = useCallback(
+    async (workspaceId: string, options?: { quiet?: boolean }) => {
+      if (!options?.quiet) setRefreshing(true);
+      setError(null);
+      try {
+        const result = await requireMcpApi(mcpApi).listServers({
+          workspaceId: McpWorkspaceId.make(workspaceId),
+          detail: "full",
+        });
+        setSnapshot(result);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Failed to load MCP servers.");
+        showErrorToast("Failed to load MCP servers", cause);
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [mcpApi],
+  );
 
   const loadWorkspaces = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await getMcpApi().listWorkspaces();
+      const result = await requireMcpApi(mcpApi).listWorkspaces();
       setWorkspacesResult(result);
       const nextSelected =
         result.workspaces.find((workspace) => workspace.id === selectedWorkspaceId)?.id ??
@@ -822,7 +833,7 @@ export function McpServersSettings() {
     } finally {
       setLoading(false);
     }
-  }, [loadServers, selectedWorkspaceId]);
+  }, [loadServers, mcpApi, selectedWorkspaceId]);
 
   useEffect(() => {
     void loadWorkspaces();
@@ -840,7 +851,7 @@ export function McpServersSettings() {
     if (!selectedWorkspaceId) return;
     setRefreshing(true);
     try {
-      const result = await getMcpApi().reloadServers({
+      const result = await requireMcpApi(mcpApi).reloadServers({
         workspaceId: McpWorkspaceId.make(selectedWorkspaceId),
       });
       setSnapshot(result);
@@ -854,7 +865,7 @@ export function McpServersSettings() {
 
   const submitForm = async (form: McpServerFormState) => {
     if (!selectedWorkspaceId) return;
-    const result = await getMcpApi().upsertServer({
+    const result = await requireMcpApi(mcpApi).upsertServer({
       workspaceId: McpWorkspaceId.make(selectedWorkspaceId),
       name: McpServerName.make(form.name.trim()),
       config: configFromMcpServerForm(form),
@@ -868,7 +879,7 @@ export function McpServersSettings() {
     if (!selectedWorkspaceId) return;
     setMutatingName(server.name);
     try {
-      const result = await getMcpApi().setServerEnabled({
+      const result = await requireMcpApi(mcpApi).setServerEnabled({
         workspaceId: McpWorkspaceId.make(selectedWorkspaceId),
         name: server.name,
         enabled,
@@ -887,7 +898,7 @@ export function McpServersSettings() {
     if (!confirmed) return;
     setMutatingName(server.name);
     try {
-      const result = await getMcpApi().removeServer({
+      const result = await requireMcpApi(mcpApi).removeServer({
         workspaceId: McpWorkspaceId.make(selectedWorkspaceId),
         name: server.name,
       });
@@ -904,7 +915,7 @@ export function McpServersSettings() {
     if (!selectedWorkspaceId) return;
     setMutatingName(server.name);
     try {
-      const result = await getMcpApi().startOauthLogin({
+      const result = await requireMcpApi(mcpApi).startOauthLogin({
         workspaceId: McpWorkspaceId.make(selectedWorkspaceId),
         serverName: server.name,
         scopes: server.config.oauthScopes,

@@ -22,6 +22,7 @@ import {
 } from "../../lib/visibilityPolling";
 import { webAppLifecycle } from "../../platform/appLifecycle";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { useSettingsTarget } from "../../settingsTarget";
 import { deriveHostedConnectionStatusIndicator } from "../../hostedHub/connectionStatus";
 import { useHostedHubStore } from "../../hostedHub/state";
 import {
@@ -415,7 +416,7 @@ interface PendingConfirmation {
   readonly run: () => Promise<void>;
 }
 
-export function NodeSecuritySettings() {
+function PrimaryNodeSecuritySettings() {
   const mode = nodeSecurityMode(isHostedHubMode());
   const availability = nodeOperatorDataAvailability(mode);
   const strictPolicy = nodeE2eeStrictPolicyDisposition(mode);
@@ -694,7 +695,10 @@ export function NodeSecuritySettings() {
         fingerprint: record.fingerprint,
       });
       if (mountedRef.current) {
-        setApprovalQr({ approval, label: record.displayLabel ?? record.fingerprint });
+        setApprovalQr({
+          approval,
+          label: record.displayLabel ?? record.fingerprint,
+        });
       }
     } catch (cause) {
       if (mountedRef.current) {
@@ -1189,6 +1193,26 @@ export function NodeSecuritySettings() {
       </Dialog>
     </SettingsPageContainer>
   );
+}
+
+export function NodeSecuritySettings() {
+  const settingsTarget = useSettingsTarget();
+  if (settingsTarget && !settingsTarget.primary) {
+    return (
+      <SettingsPageContainer>
+        <Alert variant="warning">
+          <TriangleAlertIcon />
+          <AlertTitle>Open Security on {settingsTarget.nodeLabel}</AlertTitle>
+          <AlertDescription>
+            Security administration requires that node&apos;s direct local operator channel. Ryco
+            has disabled these controls here so an action can never be applied to this Mac by
+            mistake.
+          </AlertDescription>
+        </Alert>
+      </SettingsPageContainer>
+    );
+  }
+  return <PrimaryNodeSecuritySettings />;
 }
 
 /**

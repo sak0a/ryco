@@ -9,11 +9,13 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useSavedEnvironmentRuntimeStore } from "../../environments/runtime";
+import { readEnvironmentApi } from "../../environmentApi";
 import { ensureLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useSlowRpcAckRequests } from "../../rpc/requestLatencyState";
 import { useTierOverrideStore, type PresentationTierOverride } from "../../tierOverrideStore";
+import { useSettingsTarget } from "../../settingsTarget";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -553,6 +555,7 @@ export function DiagnosticsSettings({
 }: {
   readonly presentation?: DiagnosticsPresentation;
 }) {
+  const settingsTarget = useSettingsTarget();
   const [snapshot, setSnapshot] = useState<DiagnosticsSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -564,29 +567,37 @@ export function DiagnosticsSettings({
   const environmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
   const nowMs = Date.now();
 
-  const refresh = useCallback(async (allowHidden = false) => {
-    if (!allowHidden && document.visibilityState !== "visible") return;
-    if (refreshInFlightRef.current) return;
-    refreshInFlightRef.current = true;
-    setLoading((current) => current && !hasSnapshotRef.current);
-    try {
-      const next = await ensureLocalApi().server.getDiagnosticsSnapshot();
-      if (cancelledRef.current) return;
-      setSnapshot(next);
-      setError(null);
-      hasSnapshotRef.current = true;
-    } catch (refreshError) {
-      if (cancelledRef.current) return;
-      setError(
-        refreshError instanceof Error ? refreshError.message : "Unable to refresh diagnostics.",
-      );
-    } finally {
-      refreshInFlightRef.current = false;
-      if (!cancelledRef.current) {
-        setLoading(false);
+  const refresh = useCallback(
+    async (allowHidden = false) => {
+      if (!allowHidden && document.visibilityState !== "visible") return;
+      if (refreshInFlightRef.current) return;
+      refreshInFlightRef.current = true;
+      setLoading((current) => current && !hasSnapshotRef.current);
+      try {
+        const server = settingsTarget
+          ? readEnvironmentApi(settingsTarget.environmentId)?.server
+          : ensureLocalApi().server;
+        if (!server)
+          throw new Error(`Diagnostics are unavailable on ${settingsTarget?.nodeLabel}.`);
+        const next = await server.getDiagnosticsSnapshot();
+        if (cancelledRef.current) return;
+        setSnapshot(next);
+        setError(null);
+        hasSnapshotRef.current = true;
+      } catch (refreshError) {
+        if (cancelledRef.current) return;
+        setError(
+          refreshError instanceof Error ? refreshError.message : "Unable to refresh diagnostics.",
+        );
+      } finally {
+        refreshInFlightRef.current = false;
+        if (!cancelledRef.current) {
+          setLoading(false);
+        }
       }
-    }
-  }, []);
+    },
+    [settingsTarget],
+  );
 
   useEffect(() => {
     cancelledRef.current = false;

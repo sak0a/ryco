@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { readEnvironmentApi } from "../../environmentApi";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { formatProviderDriverKindLabel } from "../../providerModels";
+import { useSettingsTarget } from "../../settingsTarget";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -116,13 +117,16 @@ function failureToast(title: string, error: unknown) {
 }
 
 export function AgentControlMcpInstallations() {
-  const environmentId = usePrimaryEnvironmentId();
+  const settingsTarget = useSettingsTarget();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const environmentId = settingsTarget?.environmentId ?? primaryEnvironmentId;
   const [providers, setProviders] = useState(EMPTY_PROVIDERS);
   const [workspaces, setWorkspaces] = useState(EMPTY_WORKSPACES);
   const [installations, setInstallations] = useState(emptyMcpInstallationSettingsState);
-  const [topology, setTopology] = useState<{ available: boolean; reason: string | null } | null>(
-    null,
-  );
+  const [topology, setTopology] = useState<{
+    available: boolean;
+    reason: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [customizingId, setCustomizingId] = useState<string | null>(null);
