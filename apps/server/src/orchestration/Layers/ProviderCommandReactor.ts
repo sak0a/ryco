@@ -1,3 +1,6 @@
+import { lstatSync } from "node:fs";
+import nodePath from "node:path";
+
 import {
   type ChatAttachment,
   CommandId,
@@ -5,7 +8,9 @@ import {
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationProjectShell,
   ProviderDriverKind,
+  type OrchestrationThread,
   type ProjectId,
   type OrchestrationSession,
   ThreadId,
@@ -93,6 +98,18 @@ const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const DEFAULT_TOKEN_MODE: AgentTokenMode = DEFAULT_AGENT_TOKEN_MODE;
 const DEFAULT_THREAD_TITLE = "New thread";
+
+function pathEntryExists(targetPath: string): boolean {
+  try {
+    lstatSync(targetPath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
 
 export function providerErrorLabel(value: string | undefined): string {
   const normalized = value?.trim();
@@ -300,6 +317,111 @@ const make = Effect.gen(function* () {
       .pipe(Effect.map(Option.getOrUndefined));
   });
 
+  const ensureRecordedWorktreeAvailable = Effect.fn("ensureRecordedWorktreeAvailable")(function* (
+    thread: OrchestrationThread,
+    project: OrchestrationProjectShell | undefined,
+  ) {
+    if (thread.worktreePath === null) {
+      return;
+    }
+    if (!project) {
+      return yield* new ProviderAdapterRequestError({
+        provider: providerErrorLabel(String(thread.modelSelection.instanceId)),
+        method: "thread.turn.start",
+        detail: `Cannot verify worktree '${thread.worktreePath}' because project '${thread.projectId}' is unavailable.`,
+      });
+    }
+
+    const repositoryRoot = nodePath.resolve(project.workspaceRoot);
+    const worktreePath = nodePath.resolve(thread.worktreePath);
+    if (worktreePath === repositoryRoot) {
+      return;
+    }
+
+    const registeredWorktreePaths = () =>
+      gitWorkflow
+        .listWorktreePaths(repositoryRoot)
+        .pipe(Effect.map((paths) => paths.map((entry) => nodePath.resolve(entry))));
+    const failRecovery = (detail: string) =>
+      new ProviderAdapterRequestError({
+        provider: providerErrorLabel(String(thread.modelSelection.instanceId)),
+        method: "thread.turn.start",
+        detail,
+      });
+
+    if (pathEntryExists(worktreePath)) {
+      const registeredPaths = yield* registeredWorktreePaths();
+      if (!registeredPaths.includes(worktreePath)) {
+        return yield* failRecovery(
+          `Refusing to use '${worktreePath}' because it exists but is not a registered worktree for '${repositoryRoot}'.`,
+        );
+      }
+      return;
+    }
+
+    const branch = thread.branch;
+    if (branch === null) {
+      return yield* failRecovery(
+        `Cannot recreate missing worktree '${worktreePath}' because the thread has no recorded branch.`,
+      );
+    }
+
+    const localBranches = yield* gitWorkflow.listLocalBranchNames(repositoryRoot);
+    if (!localBranches.includes(branch)) {
+      return yield* failRecovery(
+        `Cannot recreate missing worktree '${worktreePath}' because branch '${branch}' no longer exists.`,
+      );
+    }
+
+    yield* gitWorkflow.pruneWorktrees(repositoryRoot);
+
+    // Another process may have recreated the path while the stale metadata was pruned.
+    if (pathEntryExists(worktreePath)) {
+      const registeredPaths = yield* registeredWorktreePaths();
+      if (registeredPaths.includes(worktreePath)) {
+        return;
+      }
+      return yield* failRecovery(
+        `Refusing to recreate worktree '${worktreePath}' because another filesystem entry now occupies that path.`,
+      );
+    }
+
+    const recreated = yield* gitWorkflow.createWorktree({
+      cwd: repositoryRoot,
+      path: worktreePath,
+      refName: branch,
+      dependencyHydration: "none",
+    });
+    if (
+      nodePath.resolve(recreated.worktree.path) !== worktreePath ||
+      recreated.worktree.refName !== branch
+    ) {
+      return yield* failRecovery(
+        `Worktree recovery returned unexpected metadata for '${worktreePath}' and branch '${branch}'.`,
+      );
+    }
+
+    const changedAt = new Date().toISOString();
+    yield* orchestrationEngine.dispatch({
+      type: "thread.meta.update",
+      commandId: serverCommandId("worktree-recovered"),
+      threadId: thread.id,
+      branch,
+      worktreePath,
+    });
+    if (thread.worktreeId !== undefined && thread.worktreeId !== null) {
+      yield* orchestrationEngine.dispatch({
+        type: "worktree.meta.update",
+        commandId: serverCommandId("worktree-recovered-meta"),
+        worktreeId: thread.worktreeId,
+        branch,
+        changedAt,
+      });
+    }
+    yield* gitWorkflow.invalidateStatus(worktreePath);
+    yield* vcsStatusBroadcaster.refreshStatus(worktreePath).pipe(Effect.ignoreCause({ log: true }));
+  });
+
   const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
     threadId: ThreadId,
     createdAt: string,
@@ -311,6 +433,9 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
+
+    const project = yield* resolveProject(thread.projectId);
+    yield* ensureRecordedWorktreeAvailable(thread, project);
 
     const desiredRuntimeMode = thread.runtimeMode;
     const desiredTokenMode = thread.tokenMode ?? DEFAULT_TOKEN_MODE;
@@ -403,7 +528,6 @@ const make = Effect.gen(function* () {
         });
       }
     }
-    const project = yield* resolveProject(thread.projectId);
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
       projects: project ? [project] : [],
@@ -780,43 +904,8 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    if (event.payload.contextHandoff !== undefined) {
-      yield* contextHandoffCoordinator.processTurnStart(event);
-      return;
-    }
-
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
-    if (isFirstUserMessageTurn) {
-      const project = yield* resolveProject(thread.projectId);
-      const generationCwd =
-        resolveThreadWorkspaceCwd({
-          thread,
-          projects: project ? [project] : [],
-        }) ?? process.cwd();
-      const generationInput = {
-        messageText: message.text,
-        ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-        ...(event.payload.titleSeed !== undefined ? { titleSeed: event.payload.titleSeed } : {}),
-      };
-
-      yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
-        threadId: event.payload.threadId,
-        branch: thread.branch,
-        worktreePath: thread.worktreePath,
-        worktreeId: thread.worktreeId ?? null,
-        ...generationInput,
-      }).pipe(Effect.forkScoped);
-
-      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
-        yield* maybeGenerateThreadTitleForFirstTurn({
-          threadId: event.payload.threadId,
-          cwd: generationCwd,
-          ...generationInput,
-        }).pipe(Effect.forkScoped);
-      }
-    }
-
     const handleTurnStartFailure = (cause: Cause.Cause<unknown>) => {
       if (Cause.hasInterruptsOnly(cause)) {
         return Effect.void;
@@ -853,6 +942,19 @@ const make = Effect.gen(function* () {
         ),
       );
 
+    if (event.payload.contextHandoff !== undefined) {
+      const project = yield* resolveProject(thread.projectId);
+      const worktreeReady = yield* ensureRecordedWorktreeAvailable(thread, project).pipe(
+        Effect.as(true),
+        Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(false))),
+      );
+      if (!worktreeReady) {
+        return;
+      }
+      yield* contextHandoffCoordinator.processTurnStart(event);
+      return;
+    }
+
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
@@ -870,6 +972,36 @@ const make = Effect.gen(function* () {
 
     if (Option.isNone(sendTurnRequest)) {
       return;
+    }
+
+    if (isFirstUserMessageTurn) {
+      const project = yield* resolveProject(thread.projectId);
+      const generationCwd =
+        resolveThreadWorkspaceCwd({
+          thread,
+          projects: project ? [project] : [],
+        }) ?? process.cwd();
+      const generationInput = {
+        messageText: message.text,
+        ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+        ...(event.payload.titleSeed !== undefined ? { titleSeed: event.payload.titleSeed } : {}),
+      };
+
+      yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
+        threadId: event.payload.threadId,
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        worktreeId: thread.worktreeId ?? null,
+        ...generationInput,
+      }).pipe(Effect.forkScoped);
+
+      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
+        yield* maybeGenerateThreadTitleForFirstTurn({
+          threadId: event.payload.threadId,
+          cwd: generationCwd,
+          ...generationInput,
+        }).pipe(Effect.forkScoped);
+      }
     }
 
     const commitAcceptedModelSelection =
