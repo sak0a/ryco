@@ -23,6 +23,8 @@ export interface ThreadSubagentView {
   status: ThreadSubagentStatus;
   origin?: string | null;
   capability?: string | null;
+  model?: string | null;
+  effort?: string | null;
   tool: string | null;
   detail: string | null;
   providerThreadIds: string[];
@@ -39,6 +41,8 @@ interface MutableThreadSubagentView {
   status: ThreadSubagentStatus;
   origin: string | null;
   capability: string | null;
+  model: string | null;
+  effort: string | null;
   tool: string | null;
   detail: string | null;
   providerThreadIds: Set<string>;
@@ -212,6 +216,16 @@ function extractSubagentOrigin(payload: Record<string, unknown> | null): string 
 
 function extractSubagentCapability(payload: Record<string, unknown> | null): string | null {
   return asTrimmedString(canonicalSubagentFromPayload(payload)?.capability);
+}
+
+function extractSubagentModel(payload: Record<string, unknown> | null): string | null {
+  const subagent = canonicalSubagentFromPayload(payload);
+  return asTrimmedString(subagent?.model) ?? asTrimmedString(payload?.model);
+}
+
+function extractSubagentEffort(payload: Record<string, unknown> | null): string | null {
+  const subagent = canonicalSubagentFromPayload(payload);
+  return asTrimmedString(subagent?.effort) ?? asTrimmedString(payload?.effort);
 }
 
 function detailPrefix(value: string | null): string | null {
@@ -732,6 +746,8 @@ export function deriveThreadSubagents(
     const providerSessionIds = extractProviderSessionIds(payload);
     const origin = extractSubagentOrigin(payload);
     const capability = extractSubagentCapability(payload);
+    const model = extractSubagentModel(payload);
+    const effort = extractSubagentEffort(payload);
     const tool = extractSubagentTool(payload);
     const key = subagentKey({
       canonicalSubagentId,
@@ -749,6 +765,8 @@ export function deriveThreadSubagents(
       existing.detail = detail ?? existing.detail;
       existing.origin = existing.origin ?? origin;
       existing.capability = existing.capability ?? capability;
+      existing.model = existing.model ?? model;
+      existing.effort = existing.effort ?? effort;
       existing.tool = existing.tool ?? tool;
       mergeProviderThreadIds(existing.providerThreadIds, providerThreadIds);
       mergeStringSet(existing.providerSessionIds, providerSessionIds);
@@ -778,6 +796,8 @@ export function deriveThreadSubagents(
           : "idle"),
       origin,
       capability,
+      model,
+      effort,
       tool,
       detail,
       providerThreadIds: new Set(providerThreadIds),
@@ -841,6 +861,8 @@ export function deriveThreadSubagents(
       status,
       origin: null,
       capability: null,
+      model: null,
+      effort: null,
       tool: null,
       detail,
       providerThreadIds: new Set(),
@@ -893,6 +915,8 @@ export function deriveThreadSubagents(
       status: subagent.status,
       origin: subagent.origin,
       capability: subagent.capability,
+      model: subagent.model,
+      effort: subagent.effort,
       tool: subagent.tool,
       detail: subagent.detail,
       providerThreadIds: [...subagent.providerThreadIds],

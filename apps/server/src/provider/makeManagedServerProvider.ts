@@ -51,6 +51,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   }) => Effect.Effect<void>;
   readonly refreshInterval?: Duration.Input | null;
   readonly snapshotFreshness?: Duration.Input;
+  readonly retainInventoryOnError?: boolean;
 }): Effect.fn.Return<ServerProviderShape, ServerSettingsError, Scope.Scope> {
   const refreshSemaphore = yield* Semaphore.make(1);
   const changesPubSub = yield* Effect.acquireRelease(
@@ -137,7 +138,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot));
     }
 
-    const nextSnapshot = yield* input.checkProvider.pipe(
+    const checkedSnapshot = yield* input.checkProvider.pipe(
       Effect.onExit(() =>
         Clock.currentTimeMillis.pipe(
           Effect.flatMap((lastRefreshAttemptAtMs) =>
@@ -149,6 +150,23 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
         ),
       ),
     );
+    const previousSnapshot = yield* Ref.get(snapshotStateRef).pipe(
+      Effect.map((state) => state.snapshot),
+    );
+    const nextSnapshot =
+      input.retainInventoryOnError === true && checkedSnapshot.status === "error"
+        ? {
+            ...checkedSnapshot,
+            models:
+              checkedSnapshot.models.length > 0 ? checkedSnapshot.models : previousSnapshot.models,
+            slashCommands:
+              checkedSnapshot.slashCommands.length > 0
+                ? checkedSnapshot.slashCommands
+                : previousSnapshot.slashCommands,
+            skills:
+              checkedSnapshot.skills.length > 0 ? checkedSnapshot.skills : previousSnapshot.skills,
+          }
+        : checkedSnapshot;
     const nextGeneration = yield* Ref.modify(snapshotStateRef, (state) => {
       const generation = input.enrichSnapshot
         ? state.enrichmentGeneration + 1

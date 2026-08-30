@@ -445,4 +445,61 @@ describe("makeManagedServerProvider", () => {
       }),
     ),
   );
+
+  it.effect("retains the last known inventory when a refresh reports an error", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const firstCheckComplete = yield* Deferred.make<void>();
+        const checkCount = yield* Ref.make(0);
+        const availableSnapshot: ServerProvider = {
+          ...refreshedSnapshot,
+          models: enrichedSnapshot.models,
+          slashCommands: [{ name: "review" }],
+          skills: [
+            {
+              name: "frontend",
+              path: "/skills/frontend/SKILL.md",
+              enabled: true,
+            },
+          ],
+        };
+        const failedSnapshot: ServerProvider = {
+          ...refreshedSnapshotSecond,
+          status: "error",
+          message: "Temporary inventory failure.",
+          models: [],
+          slashCommands: [],
+          skills: [],
+        };
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => initialSnapshot,
+          checkProvider: Ref.updateAndGet(checkCount, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1
+                ? Deferred.succeed(firstCheckComplete, undefined).pipe(Effect.as(availableSnapshot))
+                : Effect.succeed(failedSnapshot),
+            ),
+          ),
+          retainInventoryOnError: true,
+          refreshInterval: null,
+        });
+
+        yield* Deferred.await(firstCheckComplete);
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (Equal.equals(yield* provider.getSnapshot, availableSnapshot)) break;
+          yield* Effect.yieldNow;
+        }
+
+        const result = yield* provider.refresh;
+        assert.strictEqual(result.status, "error");
+        assert.deepStrictEqual(result.models, availableSnapshot.models);
+        assert.deepStrictEqual(result.slashCommands, availableSnapshot.slashCommands);
+        assert.deepStrictEqual(result.skills, availableSnapshot.skills);
+      }),
+    ),
+  );
 });

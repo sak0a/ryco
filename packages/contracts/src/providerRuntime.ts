@@ -656,6 +656,8 @@ export const SubagentRef = Schema.Struct({
   capability: RuntimeSubagentCapability,
   label: Schema.optional(TrimmedNonEmptyStringSchema),
   description: Schema.optional(TrimmedNonEmptyStringSchema),
+  model: Schema.optional(TrimmedNonEmptyStringSchema),
+  effort: Schema.optional(TrimmedNonEmptyStringSchema),
   providerSessionId: Schema.optional(TrimmedNonEmptyStringSchema),
   providerThreadId: Schema.optional(TrimmedNonEmptyStringSchema),
   providerTaskId: Schema.optional(RuntimeTaskId),

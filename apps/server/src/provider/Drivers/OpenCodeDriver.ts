@@ -149,6 +149,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             Effect.provideService(ServerSettingsService, serverSettings),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),
+        retainInventoryOnError: true,
         refreshInterval: null,
       }).pipe(
         Effect.mapError(

@@ -791,7 +791,7 @@ export function SubagentRows({ subagents = [], onOpenSubagent }: SubagentProps) 
   return (
     <div>
       {subagents.map((subagent) => {
-        const meta = subagent.tool ?? subagent.role ?? null;
+        const meta = subagent.model ?? subagent.tool ?? subagent.role ?? null;
         const timestamp = subagent.updatedAt || subagent.startedAt;
         return (
           <button

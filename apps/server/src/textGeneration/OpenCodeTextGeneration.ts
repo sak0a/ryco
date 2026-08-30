@@ -36,6 +36,7 @@ import {
   openCodeRuntimeErrorDetail,
   parseOpenCodeModelSlug,
   toOpenCodeFileParts,
+  verifyOpenCodeServerVersion,
 } from "../provider/opencodeRuntime.ts";
 
 const OPENCODE_TEXT_GENERATION_IDLE_TTL = "30 seconds";
@@ -210,6 +211,9 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
                 openCodeRuntime
                   .startOpenCodeServerProcess({
                     binaryPath: input.binaryPath,
+                    ...(openCodeSettings.serverPassword
+                      ? { serverPassword: openCodeSettings.serverPassword }
+                      : {}),
                     environment,
                   })
                   .pipe(
@@ -329,15 +333,13 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       resolveAttachmentUrl: (attachment) => attachmentUrlById.get(attachment.id) ?? null,
     });
 
-    const runAgainstServer = (server: Pick<OpenCodeServerConnection, "url">) =>
+    const runAgainstServer = (server: Pick<OpenCodeServerConnection, "url" | "serverPassword">) =>
       Effect.gen(function* () {
         const client = yield* openCodeRuntime
           .createOpenCodeSdkClient({
             baseUrl: server.url,
             directory: input.cwd,
-            ...(openCodeSettings.serverUrl.length > 0 && openCodeSettings.serverPassword
-              ? { serverPassword: openCodeSettings.serverPassword }
-              : {}),
+            ...(server.serverPassword ? { serverPassword: server.serverPassword } : {}),
           })
           .pipe(
             Effect.mapError(
@@ -349,6 +351,16 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
                 }),
             ),
           );
+        yield* verifyOpenCodeServerVersion(client).pipe(
+          Effect.mapError(
+            (cause) =>
+              new TextGenerationError({
+                operation: input.operation,
+                detail: openCodeRuntimeErrorDetail(cause),
+                cause,
+              }),
+          ),
+        );
         return yield* Effect.tryPromise({
           try: async () => {
             const session = await client.session.create({
@@ -393,7 +405,12 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
 
     const rawOutput =
       openCodeSettings.serverUrl.length > 0
-        ? yield* runAgainstServer({ url: openCodeSettings.serverUrl })
+        ? yield* runAgainstServer({
+            url: openCodeSettings.serverUrl,
+            ...(openCodeSettings.serverPassword
+              ? { serverPassword: openCodeSettings.serverPassword }
+              : {}),
+          })
         : yield* Effect.acquireUseRelease(
             acquireSharedServer({
               binaryPath: openCodeSettings.binaryPath,

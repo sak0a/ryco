@@ -17,9 +17,11 @@ import {
 } from "../providerSnapshot.ts";
 import { compareCliVersions } from "../cliVersion.ts";
 import {
+  MINIMUM_OPENCODE_VERSION,
   OpenCodeRuntime,
   openCodeRuntimeErrorDetail,
   type OpenCodeInventory,
+  verifyOpenCodeServerVersion,
 } from "../opencodeRuntime.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 
@@ -28,8 +30,6 @@ const OPENCODE_PRESENTATION = {
   displayName: "OpenCode",
   showInteractionModeToggle: false,
 } as const;
-const MINIMUM_OPENCODE_VERSION = "1.14.19";
-
 class OpenCodeProbeError extends Data.TaggedError("OpenCodeProbeError")<{
   readonly cause: unknown;
   readonly detail: string;
@@ -442,6 +442,9 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
           .connectToOpenCodeServer({
             binaryPath: openCodeSettings.binaryPath,
             serverUrl: openCodeSettings.serverUrl,
+            ...(openCodeSettings.serverPassword
+              ? { serverPassword: openCodeSettings.serverPassword }
+              : {}),
             environment,
           })
           .pipe(
@@ -454,9 +457,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
           .createOpenCodeSdkClient({
             baseUrl: server.url,
             directory: cwd,
-            ...(isExternalServer && openCodeSettings.serverPassword
-              ? { serverPassword: openCodeSettings.serverPassword }
-              : {}),
+            ...(server.serverPassword ? { serverPassword: server.serverPassword } : {}),
           })
           .pipe(
             Effect.mapError(
@@ -464,7 +465,12 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
                 new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
             ),
           );
-        return yield* openCodeRuntime
+        const serverVersion = yield* verifyOpenCodeServerVersion(client).pipe(
+          Effect.mapError(
+            (cause) => new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
+          ),
+        );
+        const inventory = yield* openCodeRuntime
           .loadOpenCodeInventory(client)
           .pipe(
             Effect.mapError(
@@ -472,6 +478,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
                 new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
             ),
           );
+        return { inventory, serverVersion };
       }),
     ),
   );
@@ -479,13 +486,14 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     return fallback(Cause.squash(inventoryExit.cause), version);
   }
 
+  version = inventoryExit.value.serverVersion;
   const models = providerModelsFromSettings(
-    flattenOpenCodeModels(inventoryExit.value),
+    flattenOpenCodeModels(inventoryExit.value.inventory),
     PROVIDER,
     customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
-  const connectedCount = new Set(inventoryExit.value.providerList.connected).size;
+  const connectedCount = new Set(inventoryExit.value.inventory.providerList.connected).size;
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,

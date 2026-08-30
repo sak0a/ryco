@@ -37,7 +37,7 @@ const runtimeMock = {
 };
 
 const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
-  startOpenCodeServerProcess: ({ binaryPath }) =>
+  startOpenCodeServerProcess: ({ binaryPath, serverPassword }) =>
     Effect.gen(function* () {
       const index = runtimeMock.state.startCalls.length + 1;
       const url = `http://127.0.0.1:${4_300 + index}`;
@@ -51,18 +51,23 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       );
       return {
         url,
+        ...(serverPassword ? { serverPassword } : {}),
         exitCode: Effect.never,
       };
     }),
-  connectToOpenCodeServer: ({ serverUrl }) =>
+  connectToOpenCodeServer: ({ serverUrl, serverPassword }) =>
     Effect.succeed({
       url: serverUrl ?? "http://127.0.0.1:4301",
+      ...(serverPassword ? { serverPassword } : {}),
       exitCode: null,
       external: Boolean(serverUrl),
     }),
   runOpenCodeCommand: () => Effect.succeed({ stdout: "", stderr: "", code: 0 }),
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     Effect.succeed({
+      global: {
+        health: async () => ({ data: { healthy: true, version: "1.18.18" } }),
+      },
       session: {
         create: async () => ({ data: { id: `${baseUrl}/session` } }),
         prompt: async () => {
