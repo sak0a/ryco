@@ -57,6 +57,7 @@ function hostedState(overrides: Partial<HostedHubState> = {}): HostedHubState {
     browserStatus: "current",
     recoveryCodes: [],
     errorMessage: null,
+    errorReason: null,
     generation: 0,
     ...overrides,
   };
@@ -304,6 +305,16 @@ describe("hosted sign-in surface", () => {
     expect(signInView({ errorMessage: "Hub is temporarily unavailable." }).errorMessage).toBe(
       "Hub is temporarily unavailable.",
     );
+  });
+
+  it("renders the bounded explanation for a typed native-session failure", () => {
+    expect(
+      signInView({
+        accountStatus: "session-expired",
+        errorMessage: null,
+        errorReason: "missing-token",
+      }).errorMessage,
+    ).toBe("This device no longer has its secure Hub session. Sign in again to continue.");
   });
 });
 

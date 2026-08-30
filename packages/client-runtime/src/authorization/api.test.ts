@@ -567,6 +567,48 @@ describe("HostedHubApi", () => {
     ).rejects.toMatchObject({ name: "AbortError" });
   });
 
+  it("classifies transport unavailability without reflecting network detail", async () => {
+    const api = createApi();
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("sensitive-network-provider-detail");
+    });
+
+    const error = await api.restoreSession().catch((cause) => cause);
+
+    expect(error).toMatchObject({
+      code: "unavailable",
+      reason: "transport-unavailable",
+      message: "Ryco could not reach the Hub. Check your connection and try again.",
+    });
+    expect((error as Error).message).not.toContain("sensitive-network-provider-detail");
+  });
+
+  it("distinguishes the request deadline from caller cancellation", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = createApi();
+      globalThis.fetch = vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("deadline", "AbortError")),
+            );
+          }),
+      );
+
+      const pending = api.restoreSession();
+      const rejection = expect(pending).rejects.toMatchObject({
+        code: "timeout",
+        reason: "request-timeout",
+        message: "The Hub did not respond in time. Check your connection and try again.",
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("looks up, approves, and denies enrollments with session-bound CSRF", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     const enrollment = {
@@ -1562,19 +1604,27 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
   it("fails closed when bearer credentials lack a DPoP signer or token holder", () => {
     const { service } = recordingDpopSigner();
     // Missing signer.
-    expect(
-      () =>
-        new HostedHubApi({
+    const missingSigner = (() => {
+      try {
+        return new HostedHubApi({
           endpoint: fakeEndpoint,
           httpClient: fakeHttpClient,
           sessionCredentials: inMemoryBearerCredentials(),
           passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
-        }),
-    ).toThrow();
+        });
+      } catch (error) {
+        return error;
+      }
+    })();
+    expect(missingSigner).toMatchObject({
+      reason: "missing-signer",
+      message:
+        "Secure session signing is unavailable on this device. Restart the app, then try again.",
+    });
     // Missing bearer-token holder (only the cookie CSRF slots present).
-    expect(
-      () =>
-        new HostedHubApi({
+    const missingTokenHolder = (() => {
+      try {
+        return new HostedHubApi({
           endpoint: fakeEndpoint,
           httpClient: fakeHttpClient,
           sessionCredentials: {
@@ -1584,8 +1634,15 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
           },
           dpopSigner: service,
           passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
-        }),
-    ).toThrow();
+        });
+      } catch (error) {
+        return error;
+      }
+    })();
+    expect(missingTokenHolder).toMatchObject({
+      reason: "missing-token",
+      message: "This device no longer has its secure Hub session. Sign in again to continue.",
+    });
   });
 
   it("routes login through native passkey endpoints with a mint proof and no CSRF", async () => {
@@ -1735,9 +1792,58 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     const api = createBearerApi(service, inMemoryBearerCredentials());
     const fetchSpy = vi.fn(async () => response({ nodes: [] }));
     globalThis.fetch = fetchSpy;
-    await expect(api.listNodes()).rejects.toMatchObject({ code: "session_invalid" });
+    await expect(api.listNodes()).rejects.toMatchObject({
+      code: "session_invalid",
+      reason: "missing-token",
+      message: "This device no longer has its secure Hub session. Sign in again to continue.",
+    });
     // The request must never reach the wire without a bound token.
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports proof signing failures without exposing signer detail or making a request", async () => {
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const signerDetail = "sensitive-keystore-provider-detail";
+    const api = createBearerApi(
+      {
+        sign: async () => {
+          throw new Error(signerDetail);
+        },
+      },
+      credentials,
+    );
+    const fetchSpy = vi.fn(async () => response({ nodes: [] }));
+    globalThis.fetch = fetchSpy;
+
+    const error = await api.listNodes().catch((cause) => cause);
+
+    expect(error).toMatchObject({
+      reason: "proof-signing-failed",
+      message:
+        "This device could not verify its secure Hub session. Unlock the device and try again; if it continues, sign in again.",
+    });
+    expect((error as Error).message).not.toContain(signerDetail);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("classifies an explicit authenticated-session invalidation without reflecting response detail", async () => {
+    const { service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const api = createBearerApi(service, credentials);
+    globalThis.fetch = vi.fn(async () =>
+      response({ error: "session_invalid", details: "sensitive-native-session-detail" }, 401),
+    );
+
+    const error = await api.listNodes().catch((cause) => cause);
+
+    expect(error).toMatchObject({
+      code: "session_invalid",
+      reason: "token-invalidated",
+      message: "Your secure Hub session is no longer valid. Sign in again to continue.",
+    });
+    expect((error as Error).message).not.toContain("sensitive-native-session-detail");
   });
 
   it("fails closed before any I/O on browser-only routes in bearer mode", async () => {

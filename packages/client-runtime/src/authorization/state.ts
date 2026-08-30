@@ -1,7 +1,7 @@
 import type { EnvironmentId, RelayEffectiveRole } from "@ryco/contracts";
 import type * as HostedIdentity from "@ryco/contracts/hosted-identity";
 
-import { HostedHubApiError, type HostedAccountStepUp } from "./api.ts";
+import { HostedHubApiError, type HostedAccountStepUp, type HostedHubFailureReason } from "./api.ts";
 import { activateHostedNode, deactivateHostedNode, suspendHostedNode } from "./environment.ts";
 import { NativeHandoffClientError } from "./nativeHandoff.ts";
 import { getHostedHubApi, getHostedRuntimeConfiguration } from "./runtime.ts";
@@ -63,6 +63,8 @@ export interface HostedHubState {
    */
   readonly totpEnrollment?: HostedTotpEnrollment | null;
   readonly errorMessage: string | null;
+  /** Client-known failure category used by native/web presentation; never server detail. */
+  readonly errorReason?: HostedHubFailureReason | null;
   readonly generation: number;
 }
 
@@ -84,6 +86,7 @@ const initialState: HostedHubState = {
   recoveryCodes: [],
   totpEnrollment: null,
   errorMessage: null,
+  errorReason: null,
   generation: 0,
 };
 
@@ -230,7 +233,10 @@ export const hostedRecoveryCodeDisplayStore = createHostedStore<HostedRecoveryCo
 });
 
 function patchState(patch: Partial<HostedHubState>): void {
-  hostedHubStore.setState(patch);
+  const clearsReason =
+    Object.prototype.hasOwnProperty.call(patch, "errorMessage") &&
+    !Object.prototype.hasOwnProperty.call(patch, "errorReason");
+  hostedHubStore.setState(clearsReason ? { ...patch, errorReason: null } : patch);
 }
 
 function patchAccountState(patch: Partial<HostedAccountState>): void {
@@ -253,6 +259,13 @@ function errorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null && "name" in error && error.name === "AbortError")
     return "";
   return "Hub is temporarily unavailable.";
+}
+
+function hostedErrorPatch(error: unknown): Pick<HostedHubState, "errorMessage" | "errorReason"> {
+  return {
+    errorMessage: errorMessage(error) || null,
+    errorReason: error instanceof HostedHubApiError ? error.reason : null,
+  };
 }
 
 /**
@@ -450,7 +463,7 @@ class HostedHubController {
         patchState({
           ...initialState,
           accountStatus: "unavailable",
-          errorMessage: errorMessage(error),
+          ...hostedErrorPatch(error),
         });
         return undefined;
       })
@@ -491,7 +504,7 @@ class HostedHubController {
       await this.refreshDirectory();
     } catch (error) {
       if (operation.signal.aborted) return;
-      patchState({ accountStatus: "signed-out", errorMessage: errorMessage(error) || null });
+      patchState({ accountStatus: "signed-out", ...hostedErrorPatch(error) });
     } finally {
       if (this.#operation === operation) this.#operation = null;
     }
@@ -517,7 +530,7 @@ class HostedHubController {
       await this.refreshDirectory();
     } catch (error) {
       if (operation.signal.aborted) return;
-      patchState({ accountStatus: "signed-out", errorMessage: errorMessage(error) || null });
+      patchState({ accountStatus: "signed-out", ...hostedErrorPatch(error) });
     } finally {
       if (this.#operation === operation) this.#operation = null;
     }
@@ -604,7 +617,7 @@ class HostedHubController {
       await this.refreshDirectory();
     } catch (error) {
       if (operation.signal.aborted) return;
-      patchState({ accountStatus: "signed-out", errorMessage: errorMessage(error) || null });
+      patchState({ accountStatus: "signed-out", ...hostedErrorPatch(error) });
     } finally {
       if (this.#operation === operation) this.#operation = null;
     }
@@ -788,7 +801,7 @@ class HostedHubController {
     } catch (error) {
       if (operation.signal.aborted) return;
       if (isSessionFailure(error)) {
-        await this.#expireSessionHandled();
+        await this.#expireSessionHandled(error);
         return;
       }
       if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
@@ -809,8 +822,8 @@ class HostedHubController {
    * session failure into a rejected account read, and hand a fire-and-forget
    * caller an unhandled rejection.
    */
-  async #expireSessionHandled(): Promise<void> {
-    await this.expireSession().catch(() => undefined);
+  async #expireSessionHandled(error?: unknown): Promise<void> {
+    await this.expireSession(error).catch(() => undefined);
   }
 
   /**
@@ -919,7 +932,7 @@ class HostedHubController {
     } catch (error) {
       if (operation.signal.aborted) return;
       if (isSessionFailure(error)) {
-        await this.#expireSessionHandled();
+        await this.#expireSessionHandled(error);
         return;
       }
       if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
@@ -1323,7 +1336,7 @@ class HostedHubController {
     } catch (error) {
       if (operation.signal.aborted) return refusedLocally("cancelled", null);
       if (isSessionFailure(error)) {
-        await this.#expireSessionHandled();
+        await this.#expireSessionHandled(error);
         return refused("session-expired", error);
       }
       if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
@@ -1438,9 +1451,12 @@ class HostedHubController {
     await this.clearAccount("signed-out");
   }
 
-  async expireSession(): Promise<void> {
+  async expireSession(error?: unknown): Promise<void> {
     getHostedHubApi().clearSessionMaterial();
     await this.clearAccount("session-expired");
+    if (error instanceof HostedHubApiError && error.reason !== null) {
+      patchState(hostedErrorPatch(error));
+    }
   }
 
   suspendBrowser(reason: "hidden" | "offline"): void {
@@ -1520,10 +1536,10 @@ class HostedHubController {
       if (operation.signal.aborted || this.#browserLifecycleGeneration !== browserGeneration)
         return;
       if (isSessionFailure(error)) {
-        await this.expireSession();
+        await this.expireSession(error);
         return;
       }
-      patchState({ browserStatus: "stale", errorMessage: errorMessage(error) });
+      patchState({ browserStatus: "stale", ...hostedErrorPatch(error) });
     }
   }
 
@@ -1633,14 +1649,14 @@ class HostedHubController {
     } catch (error) {
       if (operation.signal.aborted) return;
       if (isSessionFailure(error)) {
-        await this.expireSession();
+        await this.expireSession(error);
         return;
       }
       this.#directoryRetry += 1;
       patchState({
         directoryStatus: "stale",
         effectiveRole: null,
-        errorMessage: errorMessage(error),
+        ...hostedErrorPatch(error),
       });
       const delay = Math.min(
         DIRECTORY_RETRY_MAX_MS,
@@ -1723,6 +1739,7 @@ class HostedHubController {
           ? "current"
           : state.browserStatus,
       errorMessage: preserve ? state.errorMessage : null,
+      errorReason: preserve ? (state.errorReason ?? null) : null,
       generation: state.generation + 1,
     });
     await deactivateHostedNode(node.environmentId);

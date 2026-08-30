@@ -300,6 +300,8 @@ export class HostedHubApiError extends Error {
    * see {@link narrowCode}.
    */
   readonly inferred: boolean;
+  /** A bounded client-known cause; never populated from provider or server detail. */
+  readonly reason: HostedHubFailureReason | null;
 
   constructor(
     code: string,
@@ -307,8 +309,9 @@ export class HostedHubApiError extends Error {
     retryAfterMs?: number,
     intent?: HostedAccountIntent,
     wireCode?: string,
+    reason?: HostedHubFailureReason,
   ) {
-    super(messageForCode(code, intent));
+    super(reason ? hostedHubFailureExplanation(reason).message : messageForCode(code, intent));
     this.name = "HostedHubApiError";
     this.code = code;
     this.status = status;
@@ -316,7 +319,74 @@ export class HostedHubApiError extends Error {
     this.intent = intent;
     this.wireCode = wireCode ?? code;
     this.inferred = wireCode !== undefined && wireCode !== code;
+    this.reason = reason ?? null;
   }
+}
+
+export type HostedHubFailureReason =
+  | "missing-signer"
+  | "missing-token"
+  | "proof-signing-failed"
+  | "token-invalidated"
+  | "request-timeout"
+  | "transport-unavailable";
+
+export type HostedHubFailureRecovery = "retry" | "sign-in" | "restart-app";
+
+export interface HostedHubFailureExplanation {
+  readonly reason: HostedHubFailureReason;
+  readonly title: string;
+  readonly message: string;
+  readonly recovery: HostedHubFailureRecovery;
+}
+
+const HOSTED_HUB_FAILURE_EXPLANATIONS: Readonly<
+  Record<HostedHubFailureReason, HostedHubFailureExplanation>
+> = {
+  "missing-signer": {
+    reason: "missing-signer",
+    title: "Secure session unavailable",
+    message:
+      "Secure session signing is unavailable on this device. Restart the app, then try again.",
+    recovery: "restart-app",
+  },
+  "missing-token": {
+    reason: "missing-token",
+    title: "Sign in again",
+    message: "This device no longer has its secure Hub session. Sign in again to continue.",
+    recovery: "sign-in",
+  },
+  "proof-signing-failed": {
+    reason: "proof-signing-failed",
+    title: "Secure session could not be verified",
+    message:
+      "This device could not verify its secure Hub session. Unlock the device and try again; if it continues, sign in again.",
+    recovery: "retry",
+  },
+  "token-invalidated": {
+    reason: "token-invalidated",
+    title: "Session no longer valid",
+    message: "Your secure Hub session is no longer valid. Sign in again to continue.",
+    recovery: "sign-in",
+  },
+  "request-timeout": {
+    reason: "request-timeout",
+    title: "Hub did not respond",
+    message: "The Hub did not respond in time. Check your connection and try again.",
+    recovery: "retry",
+  },
+  "transport-unavailable": {
+    reason: "transport-unavailable",
+    title: "Hub could not be reached",
+    message: "Ryco could not reach the Hub. Check your connection and try again.",
+    recovery: "retry",
+  },
+};
+
+export function hostedHubFailureExplanation(
+  reason: HostedHubFailureReason,
+): HostedHubFailureExplanation {
+  return HOSTED_HUB_FAILURE_EXPLANATIONS[reason];
 }
 
 /**
@@ -716,13 +786,24 @@ export class HostedHubApi {
       // Fail closed: a bearer (native) session cannot be presented without a
       // DPoP signer and a token holder, so a misconfigured adapter must not
       // silently fall back to an unauthenticated or cross-transport request.
-      if (
-        !this.#dpopSigner ||
-        !this.#sessionCredentials.readBearerToken ||
-        !this.#sessionCredentials.writeBearerToken
-      ) {
-        throw new Error(
-          "Bearer session credentials require a DPoP signer and a bearer-token holder.",
+      if (!this.#dpopSigner) {
+        throw new HostedHubApiError(
+          "native_session_unavailable",
+          0,
+          undefined,
+          undefined,
+          undefined,
+          "missing-signer",
+        );
+      }
+      if (!this.#sessionCredentials.readBearerToken || !this.#sessionCredentials.writeBearerToken) {
+        throw new HostedHubApiError(
+          "native_session_unavailable",
+          0,
+          undefined,
+          undefined,
+          undefined,
+          "missing-token",
         );
       }
     }
@@ -2640,16 +2721,47 @@ export class HostedHubApi {
       // the mint/login ceremony (and the public status probe) carries a proof
       // without `ath` and no token.
       const signer = this.#dpopSigner;
-      if (!signer) throw new HostedHubApiError("session_invalid", 401, undefined, options.intent);
+      if (!signer) {
+        throw new HostedHubApiError(
+          "native_session_unavailable",
+          0,
+          undefined,
+          options.intent,
+          undefined,
+          "missing-signer",
+        );
+      }
       const requestUrl = url.toString();
       let token: string | undefined;
       if (options.dpop !== "mint") {
         token = this.#readBearerToken() ?? undefined;
         if (!token) {
-          throw new HostedHubApiError("session_invalid", 401, undefined, options.intent);
+          throw new HostedHubApiError(
+            "session_invalid",
+            401,
+            undefined,
+            options.intent,
+            undefined,
+            "missing-token",
+          );
         }
       }
-      headers["DPoP"] = await signer.sign({ method, url: requestUrl, ...(token ? { token } : {}) });
+      try {
+        headers["DPoP"] = await signer.sign({
+          method,
+          url: requestUrl,
+          ...(token ? { token } : {}),
+        });
+      } catch {
+        throw new HostedHubApiError(
+          "native_session_unavailable",
+          0,
+          undefined,
+          options.intent,
+          undefined,
+          "proof-signing-failed",
+        );
+      }
       if (token) headers["Authorization"] = `DPoP ${token}`;
       target = requestUrl;
       credentials = "omit";
@@ -2695,7 +2807,16 @@ export class HostedHubApi {
       // Our own deadline is not the caller's cancellation: surfacing it as an
       // `AbortError` would let it be mistaken for a user-cancelled action and
       // reported as no error at all.
-      if (timedOut) throw new HostedHubApiError("timeout", 0, undefined, options.intent);
+      if (timedOut) {
+        throw new HostedHubApiError(
+          "timeout",
+          0,
+          undefined,
+          options.intent,
+          undefined,
+          "request-timeout",
+        );
+      }
       if (
         typeof error === "object" &&
         error !== null &&
@@ -2703,11 +2824,37 @@ export class HostedHubApi {
         error.name === "AbortError"
       )
         throw error;
-      throw new HostedHubApiError("unavailable", 0, undefined, options.intent);
+      throw new HostedHubApiError(
+        "unavailable",
+        0,
+        undefined,
+        options.intent,
+        undefined,
+        "transport-unavailable",
+      );
     } finally {
       clearTimeout(timer);
       callerSignal?.removeEventListener("abort", forwardAbort);
     }
-    return responseJson(response, options.intent, options.narrowForbidden !== false);
+    try {
+      return await responseJson(response, options.intent, options.narrowForbidden !== false);
+    } catch (error) {
+      if (
+        this.#isBearer &&
+        options.dpop !== "mint" &&
+        error instanceof HostedHubApiError &&
+        error.code === "session_invalid"
+      ) {
+        throw new HostedHubApiError(
+          error.code,
+          error.status,
+          error.retryAfterMs,
+          error.intent,
+          error.wireCode,
+          "token-invalidated",
+        );
+      }
+      throw error;
+    }
   }
 }

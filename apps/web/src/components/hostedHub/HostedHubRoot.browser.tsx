@@ -190,6 +190,24 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     await expect.element(page.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
   });
 
+  it("renders the typed Hub failure title and actionable bounded message", async () => {
+    useHostedHubStore.setState({
+      accountStatus: "unavailable",
+      errorMessage: null,
+      errorReason: "request-timeout",
+    });
+
+    mounted = await render(<HostedHubRoot />);
+
+    await expect.element(page.getByText("Hub did not respond", { exact: true })).toBeVisible();
+    await expect
+      .element(
+        page.getByText("The Hub did not respond in time. Check your connection and try again."),
+      )
+      .toBeVisible();
+    await expect.element(page.getByRole("button", { name: "Retry Hub" })).toBeVisible();
+  });
+
   it("returns GitHub authentication to account completion", async () => {
     window.history.replaceState(null, "", "/sign-in");
     useHostedAccountStore.setState({

@@ -3,6 +3,7 @@ import type { ExternalIdentityConfigResponse } from "@ryco/contracts/hosted-iden
 import {
   deriveHostedConnectionStatusIndicator,
   deriveHostedConnectionStatusText,
+  hostedHubFailureExplanation,
   resolveHostedRpcCapability,
   type HostedAccountActionStatus,
   type HostedConnectionGuarantee,
@@ -390,6 +391,11 @@ function roleLabel(state: HostedHubState): string | null {
   return `${role.charAt(0).toUpperCase()}${role.slice(1)}`;
 }
 
+function hostedStateErrorMessage(state: HostedHubState): string | null {
+  if (state.errorMessage !== null) return state.errorMessage;
+  return state.errorReason ? hostedHubFailureExplanation(state.errorReason).message : null;
+}
+
 /** The surface the sign-in sheet shows, in strict precedence order. */
 function resolveSignInSurface(input: HostedSignInViewInput): HostedSignInSurface {
   const { state } = input;
@@ -414,7 +420,7 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
   const base = {
     surface,
     busy: false,
-    errorMessage: state.errorMessage,
+    errorMessage: hostedStateErrorMessage(state),
     statusText: null,
     statusIndicator: null,
     recoveryCodes: [] as ReadonlyArray<string>,
@@ -574,7 +580,7 @@ export function deriveHostedAccountView(input: HostedAccountViewInput): HostedAc
     available: input.hostedModeAvailable,
     capability,
     capabilityNotice: capability.allowed ? null : capability.reason,
-    errorMessage: state.errorMessage,
+    errorMessage: hostedStateErrorMessage(state),
     displayName: null,
     roleLabel: null,
     statusText: null,

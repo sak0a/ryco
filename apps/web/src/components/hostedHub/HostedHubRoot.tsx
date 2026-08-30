@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import { hostedHubFailureExplanation } from "@ryco/client-runtime/authorization";
 import type { ExternalIdentityPendingResponse } from "@ryco/contracts/hosted-identity";
 import {
   ChevronDownIcon,
@@ -545,6 +546,7 @@ export function HostedAuthenticationSurface({
 } = {}) {
   const status = useHostedHubStore((state) => state.accountStatus);
   const error = useHostedHubStore((state) => state.errorMessage);
+  const errorReason = useHostedHubStore((state) => state.errorReason ?? null);
   const bootstrapAvailable = useHostedHubStore((state) => state.bootstrapAvailable);
   const [identityLink, setIdentityLink] = useState<HostedIdentityLink | null>(() =>
     consumeHostedIdentityLink({
@@ -861,12 +863,17 @@ export function HostedAuthenticationSurface({
   // Mounted on every page of the gateway, not only the landing one. An
   // authentication error is a property of the account state, and each ceremony
   // below can produce one.
-  const visibleAuthenticationError = externalAuthorizationError ?? error;
+  const runtimeFailure = errorReason ? hostedHubFailureExplanation(errorReason) : null;
+  const visibleAuthenticationError = externalAuthorizationError ?? error ?? runtimeFailure?.message;
+  const authenticationErrorTitle =
+    externalAuthorizationError === null && runtimeFailure !== null
+      ? runtimeFailure.title
+      : "Sign-in did not complete";
   const authError = visibleAuthenticationError ? (
     <div className="mt-4">
       <Alert variant="error">
         <TriangleAlertIcon aria-hidden />
-        <AlertTitle>Sign-in did not complete</AlertTitle>
+        <AlertTitle>{authenticationErrorTitle}</AlertTitle>
         <AlertDescription>{visibleAuthenticationError}</AlertDescription>
       </Alert>
     </div>
