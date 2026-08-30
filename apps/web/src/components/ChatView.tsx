@@ -257,6 +257,7 @@ import {
   retainDesktopWorkspaceVcsScope,
   useDesktopWorkspaceState,
 } from "../platform/desktopWorkspace";
+import { withDirectDesktopExecutionMachine } from "../platform/desktopWorkspaceTarget";
 import {
   retainHostedWorkspaceProviderScope,
   retainHostedWorkspaceThreadScope,
@@ -1076,6 +1077,16 @@ export default function ChatView(props: ChatViewProps) {
     sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
     sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
   }));
+  const desktopExecutionMachines = useMemo(
+    () =>
+      withDirectDesktopExecutionMachine({
+        machines: desktopWorkspace.machines,
+        ready: desktopWorkspace.status === "ready",
+        primaryEnvironmentId,
+        localHubEnvironmentId: desktopWorkspace.localEnvironmentId,
+      }),
+    [desktopWorkspace, primaryEnvironmentId],
+  );
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
@@ -1096,7 +1107,7 @@ export default function ChatView(props: ChatViewProps) {
       const isPrimary = p.environmentId === primaryEnvironmentId;
       const savedRecord = savedEnvironmentRegistry[p.environmentId];
       const runtimeState = savedEnvironmentRuntimeById[p.environmentId];
-      const desktopMachine = desktopWorkspace.machines.find(
+      const desktopMachine = desktopExecutionMachines.find(
         (machine) => machine.environmentId === p.environmentId,
       );
       const hostedMachine = hostedWorkspace.machines.find(
@@ -1104,14 +1115,13 @@ export default function ChatView(props: ChatViewProps) {
       );
       const workspaceMachine =
         hostedWorkspace.status === "signed-out" ? desktopMachine : hostedMachine;
-      const label =
-        workspaceMachine?.label ??
-        resolveEnvironmentOptionLabel({
-          isPrimary,
-          environmentId: p.environmentId,
-          runtimeLabel: runtimeState?.descriptor?.label ?? null,
-          savedLabel: savedRecord?.label ?? null,
-        });
+      const fallbackLabel = resolveEnvironmentOptionLabel({
+        isPrimary,
+        environmentId: p.environmentId,
+        runtimeLabel: runtimeState?.descriptor?.label ?? null,
+        savedLabel: savedRecord?.label ?? null,
+      });
+      const label = isPrimary ? fallbackLabel : (workspaceMachine?.label ?? fallbackLabel);
       envs.push({
         environmentId: p.environmentId,
         projectId: p.id,
@@ -1131,7 +1141,8 @@ export default function ChatView(props: ChatViewProps) {
   }, [
     activeProject,
     allProjects,
-    desktopWorkspace,
+    desktopExecutionMachines,
+    desktopWorkspace.status,
     hostedWorkspace,
     projectGroupingSettings,
     primaryEnvironmentId,
@@ -2066,7 +2077,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const executionTargetMachine =
     hostedWorkspace.status === "signed-out"
-      ? desktopWorkspace.machines.find((machine) => machine.environmentId === environmentId)
+      ? desktopExecutionMachines.find((machine) => machine.environmentId === environmentId)
       : hostedWorkspace.machines.find((machine) => machine.environmentId === environmentId);
   const workspaceExecutionTargetUnavailable =
     routeKind === "draft" &&

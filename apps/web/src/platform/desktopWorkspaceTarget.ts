@@ -11,6 +11,43 @@ import {
 } from "@ryco/client-runtime/state/workspace";
 import type { Project } from "@ryco/client-runtime/state/threads";
 
+type DesktopExecutionMachine = {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly online: boolean;
+  readonly canMutate: boolean;
+  readonly nativeTrust: WorkspaceNativeTrustState;
+};
+
+/**
+ * The primary Desktop server is reached directly and does not require Hub
+ * verification. Keep it as the canonical local execution target even though
+ * Desktop main catalogs the same node under its separate Hub environment id.
+ */
+export function withDirectDesktopExecutionMachine(input: {
+  readonly machines: ReadonlyArray<DesktopExecutionMachine>;
+  readonly ready: boolean;
+  readonly primaryEnvironmentId: EnvironmentId | null;
+  readonly localHubEnvironmentId?: EnvironmentId | null;
+}): ReadonlyArray<DesktopExecutionMachine> {
+  if (!input.ready || input.primaryEnvironmentId === null) return input.machines;
+  const withoutConflictingPrimary = input.machines.filter(
+    (machine) =>
+      machine.environmentId !== input.primaryEnvironmentId &&
+      machine.environmentId !== input.localHubEnvironmentId,
+  );
+  return [
+    {
+      environmentId: input.primaryEnvironmentId,
+      label: "This device",
+      online: true,
+      canMutate: true,
+      nativeTrust: "not-required",
+    },
+    ...withoutConflictingPrimary,
+  ];
+}
+
 /** Select within the first logical project; an explicitly clicked project remains the override. */
 export function resolveDesktopDefaultProjectRef(input: {
   readonly orderedProjects: ReadonlyArray<Project>;

@@ -21,7 +21,10 @@ import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
 import { useSettings } from "./useSettings";
 import { useDesktopWorkspaceState } from "../platform/desktopWorkspace";
-import { resolveWorkspaceDefaultProjectRef } from "../platform/desktopWorkspaceTarget";
+import {
+  resolveWorkspaceDefaultProjectRef,
+  withDirectDesktopExecutionMachine,
+} from "../platform/desktopWorkspaceTarget";
 import {
   nodeIdForHostedEnvironment,
   readHostedNodeMutationLease,
@@ -30,6 +33,7 @@ import {
 } from "../hostedHub/hostedConnectionCoordinator";
 import { adoptRoutedHostedNode } from "../hostedHub/nodeRoutes";
 import { useHostedHubStore } from "../hostedHub/state";
+import { usePrimaryEnvironmentId } from "../environments/primary";
 
 function useNewThreadState() {
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
@@ -220,6 +224,7 @@ export function useHandleNewThread() {
   const handleNewThread = useNewThreadState();
   const desktopWorkspace = useDesktopWorkspaceState();
   const hostedWorkspace = useHostedWorkspaceState();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const selectedHostedEnvironmentId = useHostedHubStore(
     (state) => state.selectedNode?.environmentId ?? null,
   );
@@ -227,9 +232,14 @@ export function useHandleNewThread() {
     () =>
       hostedWorkspace.status === "signed-out"
         ? {
-            machines: desktopWorkspace.machines,
+            machines: withDirectDesktopExecutionMachine({
+              machines: desktopWorkspace.machines,
+              ready: desktopWorkspace.status === "ready",
+              primaryEnvironmentId,
+              localHubEnvironmentId: desktopWorkspace.localEnvironmentId,
+            }),
             ready: desktopWorkspace.status === "ready",
-            localEnvironmentId: desktopWorkspace.localEnvironmentId,
+            localEnvironmentId: primaryEnvironmentId,
           }
         : {
             machines: hostedWorkspace.machines.map((machine) => ({
@@ -239,7 +249,7 @@ export function useHandleNewThread() {
             ready: hostedWorkspace.status === "ready",
             localEnvironmentId: null,
           },
-    [desktopWorkspace, hostedWorkspace],
+    [desktopWorkspace, hostedWorkspace, primaryEnvironmentId],
   );
   const defaultProjectRef = useMemo(
     () =>

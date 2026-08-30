@@ -18,11 +18,13 @@ export interface DesktopWorkspaceCacheHydrationPort {
 export function reconcileDesktopWorkspaceCacheHydration(input: {
   readonly snapshots: ReadonlyArray<unknown>;
   readonly previouslyHydratedEnvironmentIds: ReadonlySet<EnvironmentId>;
+  readonly excludedEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly port: DesktopWorkspaceCacheHydrationPort;
 }): ReadonlySet<EnvironmentId> {
   const currentEnvironmentIds = new Set<EnvironmentId>();
   for (const candidate of input.snapshots) {
     if (!isWorkspaceMetadataSnapshot(candidate)) continue;
+    if (input.excludedEnvironmentIds?.has(candidate.environmentId)) continue;
     currentEnvironmentIds.add(candidate.environmentId);
     input.port.hydrate(candidate);
   }

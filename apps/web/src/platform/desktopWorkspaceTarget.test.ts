@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   resolveDesktopDefaultProjectRef,
   resolveWorkspaceDefaultProjectRef,
+  withDirectDesktopExecutionMachine,
 } from "./desktopWorkspaceTarget";
 
 function project(environment: string): Project {
@@ -59,6 +60,56 @@ function state(): DesktopWorkspaceStateProjection {
 }
 
 describe("Desktop new-work target", () => {
+  it("uses the direct primary environment for This device instead of the local Hub alias", () => {
+    const primaryEnvironmentId = EnvironmentId.make("primary-direct");
+    const localHubEnvironmentId = EnvironmentId.make("local-hub-alias");
+    const machines = withDirectDesktopExecutionMachine({
+      machines: [
+        {
+          environmentId: localHubEnvironmentId,
+          label: "Laurin’s MacBook Pro",
+          online: true,
+          canMutate: false,
+          nativeTrust: "unverified",
+        },
+        {
+          environmentId: EnvironmentId.make("remote"),
+          label: "Remote",
+          online: true,
+          canMutate: true,
+          nativeTrust: "verified",
+        },
+      ],
+      ready: true,
+      primaryEnvironmentId,
+      localHubEnvironmentId,
+    });
+
+    expect(machines).toEqual([
+      {
+        environmentId: primaryEnvironmentId,
+        label: "This device",
+        online: true,
+        canMutate: true,
+        nativeTrust: "not-required",
+      },
+      expect.objectContaining({ environmentId: EnvironmentId.make("remote") }),
+    ]);
+    const directProject = project(primaryEnvironmentId);
+    expect(
+      resolveWorkspaceDefaultProjectRef({
+        orderedProjects: [directProject],
+        machines,
+        ready: true,
+        localEnvironmentId: primaryEnvironmentId,
+        logicalKey: () => "logical-ryco",
+      }),
+    ).toEqual({
+      environmentId: primaryEnvironmentId,
+      projectId: directProject.id,
+    });
+  });
+
   it("uses the shared resolver and local tie-break", () => {
     const remote = project("remote");
     const local = project("local");
