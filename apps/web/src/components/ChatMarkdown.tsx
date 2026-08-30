@@ -4,7 +4,7 @@ import {
   type SupportedLanguages,
 } from "@pierre/diffs";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import type { ServerProviderSkill } from "@ryco/contracts";
+import type { EnvironmentId, ServerProviderSkill } from "@ryco/contracts";
 import React, {
   Children,
   Suspense,
@@ -43,6 +43,11 @@ import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../mark
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
 import { usePerfMark } from "../perf/tabSwitchInstrumentation";
+import { readEnvironmentApi } from "../environmentApi";
+import {
+  isSafeRemoteMarkdownImageSource,
+  resolveMarkdownWorkspaceImagePath,
+} from "../markdown-images";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -68,12 +73,71 @@ class CodeHighlightErrorBoundary extends React.Component<
 interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
+  environmentId?: EnvironmentId;
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   searchHighlight?: Omit<SkillInlineTextSearchHighlight, "cursor" | "keyPrefix"> | undefined;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+
+const WorkspaceMarkdownImage = memo(function WorkspaceMarkdownImage(props: {
+  environmentId: EnvironmentId;
+  cwd: string;
+  relativePath: string;
+  alt: string;
+  title?: string;
+}) {
+  const [source, setSource] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setSource(null);
+    setFailed(false);
+    const api = readEnvironmentApi(props.environmentId);
+    if (!api) {
+      setFailed(true);
+      return () => {
+        active = false;
+      };
+    }
+
+    void api.projects
+      .readFileBinary({ cwd: props.cwd, relativePath: props.relativePath })
+      .then((result) => {
+        if (!active) return;
+        setSource(`data:${result.mimeType};base64,${result.dataBase64}`);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [props.cwd, props.environmentId, props.relativePath]);
+
+  if (failed) {
+    return (
+      <span className="text-xs text-muted-foreground">[{props.alt || "Image unavailable"}]</span>
+    );
+  }
+  if (!source) {
+    return <span className="text-xs text-muted-foreground">[Loading image…]</span>;
+  }
+  return (
+    <img
+      src={source}
+      alt={props.alt}
+      title={props.title}
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      className="max-h-[32rem] max-w-full rounded-lg border border-border/60 object-contain"
+    />
+  );
+});
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
@@ -576,6 +640,7 @@ function ChatMarkdown(props: ChatMarkdownProps) {
 const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
   text,
   cwd,
+  environmentId,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
   searchHighlight,
@@ -722,6 +787,37 @@ const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
           />
         );
       },
+      img({ node: _node, src, alt, title }) {
+        const relativePath = resolveMarkdownWorkspaceImagePath(src, cwd);
+        if (relativePath && cwd && environmentId) {
+          return (
+            <WorkspaceMarkdownImage
+              environmentId={environmentId}
+              cwd={cwd}
+              relativePath={relativePath}
+              alt={alt ?? ""}
+              {...(title ? { title } : {})}
+            />
+          );
+        }
+        if (!isSafeRemoteMarkdownImageSource(src)) {
+          return (
+            <span className="text-xs text-muted-foreground">[{alt || "Image unavailable"}]</span>
+          );
+        }
+        return (
+          <img
+            src={src}
+            alt={alt ?? ""}
+            title={title}
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            referrerPolicy="no-referrer"
+            className="max-h-[32rem] max-w-full rounded-lg border border-border/60 object-contain"
+          />
+        );
+      },
       pre({ node: _node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);
         if (!codeBlock) {
@@ -757,6 +853,8 @@ const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
     }),
     [
       diffThemeName,
+      cwd,
+      environmentId,
       fileLinkParentSuffixByPath,
       isStreaming,
       markdownFileLinkMetaByHref,

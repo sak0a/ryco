@@ -44,6 +44,7 @@ import {
 } from "../Errors.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import { requireRuntimeSessionId, stampRuntimeEvent } from "../runtimeSession.ts";
+import type { OpenCodeServerOwner } from "../OpenCodeServerOwner.ts";
 import {
   buildOpenCodePermissionRules,
   OpenCodeRuntime,
@@ -129,6 +130,7 @@ export interface OpenCodeAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly serverOwner?: OpenCodeServerOwner;
 }
 
 function nowIso(): string {
@@ -1784,12 +1786,21 @@ export function makeOpenCodeAdapter(
               // The runtime binds the server's lifetime to the Scope.Scope
               // we provide below — closing `sessionScope` kills the child
               // process automatically. No manual `server.close()` needed.
-              const server = yield* openCodeRuntime.connectToOpenCodeServer({
-                binaryPath,
-                serverUrl,
-                ...(serverPassword ? { serverPassword } : {}),
-                ...(options?.environment ? { environment: options.environment } : {}),
-              });
+              const server = options?.serverOwner
+                ? yield* options.serverOwner.acquire.pipe(
+                    Effect.map((process) => ({
+                      url: process.url,
+                      ...(process.serverPassword ? { serverPassword: process.serverPassword } : {}),
+                      exitCode: process.exitCode,
+                      external: false,
+                    })),
+                  )
+                : yield* openCodeRuntime.connectToOpenCodeServer({
+                    binaryPath,
+                    serverUrl,
+                    ...(serverPassword ? { serverPassword } : {}),
+                    ...(options?.environment ? { environment: options.environment } : {}),
+                  });
               const client = yield* openCodeRuntime.createOpenCodeSdkClient({
                 baseUrl: server.url,
                 directory,

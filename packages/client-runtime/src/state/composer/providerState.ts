@@ -18,6 +18,7 @@ export interface ModelEsque {
   readonly shortName?: string;
   readonly subProvider?: string;
   readonly isCustom?: boolean;
+  readonly isUnavailable?: boolean;
 }
 
 export interface ComposerProviderStateInput {

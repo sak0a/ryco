@@ -3,22 +3,40 @@ import "../index.css";
 import { page } from "vite-plus/test/browser";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
+import { EnvironmentId } from "@ryco/contracts";
 
-const { codeToHtmlMock, getSharedHighlighterMock, openInPreferredEditorMock, readLocalApiMock } =
-  vi.hoisted(() => {
-    const codeToHtmlMock = vi.fn((code: string) => `<pre class="shiki"><code>${code}</code></pre>`);
-    return {
-      codeToHtmlMock,
-      getSharedHighlighterMock: vi.fn(async () => ({
-        codeToHtml: codeToHtmlMock,
-      })),
-      openInPreferredEditorMock: vi.fn(async () => "vscode"),
-      readLocalApiMock: vi.fn(() => ({
-        server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
-        shell: { openInEditor: vi.fn(async () => undefined) },
-      })),
-    };
-  });
+const {
+  codeToHtmlMock,
+  getSharedHighlighterMock,
+  openInPreferredEditorMock,
+  readFileBinaryMock,
+  readLocalApiMock,
+} = vi.hoisted(() => {
+  const codeToHtmlMock = vi.fn((code: string) => `<pre class="shiki"><code>${code}</code></pre>`);
+  return {
+    codeToHtmlMock,
+    getSharedHighlighterMock: vi.fn(async () => ({
+      codeToHtml: codeToHtmlMock,
+    })),
+    openInPreferredEditorMock: vi.fn(async () => "vscode"),
+    readFileBinaryMock: vi.fn(async () => ({
+      relativePath: "assets/diagram.png",
+      dataBase64: "aGVsbG8=",
+      mimeType: "image/png",
+      sizeBytes: 5,
+    })),
+    readLocalApiMock: vi.fn(() => ({
+      server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
+      shell: { openInEditor: vi.fn(async () => undefined) },
+    })),
+  };
+});
+
+vi.mock("../environmentApi", () => ({
+  readEnvironmentApi: vi.fn(() => ({
+    projects: { readFileBinary: readFileBinaryMock },
+  })),
+}));
 
 vi.mock("../editorPreferences", () => ({
   openInPreferredEditor: openInPreferredEditorMock,
@@ -41,6 +59,7 @@ describe("ChatMarkdown", () => {
   afterEach(() => {
     openInPreferredEditorMock.mockClear();
     readLocalApiMock.mockClear();
+    readFileBinaryMock.mockClear();
     getSharedHighlighterMock.mockClear();
     codeToHtmlMock.mockClear();
     localStorage.clear();
@@ -150,6 +169,46 @@ describe("ChatMarkdown", () => {
       await expect.element(link).toBeInTheDocument();
       await expect.element(link).toHaveAttribute("href", "https://openai.com/docs");
       await expect.element(link).toHaveAttribute("target", "_blank");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("loads local Markdown images through the workspace-contained binary RPC", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text="![Architecture](./assets/diagram.png)"
+        cwd="/repo/project"
+        environmentId={EnvironmentId.make("local")}
+      />,
+    );
+
+    try {
+      await vi.waitFor(() => {
+        expect(readFileBinaryMock).toHaveBeenCalledWith({
+          cwd: "/repo/project",
+          relativePath: "assets/diagram.png",
+        });
+      });
+      const image = page.getByRole("img", { name: "Architecture" });
+      await expect.element(image).toHaveAttribute("src", "data:image/png;base64,aGVsbG8=");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("does not request Markdown images that escape the workspace", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text="![Secret](../../secret.png)"
+        cwd="/repo/project"
+        environmentId={EnvironmentId.make("local")}
+      />,
+    );
+
+    try {
+      await expect.element(page.getByText("[Secret]")).toBeInTheDocument();
+      expect(readFileBinaryMock).not.toHaveBeenCalled();
     } finally {
       await screen.unmount();
     }

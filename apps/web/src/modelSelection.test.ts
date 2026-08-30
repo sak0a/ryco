@@ -12,6 +12,7 @@ function provider(input: {
   provider?: ProviderDriverKind;
   instanceId: string;
   models?: ReadonlyArray<string>;
+  status?: ServerProvider["status"];
 }): ServerProvider {
   const driver =
     input.provider ??
@@ -24,7 +25,7 @@ function provider(input: {
     enabled: true,
     installed: true,
     version: null,
-    status: "ready",
+    status: input.status ?? "ready",
     auth: { status: "authenticated" },
     checkedAt: "2026-01-01T00:00:00.000Z",
     models: (input.models ?? []).map((slug) => ({
@@ -244,6 +245,32 @@ describe("instance-scoped model selection", () => {
         "openai/gpt-5.5",
       ),
     ).toBe("claude-sonnet-4-6");
+  });
+
+  it("preserves a selected slug while its provider catalog is temporarily unavailable", () => {
+    const providers = [
+      provider({
+        instanceId: "claudeAgent",
+        status: "error",
+        models: [],
+      }),
+    ];
+    const entry = deriveProviderInstanceEntries(providers)[0]!;
+
+    expect(
+      resolveAppModelSelectionForInstance(
+        entry.instanceId,
+        settingsWithProviderInstances(),
+        providers,
+        "claude-sonnet-4-6",
+      ),
+    ).toBe("claude-sonnet-4-6");
+    expect(
+      getAppModelOptionsForInstance(settingsWithProviderInstances(), entry, "claude-sonnet-4-6")[0],
+    ).toMatchObject({
+      slug: "claude-sonnet-4-6",
+      isUnavailable: true,
+    });
   });
 
   it("preserves custom provider instances in settings model selection", () => {

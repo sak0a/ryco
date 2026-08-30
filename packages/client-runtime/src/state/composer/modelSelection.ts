@@ -77,6 +77,7 @@ export interface AppModelOption {
   shortName?: string;
   subProvider?: string;
   isCustom: boolean;
+  isUnavailable?: boolean;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -201,6 +202,7 @@ export function getAppModelOptions(
 export function getAppModelOptionsForInstance(
   settings: UnifiedSettings,
   entry: ProviderInstanceEntry,
+  selectedModel?: string | null,
 ): AppModelOption[] {
   const options: AppModelOption[] = entry.models.map(toAppModelOption);
   const seen = new Set(options.map((option) => option.slug));
@@ -219,10 +221,27 @@ export function getAppModelOptionsForInstance(
     options.push({ slug, name: slug, isCustom: true });
   }
 
-  return applyInstanceModelPreferences(
+  const preferredOptions = applyInstanceModelPreferences(
     options,
     readInstanceModelPreferences(settings, entry.instanceId),
   );
+  const normalizedSelectedModel = normalizeModelSlug(selectedModel, entry.driverKind);
+  if (
+    entry.status !== "ready" &&
+    normalizedSelectedModel &&
+    !preferredOptions.some((option) => option.slug === normalizedSelectedModel)
+  ) {
+    return [
+      {
+        slug: normalizedSelectedModel,
+        name: normalizedSelectedModel,
+        isCustom: false,
+        isUnavailable: true,
+      },
+      ...preferredOptions,
+    ];
+  }
+  return preferredOptions;
 }
 
 export function resolveAppModelSelection(
@@ -251,8 +270,10 @@ export function resolveAppModelSelectionForInstance(
   if (!entry) return null;
   const options = getAppModelOptionsForInstance(settings, entry);
   const configuredDefault = DEFAULT_MODEL_BY_PROVIDER[entry.driverKind] ?? DEFAULT_MODEL;
+  const normalizedSelectedModel = normalizeModelSlug(selectedModel, entry.driverKind);
   return (
     resolveSelectableModel(entry.driverKind, selectedModel, options) ??
+    (entry.status !== "ready" ? normalizedSelectedModel : null) ??
     resolveSelectableModel(entry.driverKind, configuredDefault, options) ??
     options[0]?.slug ??
     entry.models[0]?.slug ??
