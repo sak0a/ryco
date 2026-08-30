@@ -7,6 +7,7 @@ import { beforeEach } from "vite-plus/test";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 
 import {
+  ApprovalRequestId,
   OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -51,6 +52,12 @@ const runtimeMock = {
     sessionCreateUrls: [] as string[],
     authHeaders: [] as Array<string | null>,
     abortCalls: [] as string[],
+    abortErrorSessionIds: new Set<string>(),
+    permissionRespondCalls: [] as Array<{
+      sessionID: string;
+      permissionID: string;
+      response?: "once" | "always" | "reject";
+    }>,
     closeCalls: [] as string[],
     revertCalls: [] as Array<{ sessionID: string; messageID?: string }>,
     promptCalls: [] as Array<unknown>,
@@ -65,6 +72,8 @@ const runtimeMock = {
     this.state.sessionCreateUrls.length = 0;
     this.state.authHeaders.length = 0;
     this.state.abortCalls.length = 0;
+    this.state.abortErrorSessionIds.clear();
+    this.state.permissionRespondCalls.length = 0;
     this.state.closeCalls.length = 0;
     this.state.revertCalls.length = 0;
     this.state.promptCalls.length = 0;
@@ -128,6 +137,9 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         },
         abort: async ({ sessionID }: { sessionID: string }) => {
           runtimeMock.state.abortCalls.push(sessionID);
+          if (runtimeMock.state.abortErrorSessionIds.has(sessionID)) {
+            throw new Error(`abort failed for ${sessionID}`);
+          }
         },
         promptAsync: async (input: unknown) => {
           runtimeMock.state.promptCalls.push(input);
@@ -164,6 +176,15 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             }
           })(),
         }),
+      },
+      permission: {
+        respond: async (input: {
+          sessionID: string;
+          permissionID: string;
+          response?: "once" | "always" | "reject";
+        }) => {
+          runtimeMock.state.permissionRespondCalls.push(input);
+        },
       },
     } as unknown as OpencodeClient),
   loadOpenCodeInventory: () =>
@@ -225,6 +246,20 @@ beforeEach(() => {
 const sleep = (ms: number) =>
   Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
+const makeChildSession = (id: string, parentID: string) => ({
+  id,
+  slug: id,
+  projectID: "project-1",
+  directory: "/tmp/project",
+  parentID,
+  title: "Child work",
+  version: "test",
+  time: {
+    created: Date.now(),
+    updated: Date.now(),
+  },
+});
+
 it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   it.effect("reuses a configured OpenCode server URL instead of spawning a local server", () =>
     Effect.gen(function* () {
@@ -264,6 +299,121 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         runtimeMock.state.abortCalls.includes("http://127.0.0.1:9999/session"),
         true,
       );
+    }),
+  );
+
+  it.effect("stops hydrated child sessions with their parent session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const rootSessionId = "http://127.0.0.1:9999/session";
+      runtimeMock.state.children = [makeChildSession("child-session-stop", rootSessionId)];
+
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-child-stop"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId: asThreadId("thread-opencode-child-stop"),
+        runtimeMode: "full-access",
+      });
+      yield* sleep(10);
+      yield* adapter.stopSession(asThreadId("thread-opencode-child-stop"));
+
+      assert.deepEqual(runtimeMock.state.abortCalls, [rootSessionId, "child-session-stop"]);
+    }),
+  );
+
+  it.effect("interrupts active child sessions with the parent turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const rootSessionId = "http://127.0.0.1:9999/session";
+      runtimeMock.state.children = [makeChildSession("child-session-interrupt", rootSessionId)];
+      const threadId = asThreadId("thread-opencode-child-interrupt");
+
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-child-interrupt"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* sleep(10);
+      yield* adapter.interruptTurn(threadId);
+
+      assert.deepEqual(runtimeMock.state.abortCalls, [rootSessionId, "child-session-interrupt"]);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("still interrupts children when the parent interrupt fails", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const rootSessionId = "http://127.0.0.1:9999/session";
+      runtimeMock.state.children = [makeChildSession("child-session-recovery", rootSessionId)];
+      runtimeMock.state.abortErrorSessionIds.add(rootSessionId);
+      const threadId = asThreadId("thread-opencode-child-interrupt-recovery");
+
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-child-interrupt-recovery"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* sleep(10);
+      const error = yield* adapter.interruptTurn(threadId).pipe(Effect.flip);
+
+      assert.equal(error._tag, "ProviderAdapterRequestError");
+      assert.deepEqual(runtimeMock.state.abortCalls, [rootSessionId, "child-session-recovery"]);
+      runtimeMock.state.abortErrorSessionIds.clear();
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("routes child permission responses to the session that owns the request", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const rootSessionId = "http://127.0.0.1:9999/session";
+      const childSessionId = "child-session-approval";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "session.created",
+          properties: {
+            sessionID: childSessionId,
+            info: makeChildSession(childSessionId, rootSessionId),
+          },
+        },
+        {
+          type: "permission.asked",
+          properties: {
+            id: "permission-child-1",
+            sessionID: childSessionId,
+            permission: "bash",
+            patterns: ["git status"],
+            metadata: {},
+            always: [],
+          },
+        },
+      ];
+      const threadId = asThreadId("thread-opencode-child-approval");
+
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-child-approval"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "approval-required",
+      });
+      yield* sleep(10);
+      yield* adapter.respondToRequest(
+        threadId,
+        ApprovalRequestId.make("permission-child-1"),
+        "accept",
+      );
+
+      assert.deepEqual(runtimeMock.state.permissionRespondCalls, [
+        {
+          sessionID: childSessionId,
+          permissionID: "permission-child-1",
+          response: "once",
+        },
+      ]);
+      yield* adapter.stopSession(threadId);
     }),
   );
 
