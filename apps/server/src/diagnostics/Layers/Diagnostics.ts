@@ -204,7 +204,7 @@ function normalizeSpanStatus(record: TraceRecord): DiagnosticsSpan["status"] {
 function spanFailureMessage(record: TraceRecord): string | undefined {
   if (record.type === "effect-span") {
     const exit = record.exit;
-    if (exit && exit._tag !== "Success") {
+    if (exit?._tag === "Failure") {
       return truncateMessage(exit.cause);
     }
     return undefined;

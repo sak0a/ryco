@@ -27,6 +27,7 @@ import {
   formatBytes,
   formatDuration,
   formatPercent,
+  isDiagnosticsSpanFailure,
   latestFailureLabel,
   relativeTimeLabel,
   resourceCpuSeries,
@@ -196,14 +197,17 @@ function SpanRows({ spans }: { spans: ReadonlyArray<DiagnosticsSpan> }) {
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <span className="truncate text-[13px] font-medium">{span.name}</span>
-              <Badge size="sm" variant={span.status === "success" ? "outline" : "error"}>
+              <Badge
+                size="sm"
+                variant={isDiagnosticsSpanFailure(span.status) ? "error" : "outline"}
+              >
                 {span.status}
               </Badge>
             </div>
             <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
               {span.source} / {span.kind} / {span.spanId}
             </div>
-            {span.failureMessage ? (
+            {span.failureMessage && isDiagnosticsSpanFailure(span.status) ? (
               <div className="mt-1 line-clamp-2 text-[11px] text-destructive">
                 {span.failureMessage}
               </div>

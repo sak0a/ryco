@@ -5,12 +5,21 @@ import {
   formatBytes,
   formatDuration,
   formatPercent,
+  isDiagnosticsSpanFailure,
   relativeTimeLabel,
   resourceCpuSeries,
   resourceMemorySeries,
 } from "./DiagnosticsSettings.logic";
 
 describe("DiagnosticsSettings logic", () => {
+  it("only gives failure styling to actual span failures", () => {
+    expect(isDiagnosticsSpanFailure("success")).toBe(false);
+    expect(isDiagnosticsSpanFailure("interrupted")).toBe(false);
+    expect(isDiagnosticsSpanFailure("unset")).toBe(false);
+    expect(isDiagnosticsSpanFailure("failure")).toBe(true);
+    expect(isDiagnosticsSpanFailure("error")).toBe(true);
+  });
+
   it("formats byte, duration, percent, and relative time labels", () => {
     expect(formatBytes(0)).toBe("0 B");
     expect(formatBytes(1536)).toBe("1.5 KB");
