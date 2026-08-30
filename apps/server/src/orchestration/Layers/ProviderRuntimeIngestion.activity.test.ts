@@ -88,3 +88,76 @@ describe("runtimeEventToActivities task progress", () => {
     expect(usagePayload).not.toHaveProperty("status");
   });
 });
+
+describe("runtimeEventToActivities tool streaming persistence", () => {
+  const accumulatedStdout = (lineCount: number) =>
+    [
+      "first line of output",
+      ...Array.from({ length: lineCount }, (_, index) => `Capturing frame ${index}/9028`),
+    ].join("\n");
+
+  const streamingData = (lineCount: number) => {
+    const stdout = accumulatedStdout(lineCount);
+    return {
+      toolCallId: "tool-call-1",
+      kind: "execute",
+      command: "blender --render",
+      rawOutput: { stdout },
+      content: [{ type: "content", content: { type: "text", text: stdout } }],
+    };
+  };
+
+  it("keeps cumulative tool.updated payloads bounded as output grows", () => {
+    const projectedPayloads = [50, 500, 2_000].map((lineCount, index) => {
+      const event = {
+        ...base,
+        type: "item.updated",
+        eventId: EventId.make(`evt-tool-streaming-updated-${index}`),
+        payload: {
+          itemType: "command_execution",
+          status: "inProgress",
+          title: "Render",
+          detail: accumulatedStdout(lineCount),
+          data: streamingData(lineCount),
+        },
+      } satisfies ProviderRuntimeEvent;
+
+      const activities = runtimeEventToActivities(event);
+      expect(activities).toHaveLength(1);
+      return activities[0]?.payload as Record<string, unknown>;
+    });
+
+    for (const payload of projectedPayloads) {
+      const data = payload.data as Record<string, unknown>;
+      expect(payload.status).toBe("inProgress");
+      expect(data.toolCallId).toBe("tool-call-1");
+      expect(data.kind).toBe("execute");
+      expect(data.command).toBe("blender --render");
+      expect(data.rawOutput).toEqual({ content: "first line of output" });
+      expect(data.content).toBeUndefined();
+      expect(JSON.stringify(payload).length).toBeLessThan(1_000);
+    }
+  });
+
+  it("retains the full terminal tool.completed payload", () => {
+    const data = streamingData(2_000);
+    const event = {
+      ...base,
+      type: "item.completed",
+      eventId: EventId.make("evt-tool-streaming-completed"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        title: "Render",
+        data,
+      },
+    } satisfies ProviderRuntimeEvent;
+
+    const activities = runtimeEventToActivities(event);
+
+    expect(activities).toHaveLength(1);
+    const payload = activities[0]?.payload as Record<string, unknown>;
+    expect(payload.data).toEqual(data);
+    expect(JSON.stringify(payload).length).toBeGreaterThan(50_000);
+  });
+});
