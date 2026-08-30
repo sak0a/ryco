@@ -34,6 +34,7 @@ import { useHostedModeAvailable } from "../hostedHub/useHostedMode";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { HubDomainEditor } from "./HubDomainEditor";
+import { openMachinesFromSettings } from "./openMachinesFromSettings";
 
 function compatibilityLabel(profile: HubProfile | null, usesBuildDefault: boolean): string {
   if (profile?.compatibility.status === "compatible") return "Compatible";
@@ -58,7 +59,6 @@ export function SettingsHubRouteScreen() {
   const [busy, setBusy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const rootNavigation = navigation.getParent();
 
   const buildProfile = useMemo(
     () =>
@@ -202,7 +202,7 @@ export function SettingsHubRouteScreen() {
           <SettingsRow
             label="Machines"
             value="Hub relay and direct"
-            onPress={() => rootNavigation?.navigate("Connections" as never)}
+            onPress={() => openMachinesFromSettings(navigation)}
           />
         </SettingsSection>
 
