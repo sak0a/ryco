@@ -4,7 +4,7 @@ import type {
   PasskeyCeremonyService,
   SecretKVService,
 } from "@ryco/client-runtime/platform";
-import { HostedHubApi } from "@ryco/client-runtime/authorization";
+import { HostedHubApi, HostedHubApiError } from "@ryco/client-runtime/authorization";
 import {
   createDpopProofSigner,
   decodeBase64Url,
@@ -90,13 +90,19 @@ describe("bearer session credentials", () => {
   });
 
   it("still throws when the DPoP signer is omitted", () => {
-    expect(
-      () =>
-        new HostedHubApi({
-          ...apiDependencies(),
-          sessionCredentials: createMobileSessionCredentials(fakeSecretKV().service),
-        }),
-    ).toThrow("Bearer session credentials require a DPoP signer and a bearer-token holder.");
+    let thrown: unknown;
+    try {
+      const api = new HostedHubApi({
+        ...apiDependencies(),
+        sessionCredentials: createMobileSessionCredentials(fakeSecretKV().service),
+      });
+      void api;
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(HostedHubApiError);
+    expect((thrown as HostedHubApiError).reason).toBe("missing-signer");
+    expect((thrown as Error).message).toContain("Secure session signing is unavailable");
   });
 
   it("reads back a token written through the holder", () => {

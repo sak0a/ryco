@@ -149,7 +149,7 @@ export function useComposerImageAttachments(
       for (const file of files) {
         const isImage = file.type.startsWith("image/");
         const attachmentName = file.name || (isImage ? "image" : "file");
-        if (!/^[^/\\\u0000-\u001f\u007f]+$/.test(attachmentName)) {
+        if (!/^[^/\\\p{Cc}]+$/u.test(attachmentName)) {
           error = `'${attachmentName}' has an unsafe filename. Rename it without path separators or control characters.`;
           continue;
         }
