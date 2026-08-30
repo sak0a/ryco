@@ -238,6 +238,15 @@ interface ClaudeSessionContext {
    */
   readonly suppressedSubagentBlocks: Map<string, Set<number>>;
   readonly taskAgents: Map<string, ClaudeTaskAgentState>;
+  /** Agent-tool input retained beyond parent-turn completion for delayed task_started. */
+  readonly subagentLaunchInputByToolUseId: Map<string, Record<string, unknown>>;
+  /**
+   * Authoritative API model observed in a subagent-owned assistant snapshot,
+   * keyed by the launching tool use id. The SDK can deliver the snapshot and
+   * task_started on independent paths, so retain the observation until both
+   * sides of the linkage have arrived.
+   */
+  readonly subagentModelByToolUseId: Map<string, string>;
   /**
    * Last emitted workflow-member fingerprint per member slot. A coordinator
    * task_progress repeats the FULL member array every tick; without a
@@ -300,6 +309,47 @@ export interface ClaudeAdapterLiveOptions {
   }) => ClaudeQueryRuntime;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+}
+
+const CLAUDE_SUBAGENT_ATTRIBUTION_CACHE_CAP = 256;
+
+function rememberClaudeSubagentLaunchInput(
+  context: ClaudeSessionContext,
+  toolUseId: string,
+  input: Record<string, unknown>,
+): void {
+  if (
+    !context.subagentLaunchInputByToolUseId.has(toolUseId) &&
+    context.subagentLaunchInputByToolUseId.size >= CLAUDE_SUBAGENT_ATTRIBUTION_CACHE_CAP
+  ) {
+    const oldestToolUseId = context.subagentLaunchInputByToolUseId.keys().next().value;
+    if (oldestToolUseId !== undefined) {
+      context.subagentLaunchInputByToolUseId.delete(oldestToolUseId);
+    }
+  }
+  context.subagentLaunchInputByToolUseId.set(toolUseId, input);
+}
+
+function rememberClaudeSubagentModel(
+  context: ClaudeSessionContext,
+  toolUseId: string,
+  model: string,
+): void {
+  if (
+    !context.subagentModelByToolUseId.has(toolUseId) &&
+    context.subagentModelByToolUseId.size >= CLAUDE_SUBAGENT_ATTRIBUTION_CACHE_CAP
+  ) {
+    const oldestToolUseId = context.subagentModelByToolUseId.keys().next().value;
+    if (oldestToolUseId !== undefined) {
+      context.subagentModelByToolUseId.delete(oldestToolUseId);
+    }
+  }
+  context.subagentModelByToolUseId.set(toolUseId, model);
+}
+
+function claudeSubagentLaunchModel(input: Record<string, unknown> | undefined): string | undefined {
+  const model = trimmedClaudeString(input?.model);
+  return model?.toLowerCase() === "inherit" ? undefined : model;
 }
 
 function isUuid(value: string): boolean {
@@ -2298,6 +2348,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ? toolInputFingerprint(parsedInput)
             : undefined;
         context.inFlightTools.set(event.index, nextTool);
+        if (nextTool.itemType === "collab_agent_tool_call" && parsedInput) {
+          rememberClaudeSubagentLaunchInput(context, nextTool.itemId, parsedInput);
+        }
 
         if (
           !parsedInput ||
@@ -2423,6 +2476,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(parentToolUseId ? { parentToolUseId } : {}),
       };
       context.inFlightTools.set(index, tool);
+      if (itemType === "collab_agent_tool_call") {
+        rememberClaudeSubagentLaunchInput(context, itemId, toolInput);
+      }
 
       const stamp = yield* makeEventStamp();
       yield* offerRuntimeEventForContext(context, {
@@ -2649,6 +2705,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const owningAgent = owningTaskId ? context.taskAgents.get(owningTaskId) : undefined;
       if (owningAgent && snapshotModel) {
         owningAgent.model = snapshotModel;
+      } else if (snapshotModel) {
+        rememberClaudeSubagentModel(context, assistantParentToolUseId, snapshotModel);
       }
       context.lastAssistantUuid = message.uuid;
       yield* updateResumeCursor(context);
@@ -3041,15 +3099,27 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             )
           : undefined;
         const owningAgentId = launchingTool?.agentId;
-        // Model/effort: the Agent tool's input carries explicit overrides;
-        // absent ones inherit the session's selection (SDK behavior).
-        // Subagent assistant snapshots later refine model with the
-        // authoritative API id. AgentInput.effort may be a named level or an
-        // integer.
-        const launchInput = launchingTool?.input;
+        // Model/effort: the Agent tool's input carries explicit overrides.
+        // The subagent's own assistant snapshot is authoritative for its API
+        // model and may arrive before or after task_started. Never fill a
+        // missing model from context.session.model: that mutable value can
+        // already belong to a later parent turn when background task events
+        // arrive. AgentInput.effort may be a named level or an integer.
+        const launchInput =
+          launchingTool?.input ??
+          (message.tool_use_id
+            ? context.subagentLaunchInputByToolUseId.get(message.tool_use_id)
+            : undefined);
+        if (message.tool_use_id) {
+          context.subagentLaunchInputByToolUseId.delete(message.tool_use_id);
+        }
         const model =
-          trimmedClaudeString(launchInput?.model) ??
-          trimmedClaudeString(context.session.model ?? undefined);
+          (message.tool_use_id
+            ? context.subagentModelByToolUseId.get(message.tool_use_id)
+            : undefined) ?? claudeSubagentLaunchModel(launchInput);
+        if (message.tool_use_id) {
+          context.subagentModelByToolUseId.delete(message.tool_use_id);
+        }
         const rawLaunchEffort = launchInput?.effort;
         const effort =
           trimmedClaudeString(rawLaunchEffort) ??
@@ -4164,6 +4234,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         inFlightTools,
         suppressedSubagentBlocks: new Map(),
         taskAgents: new Map(),
+        subagentLaunchInputByToolUseId: new Map(),
+        subagentModelByToolUseId: new Map(),
         workflowMemberFingerprints: new Map(),
         workflowPhasesByTaskId: new Map(),
         liveTaskIds: new Set(),
