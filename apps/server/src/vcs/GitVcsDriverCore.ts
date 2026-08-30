@@ -1718,6 +1718,55 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       Effect.catch(() => Effect.succeed(null)),
     );
     if (currentUpstream) {
+      // A branch tracking a differently named ref was cut from it, the way
+      // `git checkout -b feature origin/dev` and our own worktree flow leave
+      // it. That upstream is the branch's base, not its publish target, and
+      // pushing HEAD onto it would write feature commits to a shared branch.
+      // The one same-repo tracking setup that legitimately differs is a
+      // git-mangled alias such as local `upstream/effect-atom` for remote
+      // `my-org/upstream`'s `effect-atom`: the local branch name ends in the
+      // upstream head while the upstream ref ends in the local branch name.
+      const isAliasOfUpstreamHead =
+        branch === currentUpstream.branchName ||
+        (branch.endsWith(`/${currentUpstream.branchName}`) &&
+          currentUpstream.upstreamRef.endsWith(`/${branch}`));
+      if (!isAliasOfUpstreamHead) {
+        const publishRemoteName = yield* resolvePushRemoteName(cwd, branch).pipe(
+          Effect.catch(() => Effect.succeed(null)),
+        );
+        const remoteName = publishRemoteName ?? currentUpstream.remoteName;
+        const publishBranch = yield* resolvePublishBranchName(cwd, branch);
+
+        // `-u` retargets the upstream to the published branch. Record the old
+        // upstream first so base resolution keeps using it for the later PR.
+        const configuredMergeBase = yield* runGitStdout(
+          "GitVcsDriver.pushCurrentBranch.readMergeBase",
+          cwd,
+          ["config", "--get", `branch.${branch}.gh-merge-base`],
+          true,
+        ).pipe(Effect.map((stdout) => stdout.trim()));
+        if (configuredMergeBase.length === 0) {
+          yield* runGit("GitVcsDriver.pushCurrentBranch.recordMergeBase", cwd, [
+            "config",
+            `branch.${branch}.gh-merge-base`,
+            currentUpstream.branchName,
+          ]);
+        }
+
+        yield* runGit("GitVcsDriver.pushCurrentBranch.pushOwnBranch", cwd, [
+          "push",
+          "-u",
+          remoteName,
+          `HEAD:refs/heads/${publishBranch}`,
+        ]);
+        return {
+          status: "pushed" as const,
+          branch,
+          upstreamBranch: `${remoteName}/${publishBranch}`,
+          setUpstream: true,
+        };
+      }
+
       yield* runGit("GitVcsDriver.pushCurrentBranch.pushUpstream", cwd, [
         "push",
         currentUpstream.remoteName,
