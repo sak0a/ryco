@@ -383,6 +383,142 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("initializes recursive submodules in a new worktree", () =>
+      Effect.gen(function* () {
+        const leafRepo = yield* makeTmpDir("git-submodule-leaf-");
+        yield* initRepoWithCommit(leafRepo);
+        yield* writeTextFile(leafRepo, "leaf.txt", "leaf content\n");
+        yield* git(leafRepo, ["add", "leaf.txt"]);
+        yield* git(leafRepo, ["commit", "-m", "add leaf content"]);
+
+        const nestedRepo = yield* makeTmpDir("git-submodule-nested-");
+        yield* initRepoWithCommit(nestedRepo);
+        yield* git(nestedRepo, [
+          "-c",
+          "protocol.file.allow=always",
+          "submodule",
+          "add",
+          leafRepo,
+          "nested/leaf",
+        ]);
+        yield* git(nestedRepo, ["commit", "-m", "add nested submodule"]);
+
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* git(cwd, [
+          "-c",
+          "protocol.file.allow=always",
+          "submodule",
+          "add",
+          nestedRepo,
+          "modules/nested",
+        ]);
+        yield* git(cwd, ["commit", "-m", "add submodule"]);
+
+        const pathService = yield* Path.Path;
+        const worktreePath = pathService.join(
+          yield* makeTmpDir("git-worktrees-"),
+          "submodule-worktree",
+        );
+        const baseDriver = yield* GitVcsDriver.GitVcsDriver;
+        const driver = yield* makeGitVcsDriverCore({
+          executeOverride: (input) =>
+            baseDriver.execute(
+              input.operation === "GitVcsDriver.createWorktree.initializeSubmodules"
+                ? {
+                    ...input,
+                    env: { ...input.env, GIT_ALLOW_PROTOCOL: "file" },
+                  }
+                : input,
+            ),
+        }).pipe(Effect.provide(OverrideTestLayer));
+
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/submodules",
+        });
+
+        const fileSystem = yield* FileSystem.FileSystem;
+        assert.equal(
+          yield* fileSystem.exists(
+            pathService.join(worktreePath, "modules", "nested", "nested", "leaf", "leaf.txt"),
+          ),
+          true,
+        );
+      }),
+    );
+
+    it.effect("skips submodule initialization when the worktree has no submodules", () =>
+      Effect.gen(function* () {
+        const calls: GitVcsDriver.ExecuteGitInput[] = [];
+        const cwd = yield* makeTmpDir();
+        const worktreePath = yield* makeTmpDir("git-worktree-without-submodules-");
+        const driver = yield* makeGitVcsDriverCore({
+          executeOverride: (input) =>
+            Effect.sync(() => {
+              calls.push(input);
+              return {
+                exitCode: 0 as GitVcsDriver.ExecuteGitResult["exitCode"],
+                stdout: "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              };
+            }),
+        });
+
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: "main",
+          newRefName: "feature/no-submodules",
+        });
+
+        assert.deepStrictEqual(
+          calls.map((call) => call.operation),
+          ["GitVcsDriver.createWorktree"],
+        );
+      }).pipe(Effect.provide(OverrideTestLayer)),
+    );
+
+    it.effect("reports a partially created worktree when submodule initialization fails", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const worktreePath = yield* makeTmpDir("git-worktree-with-submodules-");
+        yield* writeTextFile(worktreePath, ".gitmodules", '[submodule "module"]\n');
+        const driver = yield* makeGitVcsDriverCore({
+          executeOverride: (input) =>
+            Effect.succeed({
+              exitCode: (input.operation === "GitVcsDriver.createWorktree.initializeSubmodules"
+                ? 1
+                : 0) as GitVcsDriver.ExecuteGitResult["exitCode"],
+              stdout: "",
+              stderr:
+                input.operation === "GitVcsDriver.createWorktree.initializeSubmodules"
+                  ? "fatal: unable to clone submodule"
+                  : "",
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            }),
+        });
+
+        const error = yield* driver
+          .createWorktree({
+            cwd,
+            path: worktreePath,
+            refName: "main",
+            newRefName: "feature/broken-submodule",
+          })
+          .pipe(Effect.flip);
+
+        assert.equal(error.operation, "GitVcsDriver.createWorktree.initializeSubmodules");
+        assert.include(error.detail, "The worktree was created");
+        assert.include(error.detail, "fatal: unable to clone submodule");
+      }).pipe(Effect.provide(OverrideTestLayer)),
+    );
+
     it.effect("copies dependency install directories when deprecated hydration is requested", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
