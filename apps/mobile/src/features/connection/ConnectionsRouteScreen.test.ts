@@ -59,6 +59,9 @@ vi.mock("react", async (importOriginal) => {
 });
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => navigationMock }));
 vi.mock("../../components/ConfirmDialogHost", () => ({ showConfirmDialog: confirmMock }));
+vi.mock("../../components/NavigationHeaderButton", () => ({
+  NavigationHeaderButton: "NavigationHeaderButton",
+}));
 vi.mock("../../lib/useThemeColor", () => ({ useThemeColor: () => "#000000" }));
 vi.mock("../../state/threadsRuntime", () => {
   const state = {

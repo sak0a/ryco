@@ -1,6 +1,6 @@
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
-import { Pressable, ScrollView, TextInput } from "react-native";
+import { Pressable, ScrollView, TextInput, View } from "react-native";
 
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { EnvironmentId, ThreadId } from "@ryco/contracts";
@@ -30,6 +30,23 @@ export function ReviewCommentComposerSheet(props: ReviewCommentProps) {
   const environmentIdRaw = firstParam(props.route.params.environmentId);
   const threadIdRaw = firstParam(props.route.params.threadId);
 
+  const dismiss = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    if (environmentIdRaw && threadIdRaw) {
+      navigation.dispatch(
+        StackActions.replace("Thread", {
+          environmentId: environmentIdRaw,
+          threadId: threadIdRaw,
+        }),
+      );
+      return;
+    }
+    navigation.dispatch(StackActions.replace("Home"));
+  };
+
   const submit = () => {
     const value = comment.trim();
     if (!value || !environmentIdRaw || !threadIdRaw) return;
@@ -37,11 +54,25 @@ export function ReviewCommentComposerSheet(props: ReviewCommentProps) {
     const store = useComposerDraftStore.getState();
     const current = store.getComposerDraft(target)?.prompt ?? "";
     store.setPrompt(target, current.trim().length > 0 ? `${current}\n\n${value}` : value);
-    navigation.goBack();
+    dismiss();
   };
 
   return (
     <ScrollView className="flex-1 bg-screen" contentContainerStyle={{ padding: 16, gap: 12 }}>
+      <View className="flex-row items-center gap-3">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Cancel review comment"
+          onPress={dismiss}
+          className="h-11 min-w-16 items-center justify-center rounded-full active:bg-subtle"
+        >
+          <Text className="text-base font-ryco-medium text-foreground">Cancel</Text>
+        </Pressable>
+        <Text className="flex-1 text-center text-lg font-ryco-bold text-foreground">
+          Review comment
+        </Text>
+        <View className="h-11 min-w-16" />
+      </View>
       <Text className="font-sans text-base text-foreground-muted">
         Your comment is appended to the thread draft for the next turn.
       </Text>

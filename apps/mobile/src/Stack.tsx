@@ -14,6 +14,7 @@ import { DynamicColorIOS, Platform, Pressable, ScrollView, StyleSheet } from "re
 import { useResolveClassNames } from "uniwind";
 
 import { AppText as Text } from "./components/AppText";
+import { NavigationHeaderButton } from "./components/NavigationHeaderButton";
 import { HardwareKeyboardCommandProvider } from "./features/keyboard/HardwareKeyboardCommandProvider";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
@@ -141,10 +142,26 @@ function settingsRouteOptions(
 // About without duplicating the connection browser.
 const SettingsSheetStack = createNativeStackNavigator({
   initialRouteName: "Settings",
-  screenOptions: {
+  screenOptions: ({ navigation, route }) => ({
     ...GLASS_HEADER_OPTIONS,
     unstable_navigationItemStyle: undefined,
-  },
+    headerLeft:
+      MVP_SETTINGS_SHEET_ROUTES[route.name as keyof typeof MVP_SETTINGS_SHEET_ROUTES]
+        ?.headerAction === "back"
+        ? () => (
+            <NavigationHeaderButton
+              action="back"
+              onPress={() => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                  return;
+                }
+                navigation.dispatch(StackActions.replace("Settings"));
+              }}
+            />
+          )
+        : undefined,
+  }),
   screens: {
     Settings: createNativeStackScreen({
       screen: SettingsRouteScreen,
@@ -403,9 +420,25 @@ export const ROOT_STACK_SCREENS = {
 export const RootStack = createNativeStackNavigator({
   initialRouteName: "Home",
   layout: RootStackLayout,
-  screenOptions: {
+  screenOptions: ({ navigation, route }) => ({
     headerShown: false,
-  },
+    headerLeft: (() => {
+      const action = MVP_ROOT_ROUTES[route.name as keyof typeof MVP_ROOT_ROUTES]?.headerAction;
+      if (action === undefined || action === "none") return undefined;
+      return () => (
+        <NavigationHeaderButton
+          action={action}
+          onPress={() => {
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+              return;
+            }
+            navigation.dispatch(StackActions.replace("Home"));
+          }}
+        />
+      );
+    })(),
+  }),
   screens: ROOT_STACK_SCREENS,
 });
 type RootStackType = typeof RootStack;

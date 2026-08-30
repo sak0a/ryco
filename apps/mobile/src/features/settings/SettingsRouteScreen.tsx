@@ -1,9 +1,8 @@
 import { StackActions, useNavigation } from "@react-navigation/native";
 import { useLayoutEffect } from "react";
-import { Pressable, ScrollView } from "react-native";
+import { ScrollView } from "react-native";
 
-import { SymbolView } from "../../components/AppSymbol";
-import { useThemeColor } from "../../lib/useThemeColor";
+import { NavigationHeaderButton } from "../../components/NavigationHeaderButton";
 import { useHostedHubStore } from "../../hostedHub/state";
 import { exactNodeRouteParams } from "../e2ee/exactNodeRouteModel";
 import { SettingsRow } from "./components/SettingsRow";
@@ -13,27 +12,22 @@ import { openMachinesFromSettings } from "./openMachinesFromSettings";
 export function SettingsRouteScreen() {
   const navigation = useNavigation();
   const selectedNode = useHostedHubStore((state) => state.selectedNode);
-  const iconColor = useThemeColor("--color-icon");
 
   useLayoutEffect(() => {
     navigation.setOptions({
       headerLeft: () => (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
-          onPress={() => navigation.getParent()?.goBack()}
-        >
-          <SymbolView
-            name="chevron.left"
-            size={19}
-            tintColor={iconColor as string}
-            type="monochrome"
-          />
-        </Pressable>
+        <NavigationHeaderButton
+          action="close"
+          accessibilityLabel="Close Settings"
+          onPress={() => {
+            const parent = navigation.getParent();
+            if (parent?.canGoBack()) parent.goBack();
+            else parent?.dispatch(StackActions.replace("Home"));
+          }}
+        />
       ),
     });
-  }, [iconColor, navigation]);
+  }, [navigation]);
 
   return (
     <ScrollView

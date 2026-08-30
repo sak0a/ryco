@@ -1,4 +1,4 @@
-import { useNavigation } from "@react-navigation/native";
+import { StackActions, useNavigation } from "@react-navigation/native";
 import { useState } from "react";
 import { Modal, Pressable, ScrollView, TextInput, View } from "react-native";
 
@@ -8,6 +8,7 @@ import { AppText as Text } from "../../components/AppText";
 import { showConfirmDialog } from "../../components/ConfirmDialogHost";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
+import { NavigationHeaderButton } from "../../components/NavigationHeaderButton";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useStore } from "../../state/threadsRuntime";
 import {
@@ -196,9 +197,17 @@ export function NodesScreen(props: {
         onScroll={(event) => props.onScrollOffset?.(event.nativeEvent.contentOffset.y)}
         scrollEventThrottle={32}
       >
-        {/* Settings moved to the Home header gear — this row is now purely about
-            adding machines, which is what this surface is for. */}
-        <View className="mx-4 mt-5 flex-row gap-2">
+        {/* Settings moved to the Home header gear. This headerless sheet keeps
+            its dismissal action visible beside its primary machine action. */}
+        <View className="mx-4 mt-5 flex-row items-center gap-2">
+          <NavigationHeaderButton
+            action="close"
+            accessibilityLabel="Close Machines"
+            onPress={() => {
+              if (navigation.canGoBack()) navigation.goBack();
+              else navigation.dispatch(StackActions.replace("Home"));
+            }}
+          />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Pair a machine directly"

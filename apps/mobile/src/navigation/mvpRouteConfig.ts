@@ -6,6 +6,7 @@
 
 export type RoutePresentation = "card" | "formSheet" | "fullScreenModal";
 export type HeaderPreset = "glass" | "solid" | "sheet-solid" | "none";
+export type HeaderAction = "back" | "close" | "none";
 
 export interface RoutePlatformPresentation {
   readonly presentation: RoutePresentation;
@@ -21,6 +22,9 @@ export interface MvpRouteDescriptor {
    *  adaptive-layout pathname (WORKSPACE_OVERLAY_ROUTES). */
   readonly overlay: boolean;
   readonly headerPreset: HeaderPreset;
+  /** Explicit navigation affordance rendered in the native header. Headerless
+   *  surfaces provide their dismissal action in content instead. */
+  readonly headerAction: HeaderAction;
   readonly ios: RoutePlatformPresentation;
   readonly android: RoutePlatformPresentation;
 }
@@ -35,6 +39,7 @@ export const MVP_ROOT_ROUTES = {
     linking: "account/access",
     overlay: false,
     headerPreset: "none",
+    headerAction: "none",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -42,6 +47,7 @@ export const MVP_ROOT_ROUTES = {
     linking: "",
     overlay: false,
     headerPreset: "glass",
+    headerAction: "none",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -49,6 +55,7 @@ export const MVP_ROOT_ROUTES = {
     linking: "projects/new",
     overlay: true,
     headerPreset: "sheet-solid",
+    headerAction: "close",
     ios: {
       presentation: "formSheet",
       sheetAllowedDetents: [0.7, 0.95],
@@ -60,6 +67,7 @@ export const MVP_ROOT_ROUTES = {
     linking: PROJECT,
     overlay: false,
     headerPreset: "glass",
+    headerAction: "back",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -67,6 +75,7 @@ export const MVP_ROOT_ROUTES = {
     linking: `${PROJECT}/source-control/:worktreeId?`,
     overlay: false,
     headerPreset: "glass",
+    headerAction: "back",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -74,6 +83,7 @@ export const MVP_ROOT_ROUTES = {
     linking: "tasks/new",
     overlay: false,
     headerPreset: "glass",
+    headerAction: "back",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -81,6 +91,7 @@ export const MVP_ROOT_ROUTES = {
     linking: THREAD,
     overlay: false,
     headerPreset: "glass",
+    headerAction: "back",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -88,6 +99,7 @@ export const MVP_ROOT_ROUTES = {
     linking: `${THREAD}/review`,
     overlay: false,
     headerPreset: "solid",
+    headerAction: "back",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -95,6 +107,7 @@ export const MVP_ROOT_ROUTES = {
     linking: `${THREAD}/review-comment`,
     overlay: true,
     headerPreset: "none",
+    headerAction: "none",
     // Android cannot host the keyboard-driven comment composer inside a formSheet.
     ios: {
       presentation: "formSheet",
@@ -110,6 +123,7 @@ export const MVP_ROOT_ROUTES = {
     linking: `${THREAD}/files`,
     overlay: false,
     headerPreset: "glass",
+    headerAction: "back",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -127,6 +141,7 @@ export const MVP_ROOT_ROUTES = {
     linking: `${THREAD}/files/:path*`,
     overlay: false,
     headerPreset: "solid",
+    headerAction: "back",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -134,6 +149,7 @@ export const MVP_ROOT_ROUTES = {
     linking: "connections",
     overlay: true,
     headerPreset: "none",
+    headerAction: "none",
     // Widened from [0.55, 0.7]: the sheet now carries two labeled sections —
     // direct saved devices and hosted Hub nodes — rather than one list.
     ios: {
@@ -148,6 +164,7 @@ export const MVP_ROOT_ROUTES = {
     linking: "connections/new",
     overlay: true,
     headerPreset: "sheet-solid",
+    headerAction: "back",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -157,6 +174,7 @@ export const MVP_ROOT_ROUTES = {
     // change which thread the workspace is on (see WORKSPACE_OVERLAY_ROUTES).
     overlay: true,
     headerPreset: "none",
+    headerAction: "none",
     // Settings owns a nested stack, so present it full-screen on iPhone. The
     // floating form/adaptive modal styles on iOS 26 expose live Inbox controls
     // around the rounded bottom corners and duplicate the status-bar chrome
@@ -171,6 +189,7 @@ export const MVP_ROOT_ROUTES = {
     linking: "*",
     overlay: false,
     headerPreset: "none",
+    headerAction: "none",
     ios: { presentation: "card" },
     android: { presentation: "card" },
   },
@@ -188,6 +207,9 @@ export type MvpRootRouteName = keyof typeof MVP_ROOT_ROUTES;
  */
 export interface MvpSettingsRouteDescriptor {
   readonly linking: string;
+  /** Settings itself installs a parent-stack close action; every pushed child
+   *  has an explicit Back button, including non-swipeable security screens. */
+  readonly headerAction: "back" | "none";
   readonly ios: RoutePlatformPresentation;
   readonly android: RoutePlatformPresentation;
 }
@@ -200,13 +222,13 @@ const SETTINGS_PUSH = {
 
 // Nested routes inside the full-screen Settings stack.
 export const MVP_SETTINGS_SHEET_ROUTES = {
-  Settings: { linking: "", ...SETTINGS_PUSH },
-  SettingsHub: { linking: "hub", ...SETTINGS_PUSH },
-  SettingsWorkspace: { linking: "workspace", ...SETTINGS_PUSH },
-  SettingsInbox: { linking: "inbox", ...SETTINGS_PUSH },
+  Settings: { linking: "", headerAction: "none", ...SETTINGS_PUSH },
+  SettingsHub: { linking: "hub", headerAction: "back", ...SETTINGS_PUSH },
+  SettingsWorkspace: { linking: "workspace", headerAction: "back", ...SETTINGS_PUSH },
+  SettingsInbox: { linking: "inbox", headerAction: "back", ...SETTINGS_PUSH },
   // Hosted Hub account. Account management stays nested; voluntary sign-in
   // opens the full-screen root Access route rather than a dismissible sheet.
-  SettingsAccount: { linking: "account", ...SETTINGS_PUSH },
+  SettingsAccount: { linking: "account", headerAction: "back", ...SETTINGS_PUSH },
   /**
    * The `docs/relay-e2ee-protocol.md` §13.1.1 security surface: the persistent
    * indication that this device has verified no node on this Hub, the channel's
@@ -220,6 +242,7 @@ export const MVP_SETTINGS_SHEET_ROUTES = {
    */
   SettingsNodeSecurity: {
     linking: "node-security/:environmentId/:nodeId",
+    headerAction: "back",
     ...SETTINGS_PUSH,
   },
   /**
@@ -230,11 +253,16 @@ export const MVP_SETTINGS_SHEET_ROUTES = {
    */
   SettingsNodeVerification: {
     linking: "node-verification/:environmentId/:nodeId",
+    headerAction: "back",
     ...SETTINGS_PUSH,
   },
-  SettingsAppearance: { linking: "appearance", ...SETTINGS_PUSH },
-  SettingsClientStorage: { linking: "client-storage", ...SETTINGS_PUSH },
-  SettingsAbout: { linking: "about", ...SETTINGS_PUSH },
+  SettingsAppearance: { linking: "appearance", headerAction: "back", ...SETTINGS_PUSH },
+  SettingsClientStorage: {
+    linking: "client-storage",
+    headerAction: "back",
+    ...SETTINGS_PUSH,
+  },
+  SettingsAbout: { linking: "about", headerAction: "back", ...SETTINGS_PUSH },
 } as const satisfies Record<string, MvpSettingsRouteDescriptor>;
 
 export type MvpSettingsRouteName = keyof typeof MVP_SETTINGS_SHEET_ROUTES;
