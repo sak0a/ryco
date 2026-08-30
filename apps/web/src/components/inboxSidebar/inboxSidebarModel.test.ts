@@ -8,6 +8,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  type SidebarAutoSettleAfterDays,
   ThreadId,
 } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -128,6 +129,7 @@ function build(input: {
   filters?: InboxSidebarFilters;
   worktrees?: ReadonlyArray<SidebarWorktreeSummary>;
   aiFocusEnabled?: boolean;
+  autoSettleAfterDays?: SidebarAutoSettleAfterDays;
   pinnedThreadKeys?: ReadonlySet<string>;
   nowMs?: number;
 }) {
@@ -138,6 +140,9 @@ function build(input: {
     environments: input.environments ?? [environment(ENV_A), environment(ENV_B)],
     filters: input.filters ?? ALL_FILTERS,
     ...(input.aiFocusEnabled !== undefined ? { aiFocusEnabled: input.aiFocusEnabled } : {}),
+    ...(input.autoSettleAfterDays !== undefined
+      ? { autoSettleAfterDays: input.autoSettleAfterDays }
+      : {}),
     ...(input.pinnedThreadKeys !== undefined ? { pinnedThreadKeys: input.pinnedThreadKeys } : {}),
     ...(input.nowMs !== undefined ? { nowMs: input.nowMs } : {}),
   });
@@ -298,6 +303,26 @@ describe("buildInboxSidebarSections", () => {
       settled: true,
       settlementActionEnabled: true,
       effectiveSettlementTimestamp: "2026-08-23T12:00:00.000Z",
+    });
+  });
+
+  it("moves an inactivity-eligible row into Settled only when enabled", () => {
+    const inactive = thread("inactive", {
+      latestUserMessageAt: "2026-08-10T10:00:00.000Z",
+      updatedAt: "2026-08-25T09:59:00.000Z",
+    });
+    const nowMs = Date.parse("2026-08-25T10:00:00.000Z");
+
+    expect(build({ threads: [inactive], nowMs })[0]?.key).toBe("recent");
+    const enabled = build({
+      threads: [inactive],
+      autoSettleAfterDays: 14,
+      nowMs,
+    });
+    expect(enabled[0]).toMatchObject({ key: "settled" });
+    expect(enabled[0]?.rows[0]).toMatchObject({
+      settled: true,
+      effectiveSettlementTimestamp: "2026-08-24T10:00:00.000Z",
     });
   });
 

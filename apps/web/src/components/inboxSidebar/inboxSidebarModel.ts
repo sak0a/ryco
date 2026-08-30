@@ -15,6 +15,7 @@ import {
   defaultInstanceIdForDriver,
   type EnvironmentId,
   type ProviderDriverKind,
+  type SidebarAutoSettleAfterDays,
   type ThreadId,
 } from "@ryco/contracts";
 
@@ -94,8 +95,14 @@ export interface BuildInboxSidebarInput {
   readonly localQueuedThreadKeys?: ReadonlySet<string>;
   readonly activeThreadKey?: string | null;
   readonly aiFocusEnabled?: boolean;
+  readonly autoSettleAfterDays?: SidebarAutoSettleAfterDays;
   readonly pinnedThreadKeys?: ReadonlySet<string>;
   readonly nowMs?: number;
+}
+
+export interface InboxSidebarModel {
+  readonly sections: ReadonlyArray<InboxSidebarSection>;
+  readonly nextSettlementEvaluationAtMs: number | null;
 }
 
 export interface InboxFocusExplanation {
@@ -271,9 +278,7 @@ function settlementDisabledReason(entry: ThreadInboxEntry): string | null {
   return null;
 }
 
-export function buildInboxSidebarSections(
-  input: BuildInboxSidebarInput,
-): ReadonlyArray<InboxSidebarSection> {
+export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSidebarModel {
   const environmentById = new Map(
     input.environments.map((environment) => [environment.environmentId, environment] as const),
   );
@@ -299,6 +304,7 @@ export function buildInboxSidebarSections(
     },
     currentThreadKey: input.activeThreadKey,
     aiFocusEnabled: input.aiFocusEnabled,
+    autoSettleAfterDays: input.autoSettleAfterDays,
     nowMs: input.nowMs ?? Date.now(),
   });
 
@@ -385,13 +391,22 @@ export function buildInboxSidebarSections(
       ),
     );
 
-  return [
-    ...(focus.length > 0 ? [{ key: "focus", title: "Focus", rows: focus } as const] : []),
-    ...(active.length > 0 ? [{ key: "active", title: "Active now", rows: active } as const] : []),
-    ...(needsInput.length > 0
-      ? [{ key: "needs-input", title: "Needs input", rows: needsInput } as const]
-      : []),
-    ...(recent.length > 0 ? [{ key: "recent", title: "Recent", rows: recent } as const] : []),
-    ...(settled.length > 0 ? [{ key: "settled", title: "Settled", rows: settled } as const] : []),
-  ];
+  return {
+    sections: [
+      ...(focus.length > 0 ? [{ key: "focus", title: "Focus", rows: focus } as const] : []),
+      ...(active.length > 0 ? [{ key: "active", title: "Active now", rows: active } as const] : []),
+      ...(needsInput.length > 0
+        ? [{ key: "needs-input", title: "Needs input", rows: needsInput } as const]
+        : []),
+      ...(recent.length > 0 ? [{ key: "recent", title: "Recent", rows: recent } as const] : []),
+      ...(settled.length > 0 ? [{ key: "settled", title: "Settled", rows: settled } as const] : []),
+    ],
+    nextSettlementEvaluationAtMs: inbox.nextSettlementEvaluationAtMs,
+  };
+}
+
+export function buildInboxSidebarSections(
+  input: BuildInboxSidebarInput,
+): ReadonlyArray<InboxSidebarSection> {
+  return buildInboxSidebarModel(input).sections;
 }

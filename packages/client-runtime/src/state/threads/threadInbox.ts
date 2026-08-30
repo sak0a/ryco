@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   ProjectId,
   ScopedThreadRef,
+  SidebarAutoSettleAfterDays,
   ThreadId,
   WorktreeId,
 } from "@ryco/contracts";
@@ -11,6 +12,7 @@ import {
   compareActiveInboxEntries,
   compareSettledInboxEntries,
   getEffectiveSettlementTimestamp,
+  getNextThreadSettlementEvaluationAtMs,
   type CanSettleThreadResult,
   type ThreadSettlementBlocker,
   type ThreadSettlementClassification,
@@ -97,6 +99,7 @@ export interface BuildThreadInboxInput {
   readonly filters?: ThreadInboxFilters | undefined;
   readonly currentThreadKey?: string | null | undefined;
   readonly aiFocusEnabled?: boolean | undefined;
+  readonly autoSettleAfterDays?: SidebarAutoSettleAfterDays | undefined;
   readonly nowMs: number;
 }
 
@@ -105,6 +108,7 @@ export interface ThreadInboxModel {
   readonly active: ThreadInboxEntry[];
   readonly settled: ThreadInboxEntry[];
   readonly excludedCount: number;
+  readonly nextSettlementEvaluationAtMs: number | null;
 }
 
 export function scopedInboxWorktreeKey(
@@ -179,6 +183,7 @@ function settlementInput(input: {
   readonly environment: ThreadInboxEnvironment;
   readonly hasLocalQueuedMessage: boolean;
   readonly deliveryUnknown: boolean;
+  readonly autoSettleAfterDays: SidebarAutoSettleAfterDays;
   readonly nowMs: number;
 }): ThreadSettlementInput {
   return {
@@ -191,16 +196,18 @@ function settlementInput(input: {
     sessionStatus: input.thread.session?.orchestrationStatus ?? null,
     latestTurnState: input.thread.latestTurn?.state ?? null,
     latestTurnRequestedAt: input.thread.latestTurn?.requestedAt ?? null,
+    latestTurnStartedAt: input.thread.latestTurn?.startedAt ?? null,
     latestTurnCompletedAt: input.thread.latestTurn?.completedAt ?? null,
     latestUserMessageAt: input.thread.latestUserMessageAt,
     hasPendingApprovals: input.thread.hasPendingApprovals,
-    hasPendingUserInput: input.thread.hasPendingUserInput,
+    hasPendingUserInput: input.thread.hasPendingUserInput || input.thread.hasActionableProposedPlan,
     hasLocalQueuedMessage: input.hasLocalQueuedMessage,
     deliveryUnknown: input.deliveryUnknown,
     prState: input.worktree?.prState ?? null,
     worktreeUpdatedAt: input.worktree?.updatedAt ?? null,
     updatedAt: input.thread.updatedAt ?? null,
     createdAt: input.thread.createdAt,
+    autoSettleAfterDays: input.autoSettleAfterDays,
     nowMs: input.nowMs,
   };
 }
@@ -308,6 +315,7 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
   );
 
   let excludedCount = 0;
+  let nextSettlementEvaluationAtMs: number | null = null;
   const entries: ThreadInboxEntry[] = [];
   for (const thread of input.threads) {
     const ref = scopeThreadRef(thread.environmentId, thread.id);
@@ -328,8 +336,16 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
       environment,
       hasLocalQueuedMessage: localQueueKeys.has(key),
       deliveryUnknown: deliveryUnknownKeys.has(key),
+      autoSettleAfterDays: input.autoSettleAfterDays ?? null,
       nowMs: input.nowMs,
     });
+    const nextEvaluationAtMs = getNextThreadSettlementEvaluationAtMs(policyInput);
+    if (
+      nextEvaluationAtMs !== null &&
+      (nextSettlementEvaluationAtMs === null || nextEvaluationAtMs < nextSettlementEvaluationAtMs)
+    ) {
+      nextSettlementEvaluationAtMs = nextEvaluationAtMs;
+    }
     const classification = classifyThreadSettlement(policyInput);
     if (classification === "excluded") {
       excludedCount += 1;
@@ -455,5 +471,6 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
         ),
       ),
     excludedCount,
+    nextSettlementEvaluationAtMs,
   };
 }

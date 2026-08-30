@@ -52,6 +52,7 @@ import {
 import { useAgentControlSync } from "../../state/agentControlSync";
 import { useHomeWorkspaceData } from "../../state/homeData";
 import { useMessageQueueStore } from "../../state/messageQueueStore";
+import { usePreferences } from "../../state/preferencesStore";
 import {
   useWsConnectionStatusForEnvironment,
   wsUiStateForEnvironment,
@@ -225,6 +226,8 @@ export function ThreadDetailScreen(props: {
   const navigation = useNavigation();
   const headerHeight = useHeaderHeight();
   const iconColor = String(useThemeColor("--color-icon"));
+  const preferences = usePreferences();
+  const [settlementNowMs, setSettlementNowMs] = useState(() => Date.now());
   const [sendError, setSendError] = useState<string | null>(null);
   const [actionsVisible, setActionsVisible] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
@@ -341,9 +344,9 @@ export function ThreadDetailScreen(props: {
   const environmentRow =
     environments.find((environment) => environment.environmentId === environmentId) ?? null;
   const nodeLabel = environmentRow?.label ?? null;
-  const settlementEntry = useMemo(() => {
+  const settlementModel = useMemo(() => {
     if (!sidebarThread || !environmentRow) return null;
-    const model = buildThreadInbox({
+    return buildThreadInbox({
       projects: project ? [project] : [],
       worktrees,
       threads: [sidebarThread],
@@ -358,10 +361,27 @@ export function ThreadDetailScreen(props: {
         },
       ],
       localQueuedThreadKeys: getQueuedThreadKeys(queuesByThreadKey),
-      nowMs: Date.now(),
+      autoSettleAfterDays: preferences.sidebarAutoSettleAfterDays ?? null,
+      nowMs: Math.max(settlementNowMs, Date.now()),
     });
-    return model.active[0] ?? model.settled[0] ?? null;
-  }, [environmentId, environmentRow, project, queuesByThreadKey, sidebarThread, worktrees]);
+  }, [
+    environmentId,
+    environmentRow,
+    preferences.sidebarAutoSettleAfterDays,
+    project,
+    queuesByThreadKey,
+    settlementNowMs,
+    sidebarThread,
+    worktrees,
+  ]);
+  useEffect(() => {
+    const nextEvaluationAtMs = settlementModel?.nextSettlementEvaluationAtMs ?? null;
+    if (nextEvaluationAtMs === null) return;
+    const delayMs = Math.min(2_147_483_647, Math.max(1, nextEvaluationAtMs - Date.now() + 1));
+    const timer = setTimeout(() => setSettlementNowMs(Date.now()), delayMs);
+    return () => clearTimeout(timer);
+  }, [settlementModel?.nextSettlementEvaluationAtMs]);
+  const settlementEntry = settlementModel?.active[0] ?? settlementModel?.settled[0] ?? null;
   const cachedView = useMemo(
     () =>
       deriveThreadCachedView({

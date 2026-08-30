@@ -77,4 +77,19 @@ describe("preferencesStore persistence", () => {
     await flush();
     expect(getPreferencesSnapshot().aiFocusRefreshIntervalMs).toBeUndefined();
   });
+
+  it("persists Off and supported auto-settle presets while rejecting arbitrary days", async () => {
+    updatePreferences({ sidebarAutoSettleAfterDays: 14 });
+    await flush();
+    expect(getPreferencesSnapshot().sidebarAutoSettleAfterDays).toBe(14);
+
+    updatePreferences({ sidebarAutoSettleAfterDays: null });
+    expect(getPreferencesSnapshot().sidebarAutoSettleAfterDays).toBeNull();
+
+    kvStore.set("ryco.preferences", JSON.stringify({ sidebarAutoSettleAfterDays: 2 }));
+    resetPreferencesStoreForTests();
+    hydratePreferences();
+    await flush();
+    expect(getPreferencesSnapshot().sidebarAutoSettleAfterDays).toBeUndefined();
+  });
 });

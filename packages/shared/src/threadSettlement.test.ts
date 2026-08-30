@@ -6,6 +6,8 @@ import {
   canSettleThread,
   classifyThreadSettlement,
   getEffectiveSettlementTimestamp,
+  getNextThreadSettlementEvaluationAtMs,
+  getThreadLastActivityTimestamp,
   hasQueuedTurnStart,
   type ThreadSettlementInput,
 } from "./threadSettlement.ts";
@@ -23,6 +25,7 @@ function input(overrides: Partial<ThreadSettlementInput> = {}): ThreadSettlement
     sessionStatus: "idle",
     latestTurnState: "completed",
     latestTurnRequestedAt: "2026-07-31T10:00:00.000Z",
+    latestTurnStartedAt: "2026-07-31T10:00:30.000Z",
     latestTurnCompletedAt: "2026-07-31T10:01:00.000Z",
     latestUserMessageAt: "2026-07-31T10:00:00.000Z",
     hasPendingApprovals: false,
@@ -33,6 +36,7 @@ function input(overrides: Partial<ThreadSettlementInput> = {}): ThreadSettlement
     worktreeUpdatedAt: null,
     updatedAt: "2026-07-31T10:01:00.000Z",
     createdAt: "2026-07-31T09:59:00.000Z",
+    autoSettleAfterDays: null,
     nowMs: NOW,
     ...overrides,
   };
@@ -157,6 +161,49 @@ describe("classifyThreadSettlement", () => {
     expect(classifyThreadSettlement(input({ prState: "open" }))).toBe("active");
   });
 
+  it("settles inactive work only when the opt-in boundary has passed", () => {
+    const inactive = input({
+      autoSettleAfterDays: 7,
+      nowMs: Date.parse("2026-08-07T10:01:00.000Z"),
+    });
+    expect(classifyThreadSettlement(inactive)).toBe("settled");
+    expect(getEffectiveSettlementTimestamp(inactive)).toBe("2026-08-07T10:01:00.000Z");
+    expect(
+      classifyThreadSettlement(
+        input({
+          autoSettleAfterDays: 7,
+          nowMs: Date.parse("2026-08-07T10:00:59.999Z"),
+        }),
+      ),
+    ).toBe("active");
+  });
+
+  it("protects explicit keep-active work, open PRs, blockers, and threads without activity", () => {
+    const autoSettleAfterDays = 7;
+    const nowMs = Date.parse("2026-08-08T12:00:00.000Z");
+    expect(
+      classifyThreadSettlement(input({ autoSettleAfterDays, nowMs, settledOverride: "active" })),
+    ).toBe("active");
+    expect(classifyThreadSettlement(input({ autoSettleAfterDays, nowMs, prState: "open" }))).toBe(
+      "active",
+    );
+    expect(
+      classifyThreadSettlement(input({ autoSettleAfterDays, nowMs, deliveryUnknown: true })),
+    ).toBe("active");
+    expect(
+      classifyThreadSettlement(
+        input({
+          autoSettleAfterDays,
+          nowMs,
+          latestTurnRequestedAt: null,
+          latestTurnStartedAt: null,
+          latestTurnCompletedAt: null,
+          latestUserMessageAt: null,
+        }),
+      ),
+    ).toBe("active");
+  });
+
   it("excludes archived threads and worktrees", () => {
     expect(classifyThreadSettlement(input({ archivedAt: "2026-07-31T11:00:00.000Z" }))).toBe(
       "excluded",
@@ -183,6 +230,17 @@ describe("classifyThreadSettlement", () => {
 });
 
 describe("effective settlement timestamp and sorting", () => {
+  it("uses activity timestamps only and exposes the next exact evaluation boundary", () => {
+    const nextBoundary = Date.parse("2026-08-07T10:01:00.000Z");
+    const candidate = input({
+      autoSettleAfterDays: 7,
+      nowMs: NOW,
+      updatedAt: "2026-07-31T11:59:00.000Z",
+    });
+    expect(getThreadLastActivityTimestamp(candidate)).toBe("2026-07-31T10:01:00.000Z");
+    expect(getNextThreadSettlementEvaluationAtMs(candidate)).toBe(nextBoundary);
+  });
+
   it("prefers explicit settlement and otherwise takes the newest valid candidate", () => {
     expect(
       getEffectiveSettlementTimestamp(

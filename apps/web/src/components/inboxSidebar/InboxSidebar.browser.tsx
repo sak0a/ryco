@@ -16,13 +16,13 @@ const ENVIRONMENT_ID = EnvironmentId.make("environment-hover-card");
 const PROJECT_ID = ProjectId.make("project-hover-card");
 const THREAD_ID = ThreadId.make("thread-hover-card");
 
-describe("Inbox sidebar settlement", () => {
+describe("Inbox sidebar rendering and settlement", () => {
   afterEach(() => {
     __resetEnvironmentApiOverridesForTests();
     document.body.innerHTML = "";
   });
 
-  it("anchors detail information to the row's right and dispatches scoped settlement", async () => {
+  it("keeps rows paint-efficient while preserving detail and settlement behavior", async () => {
     await page.viewport(1_280, 800);
     const now = Date.now();
     const dispatchCommand = vi.fn(async (_command: unknown) => undefined);
@@ -102,6 +102,7 @@ describe("Inbox sidebar settlement", () => {
         localQueuedThreadKeys={new Set()}
         activeThreadKey={null}
         aiFocusEnabled
+        autoSettleAfterDays={null}
         pinnedThreadKeys={new Set()}
         onOpenThread={() => undefined}
       />,
@@ -116,7 +117,13 @@ describe("Inbox sidebar settlement", () => {
         expect(document.querySelector('[data-slot="tooltip-popup"]')).not.toBeNull();
       });
       const rowElement = document.querySelector<HTMLElement>('[data-testid="inbox-thread-row"]')!;
+      const rowShell = document.querySelector<HTMLElement>(
+        '[data-testid="inbox-thread-row-shell"]',
+      )!;
       const popup = document.querySelector<HTMLElement>('[data-slot="tooltip-popup"]')!;
+      expect(getComputedStyle(rowElement).willChange).toBe("auto");
+      expect(getComputedStyle(rowShell).contentVisibility).toBe("auto");
+      expect(getComputedStyle(rowShell).containIntrinsicBlockSize).toContain("76px");
       expect(
         [...rowElement.children].some(
           (child) => child.classList.contains("absolute") && child.classList.contains("left-0"),

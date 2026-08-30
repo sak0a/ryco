@@ -1,6 +1,9 @@
 import { getWsConnectionStatusForEnvironment } from "@ryco/client-runtime/rpc";
 import type { EnvironmentId, ProviderOptionSelectionValue } from "@ryco/contracts";
-import type { AiFocusRefreshIntervalMs } from "@ryco/contracts/settings";
+import {
+  SIDEBAR_AUTO_SETTLE_DAY_OPTIONS,
+  type AiFocusRefreshIntervalMs,
+} from "@ryco/contracts/settings";
 import {
   AI_FOCUS_DISCLOSURE_FIELDS,
   AI_FOCUS_REFRESH_INTERVAL_OPTIONS,
@@ -132,6 +135,24 @@ export function SettingsInboxRouteScreen() {
         className="flex-1 bg-screen"
         contentContainerStyle={{ paddingTop: 4, paddingBottom: 40 }}
       >
+        <SettingsSection title="Auto-settle inactive tasks">
+          <SettingsRow
+            first
+            label="Off"
+            detail="Uses the last message or turn. Running work, queued messages, pending input, open pull requests, and tasks kept active are protected."
+            value={preferences.sidebarAutoSettleAfterDays == null ? "Selected" : undefined}
+            onPress={() => updatePreferences({ sidebarAutoSettleAfterDays: null })}
+          />
+          {SIDEBAR_AUTO_SETTLE_DAY_OPTIONS.map((days) => (
+            <SettingsRow
+              key={days}
+              label={`After ${days} ${days === 1 ? "day" : "days"}`}
+              value={preferences.sidebarAutoSettleAfterDays === days ? "Selected" : undefined}
+              onPress={() => updatePreferences({ sidebarAutoSettleAfterDays: days })}
+            />
+          ))}
+        </SettingsSection>
+
         <SettingsSection title="AI Focus">
           <SettingsSwitchRow
             first

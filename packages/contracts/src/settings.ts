@@ -25,6 +25,13 @@ export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+export const SIDEBAR_AUTO_SETTLE_DAY_OPTIONS = [1, 3, 7, 14, 30, 90] as const;
+export const SidebarAutoSettleAfterDays = Schema.NullOr(
+  Schema.Literals(SIDEBAR_AUTO_SETTLE_DAY_OPTIONS),
+);
+export type SidebarAutoSettleAfterDays = typeof SidebarAutoSettleAfterDays.Type;
+export const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = null;
+
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
   "repository_path",
@@ -98,6 +105,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   sidebarThreadSortOrder: SidebarThreadSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_SORT_ORDER)),
+  ),
+  sidebarAutoSettleAfterDays: SidebarAutoSettleAfterDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
@@ -631,6 +641,7 @@ export const ClientSettingsPatch = Schema.Struct({
   ),
   sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
+  sidebarAutoSettleAfterDays: Schema.optionalKey(SidebarAutoSettleAfterDays),
   timestampFormat: Schema.optionalKey(TimestampFormat),
   preferredEditor: Schema.optionalKey(Schema.NullOr(EditorId)),
   gitStatusPollIntervalMs: Schema.optionalKey(GitStatusPollIntervalMs),
