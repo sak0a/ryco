@@ -761,7 +761,7 @@ export default function Version4() {
               </MagneticButton>
             </div>
 
-            {/* detected target + escape hatch (arch detection is best-effort) */}
+            {/* detected target + escape hatch */}
             <p data-hero-fade className="mt-4 text-xs text-white/45">
               {dl.osLabel && (
                 <span className="text-white/55">
@@ -1233,7 +1233,7 @@ export default function Version4() {
             <Eyebrow>Cross-platform · {SITE.license} licensed</Eyebrow>
             <SectionHeading className="mt-5">Download Ryco.</SectionHeading>
             <p className="mt-5 text-white/60 sm:text-lg">
-              Native builds for every desktop, or kick the tires instantly with the{" "}
+              Native builds for supported desktop platforms, or kick the tires instantly with the{" "}
               <span className="font-['JetBrains_Mono'] text-white/80">{SITE.npx}</span> web CLI.
               Local-first, no cloud required.
             </p>
@@ -1243,9 +1243,7 @@ export default function Version4() {
             {PLATFORMS.map((pl) => {
               const assetUrl =
                 pl.id === "macos"
-                  ? dl.arch === "x64"
-                    ? dl.urls?.macX64
-                    : dl.urls?.macArm
+                  ? dl.urls?.mac
                   : pl.id === "windows"
                     ? dl.urls?.win
                     : pl.id === "linux"

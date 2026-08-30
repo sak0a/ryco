@@ -12,11 +12,11 @@ import {
   type UpdateManifest,
 } from "./lib/update-manifest.ts";
 
-const UpdateManifestPlatform = Schema.Literals(["mac", "win"]);
+const UpdateManifestPlatform = Schema.Literals(["win"]);
 export type UpdateManifestPlatform = typeof UpdateManifestPlatform.Type;
 
-function getPlatformLabel(platform: UpdateManifestPlatform): string {
-  return platform === "mac" ? "macOS" : "Windows";
+function getPlatformLabel(_platform: UpdateManifestPlatform): string {
+  return "Windows";
 }
 
 export function parsePlatformUpdateManifest(
@@ -98,7 +98,7 @@ export const mergeUpdateManifestsCommand = Command.make(
       secondaryPath,
       Option.getOrUndefined(outputPath),
     ),
-).pipe(Command.withDescription("Merge two Electron updater manifests into a multi-arch manifest."));
+).pipe(Command.withDescription("Merge Windows Electron updater manifests into one manifest."));
 
 if (import.meta.main) {
   Command.run(mergeUpdateManifestsCommand, { version: "0.0.0" }).pipe(

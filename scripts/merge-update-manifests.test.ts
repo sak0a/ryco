@@ -13,55 +13,6 @@ import {
 const runCli = Command.runWith(mergeUpdateManifestsCommand, { version: "0.0.0" });
 
 describe("merge-update-manifests", () => {
-  it("merges arm64 and x64 macOS update manifests into one multi-arch manifest", () => {
-    const arm64 = parsePlatformUpdateManifest(
-      "mac",
-      `version: 0.0.4
-files:
-  - url: Ryco-0.0.4-arm64.zip
-    sha512: arm64zip
-    size: 125621344
-  - url: Ryco-0.0.4-arm64.dmg
-    sha512: arm64dmg
-    size: 131754935
-path: Ryco-0.0.4-arm64.zip
-sha512: arm64zip
-releaseDate: '2026-03-07T10:32:14.587Z'
-`,
-      "latest-mac.yml",
-    );
-
-    const x64 = parsePlatformUpdateManifest(
-      "mac",
-      `version: 0.0.4
-files:
-  - url: Ryco-0.0.4-x64.zip
-    sha512: x64zip
-    size: 132000112
-  - url: Ryco-0.0.4-x64.dmg
-    sha512: x64dmg
-    size: 138148807
-path: Ryco-0.0.4-x64.zip
-sha512: x64zip
-releaseDate: '2026-03-07T10:36:07.540Z'
-`,
-      "latest-mac-x64.yml",
-    );
-
-    const merged = mergePlatformUpdateManifests("mac", arm64, x64);
-
-    assert.equal(merged.version, "0.0.4");
-    assert.equal(merged.releaseDate, "2026-03-07T10:36:07.540Z");
-    assert.deepStrictEqual(
-      merged.files.map((file) => file.url),
-      ["Ryco-0.0.4-arm64.zip", "Ryco-0.0.4-arm64.dmg", "Ryco-0.0.4-x64.zip", "Ryco-0.0.4-x64.dmg"],
-    );
-
-    const serialized = serializePlatformUpdateManifest("mac", merged);
-    assert.ok(!serialized.includes("path:"));
-    assert.equal((serialized.match(/- url:/g) ?? []).length, 4);
-  });
-
   it("merges arm64 and x64 Windows update manifests into one multi-arch manifest", () => {
     const arm64 = parsePlatformUpdateManifest(
       "win",
@@ -149,18 +100,18 @@ releaseDate: '2026-03-07T10:36:07.540Z'
 
   it("preserves quoted scalars as strings", () => {
     const manifest = parsePlatformUpdateManifest(
-      "mac",
+      "win",
       `version: '1.0'
 files:
-  - url: Ryco-1.0-x64.zip
-    sha512: zipsha
+  - url: Ryco-1.0-arm64.exe
+    sha512: exesha
     size: 1
 releaseName: 'true'
 minimumSystemVersion: '13.0'
 stagingPercentage: 50
 releaseDate: '2026-03-07T10:36:07.540Z'
 `,
-      "latest-mac.yml",
+      "latest-win-arm64.yml",
     );
 
     assert.equal(manifest.version, "1.0");
@@ -191,54 +142,6 @@ releaseDate: '2026-03-07T10:36:07.540Z'
 });
 
 it.layer(NodeServices.layer)("merge-update-manifests cli", (it) => {
-  const arm64MacManifest = `version: 0.0.4
-files:
-  - url: Ryco-0.0.4-arm64.zip
-    sha512: arm64zip
-    size: 125621344
-  - url: Ryco-0.0.4-arm64.dmg
-    sha512: arm64dmg
-    size: 131754935
-path: Ryco-0.0.4-arm64.zip
-sha512: arm64zip
-releaseDate: '2026-03-07T10:32:14.587Z'
-`;
-
-  const x64MacManifest = `version: 0.0.4
-files:
-  - url: Ryco-0.0.4-x64.zip
-    sha512: x64zip
-    size: 132000112
-  - url: Ryco-0.0.4-x64.dmg
-    sha512: x64dmg
-    size: 138148807
-path: Ryco-0.0.4-x64.zip
-sha512: x64zip
-releaseDate: '2026-03-07T10:36:07.540Z'
-`;
-
-  it.effect("writes the merged manifest back to the primary path by default", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "merge-update-manifests-cli-",
-      });
-      const primaryPath = path.join(baseDir, "latest-mac.yml");
-      const secondaryPath = path.join(baseDir, "latest-mac-x64.yml");
-
-      yield* fs.writeFileString(primaryPath, arm64MacManifest);
-      yield* fs.writeFileString(secondaryPath, x64MacManifest);
-
-      yield* runCli(["--platform", "mac", primaryPath, secondaryPath]);
-
-      const merged = yield* fs.readFileString(primaryPath);
-      assert.ok(merged.includes("Ryco-0.0.4-arm64.zip"));
-      assert.ok(merged.includes("Ryco-0.0.4-x64.zip"));
-      assert.ok(!merged.includes("path:"));
-    }),
-  );
-
   it.effect("writes the merged manifest to an explicit output path", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -279,9 +182,9 @@ releaseDate: '2026-03-07T10:36:07.540Z'
     }),
   );
 
-  it.effect("rejects invalid platform values during cli parsing", () =>
+  it.effect("rejects the removed macOS manifest merge platform", () =>
     Effect.gen(function* () {
-      const error = yield* runCli(["--platform", "linux", "a.yml", "b.yml"]).pipe(Effect.flip);
+      const error = yield* runCli(["--platform", "mac", "a.yml", "b.yml"]).pipe(Effect.flip);
 
       if (!CliError.isCliError(error)) {
         assert.fail(`Expected CliError, got ${String(error)}`);
@@ -295,7 +198,7 @@ releaseDate: '2026-03-07T10:36:07.540Z'
       }
 
       assert.equal(platformError.option, "platform");
-      assert.equal(platformError.value, "linux");
+      assert.equal(platformError.value, "mac");
     }),
   );
 });

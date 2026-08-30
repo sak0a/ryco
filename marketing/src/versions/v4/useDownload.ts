@@ -1,17 +1,13 @@
 /**
- * useDownload — resolves a one-click, OS- and arch-correct download.
+ * useDownload — resolves a one-click, OS-correct download.
  *
  * The repo's release assets are versioned (Ryco-X.Y.Z-arch.ext), so there's no
  * stable URL to hard-link. We fetch the latest release from the GitHub API once
  * (CORS-enabled, cached in localStorage + a shared in-flight promise) and match
  * the right asset for the visitor's platform.
  *
- * Apple Silicon vs Intel can't be read from the user agent (it always says
- * "MacIntel"), so arch is best-effort: UA-Client-Hints `architecture` first,
- * then a WebGL GPU-renderer heuristic, defaulting to Apple Silicon. Callers
- * surface the detected target + an "all builds" link so a wrong guess is
- * recoverable. Everything degrades to the Releases page if the API is
- * unreachable or rate-limited.
+ * macOS releases target Apple Silicon. Everything degrades to the Releases
+ * page if the API is unreachable or rate-limited.
  */
 import { useEffect, useState } from "react";
 import { SITE } from "@/data/content";
@@ -22,7 +18,6 @@ const CACHE_KEY = "ryco:latest-release";
 const CACHE_TTL = 6 * 60 * 60 * 1000; // 6h
 
 export type Os = "mac" | "windows" | "linux" | null;
-export type Arch = "arm64" | "x64" | null;
 
 interface ReleaseAsset {
   name: string;
@@ -34,8 +29,7 @@ interface Release {
 }
 
 export interface AssetUrls {
-  macArm: string | null;
-  macX64: string | null;
+  mac: string | null;
   win: string | null;
   linux: string | null;
 }
@@ -43,8 +37,7 @@ export interface AssetUrls {
 export interface DownloadInfo {
   os: Os;
   osLabel: string | null;
-  arch: Arch;
-  /** "Apple Silicon" / "Intel" for macOS; null elsewhere. */
+  /** "Apple Silicon" for macOS; null elsewhere. */
   archLabel: string | null;
   version: string | null;
   /** Best direct asset for the detected platform, else the Releases page. */
@@ -120,44 +113,8 @@ function detectOs(): Os {
   return null;
 }
 
-/** Best-effort Apple-Silicon vs Intel; only meaningful for macOS. */
-async function detectMacArch(): Promise<Arch> {
-  // 1) UA Client Hints (Chromium) — most reliable when present
-  try {
-    const uaData = (
-      navigator as unknown as {
-        userAgentData?: {
-          getHighEntropyValues?: (k: string[]) => Promise<{ architecture?: string }>;
-        };
-      }
-    ).userAgentData;
-    if (uaData?.getHighEntropyValues) {
-      const hv = await uaData.getHighEntropyValues(["architecture"]);
-      if (hv.architecture === "arm") return "arm64";
-      if (hv.architecture === "x86") return "x64";
-    }
-  } catch {
-    /* not supported — fall through */
-  }
-  // 2) WebGL GPU renderer heuristic (works in Safari too)
-  try {
-    const gl = document.createElement("canvas").getContext("webgl");
-    const dbg = gl?.getExtension("WEBGL_debug_renderer_info");
-    const renderer = (
-      (dbg && (gl?.getParameter(dbg.UNMASKED_RENDERER_WEBGL) as string)) ||
-      ""
-    ).toLowerCase();
-    if (renderer.includes("apple")) return "arm64";
-    if (/intel|amd|radeon|nvidia|geforce/.test(renderer)) return "x64";
-  } catch {
-    /* blocked (e.g. resistFingerprinting) — fall through */
-  }
-  return null; // unknown → caller defaults to Apple Silicon
-}
-
 export function useDownload(): DownloadInfo {
   const [os, setOs] = useState<Os>(null);
-  const [arch, setArch] = useState<Arch>(null);
   const [version, setVersion] = useState<string | null>(null);
   const [urls, setUrls] = useState<AssetUrls | null>(null);
 
@@ -166,16 +123,11 @@ export function useDownload(): DownloadInfo {
     setOs(o);
     let cancelled = false;
     (async () => {
-      if (o === "mac") {
-        const a = await detectMacArch();
-        if (!cancelled) setArch(a);
-      }
       const rel = await fetchLatest();
       if (cancelled || !rel) return;
       setVersion(rel.tag || null);
       setUrls({
-        macArm: pick(rel.assets, /arm64\.dmg$/i),
-        macX64: pick(rel.assets, /x64\.dmg$/i),
+        mac: pick(rel.assets, /arm64\.dmg$/i),
         win: pick(rel.assets, /\.exe$/i),
         linux: pick(rel.assets, /\.appimage$/i),
       });
@@ -187,11 +139,11 @@ export function useDownload(): DownloadInfo {
 
   const osLabel =
     os === "mac" ? "Mac" : os === "windows" ? "Windows" : os === "linux" ? "Linux" : null;
-  const archLabel = os === "mac" ? (arch === "x64" ? "Intel" : "Apple Silicon") : null;
+  const archLabel = os === "mac" ? "Apple Silicon" : null;
 
   let href: string = SITE.releases;
   if (urls) {
-    if (os === "mac") href = (arch === "x64" ? urls.macX64 : urls.macArm) ?? SITE.releases;
+    if (os === "mac") href = urls.mac ?? SITE.releases;
     else if (os === "windows") href = urls.win ?? SITE.releases;
     else if (os === "linux") href = urls.linux ?? SITE.releases;
   }
@@ -200,7 +152,6 @@ export function useDownload(): DownloadInfo {
   return {
     os,
     osLabel,
-    arch,
     archLabel,
     version,
     href,

@@ -10,11 +10,12 @@ This document covers the unified release workflow for stable and nightly desktop
   - scheduled nightly at `09:00 UTC`
   - manual `workflow_dispatch` for either channel
 - Runs quality gates first: lint, typecheck, test.
-- Builds four artifacts in parallel for both channels:
+- Builds five artifacts in parallel for both channels:
   - macOS `arm64` DMG
-  - macOS `x64` DMG
   - Linux `x64` AppImage
+  - Linux `arm64` AppImage
   - Windows `x64` NSIS installer
+  - Windows `arm64` NSIS installer
 - Publishes one GitHub Release with all produced files.
   - Stable tags with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
   - Only plain stable `X.Y.Z` releases are marked as the repository's latest release.
@@ -61,8 +62,7 @@ This document covers the unified release workflow for stable and nightly desktop
   - channel metadata: `latest*.yml` for stable releases, `nightly*.yml` for nightly releases
   - `*.blockmap` files (used for differential downloads)
 - macOS metadata note:
-  - `electron-updater` reads `latest-mac.yml` on stable and `nightly-mac.yml` on nightly, for both Intel and Apple Silicon.
-  - The workflow merges the per-arch mac manifests into one channel-specific mac manifest before publishing the GitHub Release.
+  - `electron-updater` reads `latest-mac.yml` on stable and `nightly-mac.yml` on nightly for the Apple Silicon build.
 
 ## 0) npm OIDC trusted publishing setup (CLI)
 

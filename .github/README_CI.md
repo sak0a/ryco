@@ -21,8 +21,8 @@ Ryco keeps CI entrypoints small and routes shared checks through
 
 `_validation.yml` runs each check as its own job so they execute in parallel
 rather than as one serial chain. Validation and control jobs use the standard
-GitHub-hosted `ubuntu-24.04` runner. Release builds use the matching GitHub-hosted
-macOS, Ubuntu, and Windows x64/arm64 runners. The test suite is sharded across
+GitHub-hosted `ubuntu-24.04` runner. Release builds use GitHub-hosted macOS arm64,
+Ubuntu x64/arm64, and Windows x64/arm64 runners. The test suite is sharded across
 runners. It switches shape by mode (Turbo forbids `--filter` with `--affected`):
 full runs shard the whole suite into three legs — `ryco-cli` (server) and
 `@ryco/web` each get a runner, and `rest` catches every other package through

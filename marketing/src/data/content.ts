@@ -118,7 +118,7 @@ export const PLATFORMS: Platform[] = [
     name: "macOS",
     brand: "apple",
     format: ".dmg",
-    arch: "arm64 · x64",
+    arch: "Apple Silicon",
     install: "Run Install Ryco.command from the DMG",
   },
   {
@@ -367,7 +367,7 @@ export const FAQ = [
   },
   {
     q: "What platforms are supported?",
-    a: "macOS (.dmg, arm64 + x64), Linux (.AppImage / AUR ryco-bin) and Windows (NSIS .exe).",
+    a: "macOS on Apple Silicon (.dmg), Linux (.AppImage / AUR ryco-bin) and Windows (NSIS .exe).",
   },
   {
     q: "Can I run more than one of the same agent?",
