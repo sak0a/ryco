@@ -18,11 +18,13 @@ import {
   Path,
   Queue,
   Ref,
+  Schedule,
   Scope,
   Context,
   Console,
   Duration,
   Clock,
+  Cause,
   Metric,
 } from "effect";
 
@@ -39,6 +41,8 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { WorkspaceAccessPolicy } from "./workspace/Services/WorkspaceAccessPolicy.ts";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper.ts";
+import { ProviderService } from "./provider/Services/ProviderService.ts";
+import { ProviderSessionDirectory } from "./provider/Services/ProviderSessionDirectory.ts";
 import {
   increment,
   metricAttributes,
@@ -519,6 +523,151 @@ export const validateRestrictedWorkspaceSnapshot = (snapshot: OrchestrationReadM
     );
   }).pipe(Effect.mapError(incompatibleWorkspaceStateError));
 
+const ORPHANED_PROVIDER_SESSION_ERROR =
+  "Provider session did not survive a server restart. Send a new message to continue.";
+
+function clearRuntimePayloadActiveTurn(runtimePayload: unknown): unknown {
+  if (
+    typeof runtimePayload === "object" &&
+    runtimePayload !== null &&
+    !Array.isArray(runtimePayload)
+  ) {
+    return {
+      ...runtimePayload,
+      activeTurnId: null,
+    };
+  }
+  return { activeTurnId: null };
+}
+
+/**
+ * Settle projected provider sessions whose native process did not survive this
+ * server process. This runs after the provider/orchestration roots subscribe,
+ * but before the startup command gate opens, so repaired state is authoritative
+ * before clients can mutate it.
+ */
+export const reconcileOrphanedProviderSessions = Effect.gen(function* () {
+  const directory = yield* ProviderSessionDirectory;
+  const orchestrationEngine = yield* OrchestrationEngineService;
+  const providerService = yield* ProviderService;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+
+  const liveSessionsExit = yield* Effect.exit(providerService.listSessions());
+  if (Exit.isFailure(liveSessionsExit)) {
+    if (Cause.hasInterrupts(liveSessionsExit.cause)) {
+      return yield* Effect.failCause(liveSessionsExit.cause);
+    }
+    yield* Effect.logWarning("provider session startup inventory failed", {
+      cause: Cause.pretty(liveSessionsExit.cause),
+    });
+    return;
+  }
+
+  const liveThreadIds = new Set(liveSessionsExit.value.map((session) => session.threadId));
+  const snapshot = yield* projectionSnapshotQuery.getCommandReadModel();
+  const orphanedThreads = snapshot.threads.filter(
+    (thread) =>
+      thread.session !== null &&
+      (thread.session.status === "starting" ||
+        thread.session.status === "running" ||
+        thread.session.activeTurnId !== null) &&
+      !liveThreadIds.has(thread.id),
+  );
+
+  for (const thread of orphanedThreads) {
+    const session = thread.session;
+    if (session === null) continue;
+
+    yield* Effect.gen(function* () {
+      const binding = yield* directory.getBinding(thread.id);
+      if (Option.isNone(binding)) return;
+
+      yield* providerService.stopSessionBinding(binding.value).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("failed to stop orphaned provider runtime binding", {
+                threadId: thread.id,
+                cause: Cause.pretty(cause),
+              }),
+        ),
+      );
+      yield* directory.upsert({
+        ...binding.value,
+        status: "stopped",
+        runtimePayload: clearRuntimePayloadActiveTurn(binding.value.runtimePayload),
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterrupts(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("failed to reconcile orphaned provider session binding", {
+              threadId: thread.id,
+              cause: Cause.pretty(cause),
+            }),
+      ),
+    );
+
+    const reconciledAt = new Date().toISOString();
+    if (session.activeTurnId !== null) {
+      const interruptCommand = {
+        type: "thread.turn.interrupt" as const,
+        commandId: CommandId.make(
+          `provider:startup-reconciliation:turn-interrupt:${crypto.randomUUID()}`,
+        ),
+        threadId: thread.id,
+        turnId: session.activeTurnId,
+        createdAt: reconciledAt,
+      };
+      yield* Effect.suspend(() => orchestrationEngine.dispatch(interruptCommand)).pipe(
+        Effect.retry(Schedule.recurs(1)),
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("failed to settle orphaned provider turn projection", {
+                threadId: thread.id,
+                turnId: session.activeTurnId,
+                cause: Cause.pretty(cause),
+              }),
+        ),
+      );
+    }
+
+    const sessionCommand = {
+      type: "thread.session.set" as const,
+      commandId: CommandId.make(`server:startup-reconciliation:${crypto.randomUUID()}`),
+      threadId: thread.id,
+      session: {
+        ...session,
+        status: "error" as const,
+        activeTurnId: null,
+        lastError: ORPHANED_PROVIDER_SESSION_ERROR,
+        updatedAt: reconciledAt,
+      },
+      createdAt: reconciledAt,
+    };
+    yield* Effect.suspend(() => orchestrationEngine.dispatch(sessionCommand)).pipe(
+      Effect.retry(Schedule.recurs(1)),
+      Effect.catchCause((cause) =>
+        Cause.hasInterrupts(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("failed to settle orphaned provider session projection", {
+              threadId: thread.id,
+              cause: Cause.pretty(cause),
+            }),
+      ),
+    );
+  }
+}).pipe(
+  Effect.catchCause((cause) =>
+    Cause.hasInterrupts(cause)
+      ? Effect.failCause(cause)
+      : Effect.logWarning("provider session startup reconciliation failed", {
+          cause: Cause.pretty(cause),
+        }),
+  ),
+);
+
 export const makeServerRuntimeStartup = Effect.gen(function* () {
   const runtimeStartedAt = Date.now();
   const serverConfig = yield* ServerConfig;
@@ -589,6 +738,9 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         { concurrency: "unbounded", discard: true },
       ),
     );
+
+    yield* Effect.logDebug("startup phase: reconciling orphaned provider sessions");
+    yield* runStartupPhase("provider-sessions.reconcile", reconcileOrphanedProviderSessions);
 
     const welcomeBase = yield* resolveWelcomeBase;
     const environment = yield* serverEnvironment.getDescriptor;

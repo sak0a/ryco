@@ -1,11 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  type OrchestrationCommand,
   DEFAULT_MODEL,
   type OrchestrationReadModel,
   type OrchestrationEvent,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   WorktreeId,
 } from "@ryco/contracts";
 import { assert, it } from "@effect/vitest";
@@ -31,12 +34,24 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "./orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { OrchestrationCommandInvariantError } from "./orchestration/Errors.ts";
+import {
+  ProjectionSnapshotQuery,
+  type ProjectionSnapshotQueryShape,
+} from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import {
+  ProviderSessionDirectory,
+  type ProviderRuntimeBinding,
+  type ProviderSessionDirectoryShape,
+} from "./provider/Services/ProviderSessionDirectory.ts";
+import { ProviderAdapterRequestError } from "./provider/Errors.ts";
+import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import {
   getAutoBootstrapDefaultModelSelection,
   launchStartupHeartbeat,
   makeCommandGate,
+  reconcileOrphanedProviderSessions,
   resolveAutoBootstrapWelcomeTargets,
   resolveWelcomeBase,
   ServerRuntimeStartupError,
@@ -86,11 +101,238 @@ const startupWorkspaceSnapshot = (input: {
     updatedAt: "2026-01-01T00:00:00.000Z",
   }) as unknown as OrchestrationReadModel;
 
+const orphanedSessionThread = (input: {
+  readonly id: string;
+  readonly status: "starting" | "running" | "ready" | "stopped" | "error";
+  readonly activeTurnId?: TurnId | null;
+}) => ({
+  id: ThreadId.make(input.id),
+  archivedAt: null,
+  deletedAt: null,
+  session: {
+    threadId: ThreadId.make(input.id),
+    status: input.status,
+    providerName: "codex",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    runtimeMode: "full-access" as const,
+    activeTurnId: input.activeTurnId ?? null,
+    lastError: null,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+});
+
+const runOrphanedSessionReconciliation = (input: {
+  readonly threads: ReadonlyArray<ReturnType<typeof orphanedSessionThread>>;
+  readonly liveThreadIds?: ReadonlyArray<ThreadId>;
+  readonly directory: Pick<ProviderSessionDirectoryShape, "getBinding" | "upsert">;
+  readonly stopSessionBinding?: ProviderServiceShape["stopSessionBinding"];
+  readonly dispatch: OrchestrationEngineShape["dispatch"];
+}) =>
+  reconcileOrphanedProviderSessions.pipe(
+    Effect.provideService(ProjectionSnapshotQuery, {
+      getCommandReadModel: () =>
+        Effect.succeed({ threads: input.threads } as unknown as OrchestrationReadModel),
+    } as unknown as ProjectionSnapshotQueryShape),
+    Effect.provideService(ProviderSessionDirectory, {
+      ...input.directory,
+    } as unknown as ProviderSessionDirectoryShape),
+    Effect.provideService(ProviderService, {
+      listSessions: () =>
+        Effect.succeed((input.liveThreadIds ?? []).map((threadId) => ({ threadId }) as never)),
+      stopSessionBinding: input.stopSessionBinding ?? (() => Effect.succeed("not-found" as const)),
+    } as unknown as ProviderServiceShape),
+    Effect.provideService(OrchestrationEngineService, {
+      dispatch: input.dispatch,
+    } as unknown as OrchestrationEngineShape),
+  );
+
 it("uses the canonical Codex default for auto-bootstrapped model selection", () => {
   assert.deepStrictEqual(getAutoBootstrapDefaultModelSelection(), {
     instanceId: ProviderInstanceId.make("codex"),
     model: DEFAULT_MODEL,
   });
+});
+
+it.effect("repairs orphaned provider sessions while preserving resumable binding state", () => {
+  const orphan = orphanedSessionThread({
+    id: "thread-startup-orphan",
+    status: "running",
+    activeTurnId: TurnId.make("turn-startup-orphan"),
+  });
+  const starting = orphanedSessionThread({
+    id: "thread-startup-starting",
+    status: "starting",
+  });
+  const live = orphanedSessionThread({
+    id: "thread-startup-live",
+    status: "running",
+    activeTurnId: TurnId.make("turn-startup-live"),
+  });
+  const ready = orphanedSessionThread({ id: "thread-startup-ready", status: "ready" });
+  const dispatches: OrchestrationCommand[] = [];
+  const stoppedBindings: ProviderRuntimeBinding[] = [];
+  const upserts: ProviderRuntimeBinding[] = [];
+  const bindingByThread = new Map<ThreadId, ProviderRuntimeBinding>([
+    [
+      orphan.id,
+      {
+        threadId: orphan.id,
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        status: "running",
+        resumeCursor: { cursor: "resume-orphan" },
+        runtimePayload: { activeTurnId: "stale", unrelated: "preserve-me" },
+      },
+    ],
+    [
+      starting.id,
+      {
+        threadId: starting.id,
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        status: "stopped",
+        resumeCursor: { cursor: "resume-starting" },
+        runtimePayload: { unrelated: "also-preserve-me" },
+      },
+    ],
+  ]);
+
+  return runOrphanedSessionReconciliation({
+    threads: [orphan, starting, live, ready],
+    liveThreadIds: [live.id],
+    directory: {
+      getBinding: (threadId) => {
+        const binding = bindingByThread.get(threadId);
+        return Effect.succeed(binding === undefined ? Option.none() : Option.some(binding));
+      },
+      upsert: (binding) => Effect.sync(() => upserts.push(binding)),
+    },
+    stopSessionBinding: (binding) =>
+      Effect.sync(() => stoppedBindings.push(binding)).pipe(
+        Effect.andThen(
+          binding.threadId === starting.id
+            ? Effect.fail(
+                new ProviderAdapterRequestError({
+                  provider: "codex",
+                  method: "session.stop",
+                  detail: "provider process already exited",
+                }),
+              )
+            : Effect.succeed("not-found" as const),
+        ),
+      ),
+    dispatch: (command) =>
+      Effect.sync(() => dispatches.push(command)).pipe(Effect.as({ sequence: dispatches.length })),
+  }).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(
+          stoppedBindings.map((binding) => binding.threadId),
+          [orphan.id, starting.id],
+        );
+        assert.deepStrictEqual(
+          upserts.map((binding) => ({
+            threadId: binding.threadId,
+            status: binding.status,
+            resumeCursor: binding.resumeCursor,
+            runtimePayload: binding.runtimePayload,
+          })),
+          [
+            {
+              threadId: orphan.id,
+              status: "stopped",
+              resumeCursor: { cursor: "resume-orphan" },
+              runtimePayload: { activeTurnId: null, unrelated: "preserve-me" },
+            },
+            {
+              threadId: starting.id,
+              status: "stopped",
+              resumeCursor: { cursor: "resume-starting" },
+              runtimePayload: { activeTurnId: null, unrelated: "also-preserve-me" },
+            },
+          ],
+        );
+        assert.deepStrictEqual(
+          dispatches.map((command) => ({
+            type: command.type,
+            threadId: "threadId" in command ? command.threadId : null,
+            status: command.type === "thread.session.set" ? command.session.status : undefined,
+            activeTurnId:
+              command.type === "thread.session.set" ? command.session.activeTurnId : undefined,
+          })),
+          [
+            {
+              type: "thread.turn.interrupt",
+              threadId: orphan.id,
+              status: undefined,
+              activeTurnId: undefined,
+            },
+            {
+              type: "thread.session.set",
+              threadId: orphan.id,
+              status: "error",
+              activeTurnId: null,
+            },
+            {
+              type: "thread.session.set",
+              threadId: starting.id,
+              status: "error",
+              activeTurnId: null,
+            },
+          ],
+        );
+        for (const command of dispatches) {
+          if (command.type === "thread.session.set") {
+            assert.match(command.session.lastError ?? "", /did not survive a server restart/);
+          }
+        }
+      }),
+    ),
+  );
+});
+
+it.effect("retries a failed orphan projection and continues after a persistent failure", () => {
+  const transient = orphanedSessionThread({ id: "thread-orphan-transient", status: "running" });
+  const persistent = orphanedSessionThread({ id: "thread-orphan-persistent", status: "running" });
+  const later = orphanedSessionThread({ id: "thread-orphan-later", status: "running" });
+  const attempted: ThreadId[] = [];
+  let transientAttempts = 0;
+  const failure = new OrchestrationCommandInvariantError({
+    commandType: "thread.session.set",
+    detail: "simulated startup reconciliation failure",
+  });
+
+  return runOrphanedSessionReconciliation({
+    threads: [transient, persistent, later],
+    directory: {
+      getBinding: () => Effect.succeed(Option.none()),
+      upsert: () => Effect.void,
+    },
+    dispatch: (command) => {
+      if (command.type !== "thread.session.set") {
+        return Effect.die("unexpected command");
+      }
+      attempted.push(command.threadId);
+      if (command.threadId === transient.id && transientAttempts++ === 0) {
+        return Effect.fail(failure);
+      }
+      return command.threadId === persistent.id
+        ? Effect.fail(failure)
+        : Effect.succeed({ sequence: attempted.length });
+    },
+  }).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(attempted, [
+          transient.id,
+          transient.id,
+          persistent.id,
+          persistent.id,
+          later.id,
+        ]);
+      }),
+    ),
+  );
 });
 
 it.effect("restricted startup rejects active project roots outside the workspace", () =>
