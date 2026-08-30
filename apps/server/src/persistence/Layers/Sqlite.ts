@@ -30,6 +30,8 @@ const setup = Layer.effectDiscard(
   Effect.gen(function* () {
     const startedAt = Date.now();
     const sql = yield* SqlClient.SqlClient;
+    // CLI and server write from separate processes; wait rather than fail with SQLITE_BUSY.
+    yield* sql`PRAGMA busy_timeout = 5000;`;
     yield* sql`PRAGMA journal_mode = WAL;`;
     yield* sql`PRAGMA foreign_keys = ON;`;
     yield* runMigrations();
