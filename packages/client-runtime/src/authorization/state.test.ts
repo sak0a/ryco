@@ -592,6 +592,37 @@ describe("hosted registration and directory state", () => {
     });
   });
 
+  it("publishes a typed transport explanation while retaining stale directory data", async () => {
+    const selected = node();
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      nodes: [selected],
+      selectedNode: selected,
+      effectiveRole: "operator",
+    });
+    vi.spyOn(hostedHubApi, "listNodes").mockRejectedValue(
+      new HostedHubApiError(
+        "unavailable",
+        0,
+        undefined,
+        undefined,
+        undefined,
+        "transport-unavailable",
+      ),
+    );
+
+    await hostedHubController.refreshDirectory();
+
+    expect(hostedHubStore.getState()).toMatchObject({
+      accountStatus: "authenticated",
+      directoryStatus: "stale",
+      selectedNode: selected,
+      errorReason: "transport-unavailable",
+      errorMessage: "Ryco could not reach the Hub. Check your connection and try again.",
+    });
+  });
+
   it("refreshes the directory when a hidden tab becomes visible", async () => {
     vi.useFakeTimers();
     const listeners = new Set<() => void>();
@@ -1492,12 +1523,23 @@ describe("hosted account management state", () => {
   it("expires the session when the account-security read is unauthenticated", async () => {
     await authenticate();
     vi.spyOn(hostedHubApi, "getAccountSecurity").mockRejectedValue(
-      new HostedHubApiError("session_invalid", 401),
+      new HostedHubApiError(
+        "session_invalid",
+        401,
+        undefined,
+        undefined,
+        undefined,
+        "token-invalidated",
+      ),
     );
 
     await hostedHubController.refreshAccountSecurity();
 
-    expect(hostedHubStore.getState().accountStatus).toBe("session-expired");
+    expect(hostedHubStore.getState()).toMatchObject({
+      accountStatus: "session-expired",
+      errorReason: "token-invalidated",
+      errorMessage: "Your secure Hub session is no longer valid. Sign in again to continue.",
+    });
     expect(hostedAccountStore.getState()).toEqual(hostedAccountStore.getInitialState());
   });
 
