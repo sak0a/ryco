@@ -542,12 +542,18 @@ const stopOpenCodeContext = Effect.fn("stopOpenCodeContext")(function* (
     return false;
   }
 
-  // Best-effort remote abort. The scope close below tears down the local
-  // handles (event-pump fiber, server-exit fiber, event-subscribe fetch),
-  // but we still want to tell OpenCode that this session is done.
-  yield* runOpenCodeSdk("session.abort", () =>
-    context.client.session.abort({ sessionID: context.openCodeSessionId }),
-  ).pipe(Effect.ignore({ log: true }));
+  // Stop the root first so it cannot launch more work while we cancel the
+  // child sessions already observed by the event stream or hydration pass.
+  // A root abort does not consistently terminate independently-running
+  // children, so every tracked session gets its own best-effort abort.
+  yield* Effect.forEach(
+    [context.openCodeSessionId, ...context.childSessionIds],
+    (sessionID) =>
+      runOpenCodeSdk("session.abort", () => context.client.session.abort({ sessionID })).pipe(
+        Effect.ignore({ log: true }),
+      ),
+    { discard: true },
+  );
 
   // Closing the session scope interrupts every fiber forked into it and
   // runs each finalizer we registered — the `AbortController.abort()` call,
@@ -726,6 +732,19 @@ export function makeOpenCodeAdapter(
       });
     });
 
+    const emitStoppedOpenCodeChildren = Effect.fn("emitStoppedOpenCodeChildren")(function* (
+      context: OpenCodeSessionContext,
+      raw: unknown,
+    ) {
+      for (const subagent of context.subagentBySessionId.values()) {
+        yield* emitOpenCodeSubagentCompleted(context, {
+          subagent,
+          status: subagentCompletionStatus("stopped"),
+          raw,
+        });
+      }
+    });
+
     const bindOpenCodeSubtaskPart = Effect.fn("bindOpenCodeSubtaskPart")(function* (
       context: OpenCodeSessionContext,
       part: Extract<Part, { type: "subtask" }>,
@@ -882,9 +901,14 @@ export function makeOpenCodeAdapter(
       // Inline the teardown that `stopOpenCodeContext` would do; we can't
       // delegate to it because our `getAndSet` above already flipped the
       // one-shot guard, so the call would no-op.
-      yield* runOpenCodeSdk("session.abort", () =>
-        context.client.session.abort({ sessionID: context.openCodeSessionId }),
-      ).pipe(Effect.ignore({ log: true }));
+      yield* Effect.forEach(
+        [context.openCodeSessionId, ...context.childSessionIds],
+        (sessionID) =>
+          runOpenCodeSdk("session.abort", () => context.client.session.abort({ sessionID })).pipe(
+            Effect.ignore({ log: true }),
+          ),
+        { discard: true },
+      );
       yield* Scope.close(context.sessionScope, Exit.void);
     });
 
@@ -1785,9 +1809,24 @@ export function makeOpenCodeAdapter(
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
       function* (threadId, turnId) {
         const context = ensureSessionContext(sessions, threadId);
-        yield* runOpenCodeSdk("session.abort", () =>
+        const rootAbortExit = yield* runOpenCodeSdk("session.abort", () =>
           context.client.session.abort({ sessionID: context.openCodeSessionId }),
-        ).pipe(Effect.mapError(toRequestError));
+        ).pipe(Effect.mapError(toRequestError), Effect.exit);
+        yield* Effect.forEach(
+          context.childSessionIds,
+          (sessionID) =>
+            runOpenCodeSdk("session.abort", () => context.client.session.abort({ sessionID })).pipe(
+              Effect.ignore({ log: true }),
+            ),
+          { discard: true },
+        );
+        yield* emitStoppedOpenCodeChildren(context, {
+          method: "session.abort",
+          reason: "turn-interrupted",
+        });
+        if (Exit.isFailure(rootAbortExit)) {
+          return yield* Effect.failCause(rootAbortExit.cause);
+        }
         if (turnId ?? context.activeTurnId) {
           yield* emitForContext(context, {
             ...(yield* buildEventBase({
@@ -1807,18 +1846,20 @@ export function makeOpenCodeAdapter(
       "respondToRequest",
     )(function* (threadId, requestId, decision) {
       const context = ensureSessionContext(sessions, threadId);
-      if (!context.pendingPermissions.has(requestId)) {
+      const request = context.pendingPermissions.get(requestId);
+      if (!request) {
         return yield* new ProviderAdapterRequestError({
           provider: PROVIDER,
-          method: "permission.reply",
+          method: "permission.respond",
           detail: `Unknown pending permission request: ${requestId}`,
         });
       }
 
-      yield* runOpenCodeSdk("permission.reply", () =>
-        context.client.permission.reply({
-          requestID: requestId,
-          reply: toOpenCodePermissionReply(decision),
+      yield* runOpenCodeSdk("permission.respond", () =>
+        context.client.permission.respond({
+          sessionID: request.sessionID,
+          permissionID: requestId,
+          response: toOpenCodePermissionReply(decision),
         }),
       ).pipe(Effect.mapError(toRequestError));
     });
@@ -1857,6 +1898,10 @@ export function makeOpenCodeAdapter(
         if (!stopped) {
           return;
         }
+        yield* emitStoppedOpenCodeChildren(context, {
+          method: "session.abort",
+          reason: "session-stopped",
+        });
         yield* emitForContext(context, {
           ...(yield* buildEventBase({ threadId })),
           type: "session.exited",

@@ -155,6 +155,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
                     medium: {},
                     high: {},
                     xhigh: {},
+                    preview: { disabled: true },
                   },
                 },
               },
@@ -164,7 +165,9 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
         },
         agents: [
           { name: "build", hidden: false, mode: "primary" },
+          { name: "build", hidden: false, mode: "primary" },
           { name: "plan", hidden: false, mode: "primary" },
+          { name: "internal", hidden: true, mode: "primary" },
         ],
       };
 
@@ -180,6 +183,10 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
         variantDescriptor.options.find((option) => option.isDefault === true)?.id,
         "medium",
       );
+      assert.equal(
+        variantDescriptor.options.some((option) => option.id === "preview"),
+        false,
+      );
       const agentDescriptor = model.capabilities?.optionDescriptors?.find(
         (descriptor) => descriptor.id === "agent" && descriptor.type === "select",
       );
@@ -187,6 +194,45 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
       assert.equal(
         agentDescriptor.options.find((option) => option.isDefault === true)?.id,
         "build",
+      );
+      assert.deepEqual(
+        agentDescriptor.options.map((option) => option.id),
+        ["build", "plan"],
+      );
+    }),
+  );
+
+  it.effect("deduplicates repeated model catalog entries by provider and model id", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.inventory = {
+        providerList: {
+          connected: ["openai"],
+          all: [
+            {
+              id: "openai",
+              name: "OpenAI",
+              models: {
+                primary: { id: "gpt-5", name: "GPT-5" },
+              },
+            },
+            {
+              id: "openai",
+              name: "OpenAI duplicate",
+              models: {
+                duplicate: { id: "gpt-5", name: "GPT-5 duplicate" },
+              },
+            },
+          ],
+          default: {},
+        },
+        agents: [],
+      };
+
+      const snapshot = yield* checkOpenCodeProviderStatus(makeOpenCodeSettings(), process.cwd());
+
+      assert.deepEqual(
+        snapshot.models.filter((entry) => entry.slug === "openai/gpt-5").map((entry) => entry.name),
+        ["GPT-5"],
       );
     }),
   );

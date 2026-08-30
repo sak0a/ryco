@@ -171,16 +171,23 @@ function openCodeCapabilitiesForModel(input: {
   readonly model: ProviderListResponse["all"][number]["models"][string];
   readonly agents: ReadonlyArray<Agent>;
 }): ModelCapabilities {
-  const variantValues = Object.keys(input.model.variants ?? {});
+  const variantValues = Object.entries(input.model.variants ?? {})
+    .filter(([, configuration]) => configuration.disabled !== true)
+    .map(([variant]) => variant)
+    .toSorted((left, right) => left.localeCompare(right));
   const defaultVariant = inferDefaultVariant(input.providerID, variantValues);
   const variantOptions = variantValues.map((value) =>
     defaultVariant === value
       ? { id: value, label: titleCaseSlug(value), isDefault: true as const }
       : { id: value, label: titleCaseSlug(value) },
   );
-  const primaryAgents = input.agents.filter(
-    (agent) => !agent.hidden && (agent.mode === "primary" || agent.mode === "all"),
-  );
+  const primaryAgents = [
+    ...new Map(
+      input.agents
+        .filter((agent) => !agent.hidden && (agent.mode === "primary" || agent.mode === "all"))
+        .map((agent) => [agent.name, agent] as const),
+    ).values(),
+  ].toSorted((left, right) => left.name.localeCompare(right.name));
   const defaultAgent = inferDefaultAgent(primaryAgents);
   const agentOptions = primaryAgents.map((agent) =>
     defaultAgent === agent.name
@@ -217,7 +224,7 @@ function openCodeCapabilitiesForModel(input: {
 
 function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerProviderModel> {
   const connected = new Set(input.providerList.connected);
-  const models: Array<ServerProviderModel> = [];
+  const models = new Map<string, ServerProviderModel>();
 
   for (const provider of input.providerList.all) {
     if (!connected.has(provider.id)) {
@@ -225,8 +232,9 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
     }
 
     for (const model of Object.values(provider.models)) {
+      const modelId = nonEmptyTrimmed(model.id);
       const name = nonEmptyTrimmed(model.name);
-      if (!name) {
+      if (!modelId || !name) {
         continue;
       }
 
@@ -234,8 +242,12 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
       const shortName = subProvider
         ? deriveShortNameByStrippingPrefix(name, subProvider)
         : undefined;
-      models.push({
-        slug: `${provider.id}/${model.id}`,
+      const slug = `${provider.id}/${modelId}`;
+      if (models.has(slug)) {
+        continue;
+      }
+      models.set(slug, {
+        slug,
         name,
         ...(subProvider ? { subProvider } : {}),
         ...(shortName ? { shortName } : {}),
@@ -249,7 +261,9 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
     }
   }
 
-  return models.toSorted((left, right) => left.name.localeCompare(right.name));
+  return [...models.values()].toSorted(
+    (left, right) => left.name.localeCompare(right.name) || left.slug.localeCompare(right.slug),
+  );
 }
 
 /**
@@ -471,7 +485,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
-  const connectedCount = inventoryExit.value.providerList.connected.length;
+  const connectedCount = new Set(inventoryExit.value.providerList.connected).size;
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,
