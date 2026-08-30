@@ -38,6 +38,10 @@ describe("keybindingCategories", () => {
 
   it("maps thread navigation to the Threads category", () => {
     expect(getCommandMeta("thread.find").category).toBe(KEYBINDING_CATEGORIES.thread);
+    expect(getCommandMeta("thread.pinToggle")).toMatchObject({
+      category: KEYBINDING_CATEGORIES.thread,
+      title: "Pin or unpin current thread",
+    });
     expect(getCommandMeta("thread.previous").category).toBe(KEYBINDING_CATEGORIES.thread);
     expect(getCommandMeta("thread.jump.1").category).toBe(KEYBINDING_CATEGORIES.thread);
     expect(getCommandMeta("thread.jump.9").category).toBe(KEYBINDING_CATEGORIES.thread);

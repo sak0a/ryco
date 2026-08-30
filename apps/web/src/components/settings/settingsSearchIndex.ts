@@ -111,6 +111,12 @@ export const SETTINGS_SEARCH_INDEX: ReadonlyArray<SettingsSearchEntry> = [
   },
   {
     section: "general",
+    title: "Unpin confirmation",
+    description: "Ask before removing a thread from pinned threads.",
+    keywords: "confirm pin unpin favorite",
+  },
+  {
+    section: "general",
     title: "Update track",
     description: "Which release channel the app follows.",
     keywords: "beta stable release channel",

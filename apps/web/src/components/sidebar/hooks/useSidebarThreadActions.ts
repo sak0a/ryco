@@ -29,6 +29,7 @@ import {
 import { stackedThreadToast, toastManager } from "../../ui/toast";
 import type { SidebarThreadSummary } from "../../../types";
 import type { SidebarProjectGroupMember } from "../../../sidebarProjectGrouping";
+import { requestThreadPinChange } from "../../../threadPinning";
 
 export type ThreadMenuActionId =
   | "pin"
@@ -58,6 +59,7 @@ export function useSidebarThreadActions(params: {
   selectedThreadCount: number;
   appSettingsConfirmThreadDelete: boolean;
   appSettingsConfirmThreadArchive: boolean;
+  appSettingsConfirmThreadUnpin: boolean;
   defaultThreadEnvMode: ThreadEnvMode;
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
@@ -81,6 +83,7 @@ export function useSidebarThreadActions(params: {
     selectedThreadCount,
     appSettingsConfirmThreadDelete,
     appSettingsConfirmThreadArchive,
+    appSettingsConfirmThreadUnpin,
     defaultThreadEnvMode,
     deleteThread,
     archiveThread,
@@ -493,7 +496,12 @@ export function useSidebarThreadActions(params: {
       }
 
       if (actionId === "pin" || actionId === "unpin") {
-        useUiStateStore.getState().setThreadPinned(threadKey, actionId === "pin");
+        await requestThreadPinChange({
+          threadKey,
+          threadTitle: thread.title,
+          pinned: actionId === "pin",
+          confirmUnpin: appSettingsConfirmThreadUnpin,
+        });
         return;
       }
 
@@ -545,6 +553,7 @@ export function useSidebarThreadActions(params: {
     [
       attemptArchiveThread,
       appSettingsConfirmThreadArchive,
+      appSettingsConfirmThreadUnpin,
       closeThread,
       copyPathToClipboard,
       copyThreadIdToClipboard,

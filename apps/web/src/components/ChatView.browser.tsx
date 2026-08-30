@@ -201,6 +201,21 @@ const COMPOSER_STASH_KEYBINDING: ServerConfig["keybindings"][number] = {
     node: { type: "identifier" as const, name: "terminalFocus" },
   },
 };
+const THREAD_PIN_TOGGLE_KEYBINDING: ServerConfig["keybindings"][number] = {
+  command: "thread.pinToggle",
+  shortcut: {
+    key: "p",
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: true,
+    modKey: true,
+  },
+  whenAst: {
+    type: "not" as const,
+    node: { type: "identifier" as const, name: "terminalFocus" },
+  },
+};
 
 interface TestFixture {
   snapshot: OrchestrationReadModel;
@@ -1997,6 +2012,20 @@ function dispatchComposerStashShortcut(
   return event;
 }
 
+function dispatchThreadPinToggleShortcut(): void {
+  const useMetaForMod = isMacPlatform(navigator.platform);
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "p",
+      altKey: true,
+      metaKey: useMetaForMod,
+      ctrlKey: !useMetaForMod,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
 function releaseModShortcut(key?: string): void {
   window.dispatchEvent(
     new KeyboardEvent("keyup", {
@@ -2568,6 +2597,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       sidebarMode: "projects",
       projectExpandedById: {},
       projectOrder: [],
+      pinnedThreadKeys: {},
       threadLastVisitedAtById: {},
     });
     useTerminalStateStore.persist.clearStorage();
@@ -6253,6 +6283,43 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await createDraftFromChatNewShortcut(mounted);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("pins from the global shortcut and exposes the matching palette action", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-thread-pin-shortcut-test" as MessageId,
+        targetText: "thread pin shortcut test",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [THREAD_PIN_TOGGLE_KEYBINDING],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      expect(useUiStateStore.getState().pinnedThreadKeys[THREAD_KEY]).not.toBe(true);
+
+      dispatchThreadPinToggleShortcut();
+      await vi.waitFor(() => {
+        expect(useUiStateStore.getState().pinnedThreadKeys[THREAD_KEY]).toBe(true);
+      });
+
+      useCommandPaletteStore.getState().setOpen(true);
+      const palette = page.getByTestId("command-palette");
+      const unpinAction = palette.getByText("Unpin current thread", { exact: true });
+      await expect.element(unpinAction).toBeInTheDocument();
+      await unpinAction.click();
+      await vi.waitFor(() => {
+        expect(useUiStateStore.getState().pinnedThreadKeys[THREAD_KEY]).not.toBe(true);
+      });
     } finally {
       await mounted.cleanup();
     }

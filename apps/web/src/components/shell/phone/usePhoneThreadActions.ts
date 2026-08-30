@@ -33,6 +33,9 @@ export function usePhoneThreadActions(params: {
   const appSettingsConfirmThreadArchive = useSettings<boolean>(
     (settings) => settings.confirmThreadArchive,
   );
+  const appSettingsConfirmThreadUnpin = useSettings<boolean>(
+    (settings) => settings.confirmThreadUnpin,
+  );
   const defaultThreadEnvMode = useSettings<ThreadEnvMode>(
     (settings) => settings.defaultThreadEnvMode,
   );
@@ -59,6 +62,7 @@ export function usePhoneThreadActions(params: {
     selectedThreadCount,
     appSettingsConfirmThreadDelete,
     appSettingsConfirmThreadArchive,
+    appSettingsConfirmThreadUnpin,
     defaultThreadEnvMode,
     deleteThread,
     archiveThread,

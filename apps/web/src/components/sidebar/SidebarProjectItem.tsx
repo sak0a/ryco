@@ -95,6 +95,9 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
   const appSettingsConfirmThreadArchive = useSettings<boolean>(
     (settings) => settings.confirmThreadArchive,
   );
+  const appSettingsConfirmThreadUnpin = useSettings<boolean>(
+    (settings) => settings.confirmThreadUnpin,
+  );
   const defaultThreadEnvMode = useSettings<ThreadEnvMode>(
     (settings) => settings.defaultThreadEnvMode,
   );
@@ -290,6 +293,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
     selectedThreadCount,
     appSettingsConfirmThreadDelete,
     appSettingsConfirmThreadArchive,
+    appSettingsConfirmThreadUnpin,
     defaultThreadEnvMode,
     deleteThread,
     archiveThread,
