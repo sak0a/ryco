@@ -133,9 +133,11 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         ...(serverOwner ? { serverOwner } : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
-      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv, {
-        ...(serverOwner ? { serverOwner } : {}),
-      });
+      const textGeneration = yield* makeOpenCodeTextGeneration(
+        effectiveConfig,
+        processEnv,
+        serverOwner ? { serverOwner } : undefined,
+      );
 
       const checkProvider = checkOpenCodeProviderStatus(
         effectiveConfig,

@@ -1435,7 +1435,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("status is resilient to gh lookup failures and returns pr null", () =>
+  it.effect("status surfaces pull request lookup failures", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("ryco-git-manager-");
       yield* initRepo(repoDir);
@@ -1453,9 +1453,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         },
       });
 
-      const status = yield* manager.status({ cwd: repoDir });
-      expect(status.refName).toBe("feature/status-no-gh");
-      expect(status.pr).toBeNull();
+      const error = yield* manager.status({ cwd: repoDir }).pipe(Effect.flip);
+      expect(String(error)).toContain("required but not available on PATH");
     }),
   );
 
