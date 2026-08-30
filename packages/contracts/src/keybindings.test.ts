@@ -107,6 +107,12 @@ it.effect("parses keybinding rules", () =>
       command: "thread.find",
     });
     assert.strictEqual(parsedThreadFind.command, "thread.find");
+
+    const parsedThreadPinToggle = yield* decode(KeybindingRule, {
+      key: "mod+alt+p",
+      command: "thread.pinToggle",
+    });
+    assert.strictEqual(parsedThreadPinToggle.command, "thread.pinToggle");
   }),
 );
 

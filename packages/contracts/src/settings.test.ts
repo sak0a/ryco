@@ -56,6 +56,14 @@ describe("AI Focus settings", () => {
   });
 });
 
+describe("thread unpin confirmation", () => {
+  it("preserves low-friction unpinning for existing settings and supports an opt-in patch", () => {
+    expect(decodeClientSettings({}).confirmThreadUnpin).toBe(false);
+    expect(DEFAULT_CLIENT_SETTINGS.confirmThreadUnpin).toBe(false);
+    expect(decodeClientSettingsPatch({ confirmThreadUnpin: true }).confirmThreadUnpin).toBe(true);
+  });
+});
+
 describe("ClientSettings.sourceControlRefreshMode", () => {
   it("defaults legacy settings to automatic refresh", () => {
     expect(DEFAULT_CLIENT_SETTINGS.sourceControlRefreshMode).toBe("automatic");

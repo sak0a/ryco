@@ -37,6 +37,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
   { key: "mod+f", command: "thread.find", when: "!terminalFocus" },
+  { key: "mod+alt+p", command: "thread.pinToggle", when: "!terminalFocus" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({

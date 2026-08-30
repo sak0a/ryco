@@ -1,4 +1,5 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { useEffect } from "react";
 
 import { useCommandPaletteStore } from "../commandPaletteStore";
@@ -16,6 +17,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "~/rpc/serverState";
+import { toggleThreadPin } from "../threadPinning";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -57,6 +59,18 @@ function ChatRouteGlobalShortcuts() {
       if (event.key === "Escape" && selectedThreadKeysSize > 0) {
         event.preventDefault();
         clearSelection();
+        return;
+      }
+
+      if (command === "thread.pinToggle") {
+        if (!activeThread) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void toggleThreadPin({
+          threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),
+          threadTitle: activeThread.title,
+          confirmUnpin: appSettings.confirmThreadUnpin,
+        });
         return;
       }
 
@@ -105,6 +119,7 @@ function ChatRouteGlobalShortcuts() {
     terminalOpen,
     modelPickerOpen,
     appSettings.defaultThreadEnvMode,
+    appSettings.confirmThreadUnpin,
   ]);
 
   return null;

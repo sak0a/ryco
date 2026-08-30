@@ -404,6 +404,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
         ? ["Delete confirmation"]
         : []),
+      ...(settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin
+        ? ["Unpin confirmation"]
+        : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
     ],
     [
@@ -411,6 +414,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.autoOpenPlanSidebar,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.confirmThreadUnpin,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.diffIgnoreWhitespace,
@@ -448,6 +452,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
+      confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
     });
     onRestored?.();
@@ -1065,6 +1070,33 @@ export function GeneralSettingsPanel({
                 updateSettings({ confirmThreadDelete: Boolean(checked) })
               }
               aria-label="Confirm thread deletion"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Unpin confirmation"
+          description="Ask before removing a thread from the pinned section."
+          scope={localScopeLabel}
+          resetAction={
+            settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin ? (
+              <SettingResetButton
+                label="unpin confirmation"
+                onClick={() =>
+                  updateSettings({
+                    confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.confirmThreadUnpin}
+              onCheckedChange={(checked) =>
+                updateSettings({ confirmThreadUnpin: Boolean(checked) })
+              }
+              aria-label="Confirm thread unpinning"
             />
           }
         />

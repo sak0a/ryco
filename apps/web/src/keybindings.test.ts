@@ -153,6 +153,11 @@ const DEFAULT_BINDINGS = compile([
     command: "thread.find",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
+  {
+    shortcut: modShortcut("p", { altKey: true }),
+    command: "thread.pinToggle",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
   { shortcut: modShortcut("[", { shiftKey: true }), command: "thread.previous" },
   { shortcut: modShortcut("]", { shiftKey: true }), command: "thread.next" },
   { shortcut: modShortcut("1"), command: "thread.jump.1" },
@@ -351,6 +356,10 @@ describe("shortcutLabelForCommand", () => {
       "Ctrl+O",
     );
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.find", "MacIntel"), "⌘F");
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.pinToggle", "MacIntel"),
+      "⌥⌘P",
+    );
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.jump.3", "MacIntel"),
       "⌘3",
@@ -709,6 +718,22 @@ describe("resolveShortcutCommand", () => {
         platform: "Linux",
       }),
       "script.setup.run",
+    );
+  });
+
+  it("resolves the active-thread pin toggle outside terminal focus", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "p", metaKey: true, altKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "thread.pinToggle",
+    );
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "p", metaKey: true, altKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: true },
+      }),
     );
   });
 

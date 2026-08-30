@@ -1,6 +1,6 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
+import { scopedThreadKey, scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   DEFAULT_MODEL,
   ORCHESTRATION_WS_METHODS,
@@ -34,6 +34,8 @@ import {
   LinkIcon,
   InboxIcon,
   MessageSquareIcon,
+  PinIcon,
+  PinOffIcon,
   SettingsIcon,
   SquarePenIcon,
 } from "lucide-react";
@@ -133,6 +135,7 @@ import { useHostedRpcCapability } from "../hostedHub/capabilities";
 import { getPresentationTier } from "../lib/presentationTier";
 import { useSettingsDialogStore } from "../settingsDialogStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
+import { resolveThreadPinCommandPresentation, toggleThreadPin } from "../threadPinning";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const BROWSE_STALE_TIME_MS = 30_000;
@@ -398,6 +401,7 @@ function OpenCommandPaletteDialog() {
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const settings = useSettings();
+  const pinnedThreadKeys = useUiStateStore((state) => state.pinnedThreadKeys);
   const primaryServerConfig = useServerConfig();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
@@ -639,6 +643,13 @@ function OpenCommandPaletteDialog() {
   );
 
   const activeThreadId = activeThread?.id;
+  const activeThreadKey = activeThread
+    ? scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id))
+    : null;
+  const activeThreadPinCommand = resolveThreadPinCommandPresentation({
+    threadKey: activeThreadKey,
+    pinned: activeThreadKey ? pinnedThreadKeys[activeThreadKey] === true : false,
+  });
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
@@ -1114,6 +1125,31 @@ function OpenCommandPaletteDialog() {
       },
     },
   );
+
+  actionItems.push({
+    kind: "action",
+    value: "action:toggle-current-thread-pin",
+    searchTerms: ["pin", "unpin", "thread", "favorite", "keep at top"],
+    title: activeThreadPinCommand.title,
+    ...(activeThreadPinCommand.description
+      ? { description: activeThreadPinCommand.description }
+      : {}),
+    disabled: activeThreadPinCommand.disabled,
+    icon: activeThreadPinCommand.pinned ? (
+      <PinOffIcon className={ITEM_ICON_CLASS} />
+    ) : (
+      <PinIcon className={ITEM_ICON_CLASS} />
+    ),
+    shortcutCommand: "thread.pinToggle",
+    run: async () => {
+      if (!activeThread || !activeThreadKey) return;
+      await toggleThreadPin({
+        threadKey: activeThreadKey,
+        threadTitle: activeThread.title,
+        confirmUnpin: settings.confirmThreadUnpin,
+      });
+    },
+  });
 
   if (projects.length > 0) {
     const activeProjectTitle = currentProjectId
