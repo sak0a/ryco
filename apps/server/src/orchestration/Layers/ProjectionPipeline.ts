@@ -2028,22 +2028,24 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
 
       const replayFromSequence = Math.min(...lastAppliedByProjector.values());
-      yield* Stream.runForEach(eventStore.readFromSequence(replayFromSequence), (event) =>
-        Effect.gen(function* () {
-          const projectorsToAdvance = projectors.filter(
-            (projector) => event.sequence > (lastAppliedByProjector.get(projector.name) ?? 0),
-          );
-          if (projectorsToAdvance.length === 0) {
-            return;
-          }
-          const postCommit = yield* sql.withTransaction(
-            applyProjectorsForEvent(event, projectorsToAdvance),
-          );
-          for (const projector of projectorsToAdvance) {
-            lastAppliedByProjector.set(projector.name, event.sequence);
-          }
-          yield* postCommit;
-        }),
+      yield* Stream.runForEach(
+        eventStore.readFromSequence(replayFromSequence, Number.MAX_SAFE_INTEGER),
+        (event) =>
+          Effect.gen(function* () {
+            const projectorsToAdvance = projectors.filter(
+              (projector) => event.sequence > (lastAppliedByProjector.get(projector.name) ?? 0),
+            );
+            if (projectorsToAdvance.length === 0) {
+              return;
+            }
+            const postCommit = yield* sql.withTransaction(
+              applyProjectorsForEvent(event, projectorsToAdvance),
+            );
+            for (const projector of projectorsToAdvance) {
+              lastAppliedByProjector.set(projector.name, event.sequence);
+            }
+            yield* postCommit;
+          }),
       );
     });
 
