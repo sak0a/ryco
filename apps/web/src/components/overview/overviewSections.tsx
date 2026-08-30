@@ -327,78 +327,6 @@ function StatusDot({ className, title }: { className?: string; title?: string })
   return <span className={cn("size-2 shrink-0 rounded-full", className)} title={title} />;
 }
 
-export function MetricCell({
-  label,
-  value,
-  hint,
-  tone = "default",
-}: {
-  label: string;
-  value: ReactNode;
-  hint?: ReactNode;
-  tone?: "default" | "danger";
-}) {
-  return (
-    <div className="flex-1 rounded-[10px] border border-border bg-card px-2.5 py-2">
-      <div className="text-[9.5px] font-semibold tracking-wider text-muted-foreground uppercase">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "mt-[3px] flex items-baseline gap-1 text-[13px] font-semibold -tracking-[0.01em]",
-          tone === "danger" && "text-destructive-foreground",
-        )}
-      >
-        {value}
-      </div>
-      {hint ? <div className="mt-px truncate text-[10px] text-muted-foreground">{hint}</div> : null}
-    </div>
-  );
-}
-
-export function MetricTile({
-  icon,
-  label,
-  value,
-  hint,
-  tone = "default",
-  isActive = false,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: ReactNode;
-  hint?: ReactNode;
-  tone?: "default" | "danger";
-  isActive?: boolean;
-  onClick?: (() => void) | undefined;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "min-w-0 rounded-[10px] border border-border bg-card px-2 pt-2 pb-[9px] text-left transition-colors hover:bg-accent",
-        isActive && "border-primary bg-primary/[0.05] shadow-[inset_0_0_0_1px_var(--primary)]",
-      )}
-    >
-      <div className="flex items-center gap-[3px] text-[9px] font-semibold tracking-wider text-muted-foreground uppercase [&_svg]:size-[11px] [&_svg]:text-muted-foreground">
-        {icon}
-        <span className="truncate">{label}</span>
-      </div>
-      <div
-        className={cn(
-          "mt-1 flex items-baseline gap-[3px] text-[15px] font-semibold -tracking-[0.02em]",
-          tone === "danger" && "text-destructive-foreground",
-        )}
-      >
-        {value}
-      </div>
-      {hint ? <div className="mt-px truncate text-[10px] text-muted-foreground">{hint}</div> : null}
-    </button>
-  );
-}
-
 export function SectionMiniLabel({ children }: { children: ReactNode }) {
   return (
     <p className="px-3 pt-1.5 pb-1 text-[10.5px] font-semibold tracking-wider text-muted-foreground uppercase">
@@ -436,57 +364,6 @@ export function ConflictBanner({ detail }: { detail?: string | undefined }) {
         <span className="font-semibold">Merge conflict</span>
         {detail ? ` · ${detail}` : " — rebase onto the base branch to resolve before merge."}
       </span>
-    </div>
-  );
-}
-
-export function Accordion({
-  icon,
-  title,
-  summary,
-  defaultOpen = false,
-  open: controlledOpen,
-  onToggle,
-  rootRef,
-  flash,
-  children,
-}: {
-  icon: ReactNode;
-  title: ReactNode;
-  summary?: ReactNode;
-  defaultOpen?: boolean;
-  open?: boolean | undefined;
-  onToggle?: (() => void) | undefined;
-  rootRef?: ((node: HTMLDivElement | null) => void) | undefined;
-  flash?: boolean | undefined;
-  children: ReactNode;
-}) {
-  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
-  const open = controlledOpen ?? uncontrolledOpen;
-  return (
-    <div ref={rootRef} className="border-b border-border last:border-b-0">
-      <button
-        type="button"
-        onClick={() => {
-          if (onToggle) onToggle();
-          else setUncontrolledOpen((value) => !value);
-        }}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-accent"
-      >
-        <ChevronRightIcon
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
-          )}
-        />
-        <span className="flex min-w-0 flex-1 items-center gap-2 text-[13px] font-semibold [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-muted-foreground">
-          {icon}
-          <span className="truncate">{title}</span>
-        </span>
-        {summary ? <span className="flex shrink-0 items-center gap-1.5">{summary}</span> : null}
-      </button>
-      {open ? <div className={cn("pb-1.5", flash && "overview-jump-flash")}>{children}</div> : null}
     </div>
   );
 }

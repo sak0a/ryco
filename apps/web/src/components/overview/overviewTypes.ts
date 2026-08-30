@@ -97,10 +97,7 @@ export interface OverviewChanges {
 
 export type OverviewPanelMode = "floating" | "sheet" | "sidebar";
 
-/**
- * The data + callbacks shared by every overview panel layout. Each layout
- * arranges this same content differently (see {@link PanelLayout}).
- */
+/** The data and callbacks rendered by the overview panel's Status Board. */
 export interface OverviewLayoutProps {
   activePlan: ActivePlanState | null;
   activeProposedPlan: LatestProposedPlanState | null;

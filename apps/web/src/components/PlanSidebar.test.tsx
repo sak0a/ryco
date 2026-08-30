@@ -7,8 +7,6 @@ import PlanSidebar from "./PlanSidebar";
 const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 
 describe("PlanSidebar", () => {
-  // These assertions assume the default (stack) layout; ensure a `panelLayout`
-  // stored by another suite can't leak in through a shared global localStorage.
   beforeEach(() => {
     Reflect.deleteProperty(globalThis, "localStorage");
   });
@@ -46,8 +44,8 @@ describe("PlanSidebar", () => {
     );
 
     expect(markup).toContain("Changes");
-    // Sections mount collapsed (`defaultOpen: false` in buildSections), so the
-    // panel shows the rolled-up diffstat and file count only. The committed /
+    // Status Board lanes mount collapsed, so the panel shows the rolled-up
+    // diffstat and file count only. The committed /
     // uncommitted bucket split is asserted at its own layer, in
     // overviewChanges.logic.test.ts.
     expect(markup).toContain("+37");
@@ -58,7 +56,7 @@ describe("PlanSidebar", () => {
     expect(markup).not.toContain("Overview");
   });
 
-  it("renders the pull request with inline checks and a merge-conflict banner", () => {
+  it("summarizes pull request checks and merge conflicts in Status Board lanes", () => {
     const markup = renderToStaticMarkup(
       <PlanSidebar
         activePlan={null}
@@ -97,8 +95,9 @@ describe("PlanSidebar", () => {
 
     expect(markup).toContain("#124");
     expect(markup).toContain("Consolidate chat right panel");
-    expect(markup).toContain("lint");
-    expect(markup).toContain("e2e (smoke)");
-    expect(markup).toContain("Merge conflict");
+    expect(markup).toContain("1/2");
+    expect(markup).toContain("conflict");
+    expect(markup).not.toContain("lint");
+    expect(markup).not.toContain("e2e (smoke)");
   });
 });

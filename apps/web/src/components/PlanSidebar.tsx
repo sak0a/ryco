@@ -1,11 +1,9 @@
-import { EyeIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import { RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { memo } from "react";
 
-import { useAppearancePreference } from "~/hooks/useAppearancePreference";
 import { cn } from "~/lib/utils";
 
-import type { PanelLayout } from "../themes/appearancePreferences";
-import { OverviewLayoutContent } from "./overview/overviewLayouts";
+import { StatusBoardLayout } from "./overview/overviewLayouts";
 import { isOverviewEmpty, OverviewBadge, OverviewEmptyState } from "./overview/overviewSections";
 import type { OverviewLayoutProps, OverviewPanelMode } from "./overview/overviewTypes";
 import { Button } from "./ui/button";
@@ -31,14 +29,8 @@ export interface PlanSidebarProps extends OverviewLayoutProps {
   onClose?: (() => void) | undefined;
 }
 
-function HeaderTrailing({
-  layout,
-  layoutProps,
-}: {
-  layout: PanelLayout;
-  layoutProps: OverviewLayoutProps;
-}) {
-  const showConflict = layout === "board" && Boolean(layoutProps.pullRequest?.hasMergeConflicts);
+function HeaderTrailing({ layoutProps }: { layoutProps: OverviewLayoutProps }) {
+  const showConflict = Boolean(layoutProps.pullRequest?.hasMergeConflicts);
   const showRefresh = Boolean(layoutProps.onRefreshPullRequest);
   if (!showConflict && !showRefresh) return null;
 
@@ -90,7 +82,6 @@ const PlanSidebar = memo(function PlanSidebar({
   onClose,
   ...layoutProps
 }: PlanSidebarProps) {
-  const layout = useAppearancePreference("panelLayout") as PanelLayout;
   const empty = isOverviewEmpty(layoutProps);
   const closeButton = onClose ? (
     <Button
@@ -105,14 +96,7 @@ const PlanSidebar = memo(function PlanSidebar({
     </Button>
   ) : null;
 
-  const body = empty ? (
-    <OverviewEmptyState />
-  ) : (
-    <OverviewLayoutContent layout={layout} {...layoutProps} />
-  );
-
-  const pullRequestUrl = layoutProps.pullRequest?.url;
-  const showViewPullRequest = layout === "stack" && Boolean(pullRequestUrl);
+  const body = empty ? <OverviewEmptyState /> : <StatusBoardLayout {...layoutProps} />;
 
   return (
     <div
@@ -140,11 +124,11 @@ const PlanSidebar = memo(function PlanSidebar({
           </div>
           {closeButton ? (
             <div className="flex shrink-0 items-center gap-1.5">
-              <HeaderTrailing layout={layout} layoutProps={layoutProps} />
+              <HeaderTrailing layoutProps={layoutProps} />
               {closeButton}
             </div>
           ) : (
-            <HeaderTrailing layout={layout} layoutProps={layoutProps} />
+            <HeaderTrailing layoutProps={layoutProps} />
           )}
         </div>
       ) : closeButton ? (
@@ -171,23 +155,6 @@ const PlanSidebar = memo(function PlanSidebar({
       {!empty && layoutProps.sourceControlActions ? (
         <div className="flex shrink-0 items-center gap-2 border-t border-border/60 bg-card/50 px-3 py-2.5">
           <div className="flex min-w-0 flex-1">{layoutProps.sourceControlActions}</div>
-          {showViewPullRequest ? (
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-8 shrink-0"
-              render={
-                <a
-                  href={pullRequestUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label="View pull request"
-                />
-              }
-            >
-              <EyeIcon className="size-3.5" />
-            </Button>
-          ) : null}
         </div>
       ) : null}
     </div>

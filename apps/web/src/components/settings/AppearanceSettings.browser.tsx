@@ -209,6 +209,7 @@ describe("AppearanceSettingsPanel", () => {
   it("omits reasoning and token mode style controls", async () => {
     mounted = await render(<AppearanceSettingsPanel />);
 
+    await expect.element(page.getByText("Panel layout", { exact: true })).not.toBeInTheDocument();
     await expect
       .element(page.getByText("Reasoning chip style", { exact: true }))
       .not.toBeInTheDocument();

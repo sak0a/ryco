@@ -153,12 +153,6 @@ export const SETTINGS_SEARCH_INDEX: ReadonlyArray<SettingsSearchEntry> = [
   },
   {
     section: "appearance",
-    title: "Panel layout",
-    description: "How the overview panel arranges its sections.",
-    keywords: "stack hybrid status board",
-  },
-  {
-    section: "appearance",
     title: "Theme palette",
     description: "Built-in and custom color themes; import and export.",
     keywords: "dark midnight graphite nord dracula catppuccin",
