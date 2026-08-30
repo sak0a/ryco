@@ -106,9 +106,14 @@ function validateInstanceId(id: string, existing: ReadonlySet<string>): string |
 interface AddProviderInstanceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCreated?: (instanceId: ProviderInstanceId) => void;
 }
 
-export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderInstanceDialogProps) {
+export function AddProviderInstanceDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: AddProviderInstanceDialogProps) {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
 
@@ -204,6 +209,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
     };
     try {
       updateSettings({ providerInstances: nextMap });
+      onCreated?.(brandedId);
       toastManager.add({
         type: "success",
         title: "Provider instance added",
@@ -226,6 +232,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
     label,
     accentColor,
     onOpenChange,
+    onCreated,
     settings.providerInstances,
     updateSettings,
   ]);
