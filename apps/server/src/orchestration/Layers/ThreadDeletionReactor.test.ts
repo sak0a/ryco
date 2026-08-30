@@ -14,10 +14,7 @@ import {
   ProviderService,
   type ProviderServiceShape,
 } from "../../provider/Services/ProviderService.ts";
-import {
-  TerminalManager,
-  type TerminalManagerShape,
-} from "../../terminal/Services/Manager.ts";
+import { TerminalManager, type TerminalManagerShape } from "../../terminal/Services/Manager.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -115,9 +112,9 @@ describe("ThreadDeletionReactor recreation fence", () => {
           const layer = ThreadDeletionReactorLive.pipe(
             Layer.provide(
               Layer.succeed(ProviderService, {
-                stopSession: ({ threadId: stoppedThreadId }: Parameters<
-                  ProviderServiceShape["stopSession"]
-                >[0]) =>
+                stopSession: ({
+                  threadId: stoppedThreadId,
+                }: Parameters<ProviderServiceShape["stopSession"]>[0]) =>
                   Effect.gen(function* () {
                     stops.push(stoppedThreadId);
                     yield* Deferred.succeed(cleanupStarted, undefined);
