@@ -53,8 +53,18 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setModelCalls: Array<string | undefined> = [];
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
+  public readonly applyFlagSettingsCalls: Array<Record<string, unknown>> = [];
+  public readonly applyFlagSettings?: (settings: Record<string, unknown>) => Promise<void>;
   public closeCalls = 0;
   public mcpStatuses: ReadonlyArray<{ readonly name: string; readonly status: string }> = [];
+
+  constructor(supportsAutomaticCompaction = false) {
+    if (supportsAutomaticCompaction) {
+      this.applyFlagSettings = async (settings) => {
+        this.applyFlagSettingsCalls.push(settings);
+      };
+    }
+  }
 
   emit(message: SDKMessage): void {
     if (this.done) {
@@ -159,8 +169,9 @@ function makeHarness(config?: {
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
   readonly agentControl?: AgentControlProviderBridge;
+  readonly supportsAutomaticCompaction?: boolean;
 }) {
-  const query = new FakeClaudeQuery();
+  const query = new FakeClaudeQuery(config?.supportsAutomaticCompaction);
   let createInput:
     | {
         readonly prompt: AsyncIterable<SDKUserMessage>;
@@ -270,6 +281,49 @@ async function readFirstPromptMessage(
 
 const THREAD_ID = ThreadId.make("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
+
+function emitClaudeUsage(
+  query: FakeClaudeQuery,
+  input: { readonly id: string; readonly usedTokens: number },
+): void {
+  query.emit({
+    type: "system",
+    subtype: "task_progress",
+    task_id: `task-${input.id}`,
+    description: "Working",
+    usage: { total_tokens: input.usedTokens },
+    session_id: `sdk-session-${input.id}`,
+    uuid: `usage-${input.id}`,
+  } as unknown as SDKMessage);
+}
+
+function emitClaudeSuccessfulResult(
+  query: FakeClaudeQuery,
+  input: { readonly id: string; readonly usedTokens: number; readonly contextWindow?: number },
+): void {
+  query.emit({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    duration_ms: 10,
+    duration_api_ms: 8,
+    num_turns: 1,
+    result: "done",
+    stop_reason: "end_turn",
+    session_id: `sdk-session-${input.id}`,
+    usage: { total_tokens: input.usedTokens },
+    ...(input.contextWindow
+      ? {
+          modelUsage: {
+            "claude-opus-4-6": {
+              contextWindow: input.contextWindow,
+              maxOutputTokens: 64_000,
+            },
+          },
+        }
+      : {}),
+  } as unknown as SDKMessage);
+}
 
 function makeAgentControlBridge() {
   const rawCredential = `rycoac_${"a".repeat(43)}`;
@@ -2193,6 +2247,204 @@ describe("ClaudeAdapterLive", () => {
           },
         });
       }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect(
+    "enables automatic compaction once at the threshold and preserves the canonical boundary lifecycle",
+    () => {
+      const harness = makeHarness({ supportsAutomaticCompaction: true });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-claudeadapter-auto-compact"),
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          resumeCursor: {
+            threadId: THREAD_ID,
+            resume: "11111111-1111-4111-8111-111111111111",
+            turnCount: 2,
+          },
+        });
+
+        const firstCompletionFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "first", attachments: [] });
+        emitClaudeUsage(harness.query, { id: "compact-first", usedTokens: 160_000 });
+        emitClaudeSuccessfulResult(harness.query, {
+          id: "compact-first",
+          usedTokens: 160_000,
+          contextWindow: 200_000,
+        });
+        yield* Fiber.join(firstCompletionFiber);
+        yield* Effect.yieldNow;
+
+        const secondCompletionFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "second", attachments: [] });
+        emitClaudeUsage(harness.query, { id: "compact-second", usedTokens: 175_000 });
+        emitClaudeSuccessfulResult(harness.query, {
+          id: "compact-second",
+          usedTokens: 175_000,
+          contextWindow: 200_000,
+        });
+
+        yield* Fiber.join(secondCompletionFiber);
+        yield* Effect.yieldNow;
+        assert.deepEqual(harness.query.applyFlagSettingsCalls, [
+          {
+            autoCompactEnabled: true,
+            autoCompactWindow: 160_000,
+          },
+        ]);
+
+        const boundaryFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "thread.state.changed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        harness.query.emit({
+          type: "system",
+          subtype: "status",
+          status: "compacting",
+          uuid: "compact-status",
+          session_id: "sdk-session-compact",
+        } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "system",
+          subtype: "compact_boundary",
+          compact_metadata: {
+            trigger: "auto",
+            pre_tokens: 175_000,
+            post_tokens: 42_000,
+          },
+          uuid: "compact-boundary",
+          session_id: "sdk-session-compact",
+        } as unknown as SDKMessage);
+
+        const boundary = yield* Fiber.join(boundaryFiber);
+        assert.equal(boundary._tag, "Some");
+        if (boundary._tag === "Some") {
+          assert.equal(boundary.value.type, "thread.state.changed");
+          if (boundary.value.type === "thread.state.changed") {
+            assert.equal(boundary.value.payload.state, "compacted");
+          }
+        }
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect(
+    "does not arm compaction for an interrupted turn and retries on a later success",
+    () => {
+      const harness = makeHarness({ supportsAutomaticCompaction: true });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-claudeadapter-auto-compact-interrupted"),
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+
+        const interruptedCompletionFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "interrupt", attachments: [] });
+        emitClaudeUsage(harness.query, { id: "compact-interrupted", usedTokens: 170_000 });
+        harness.query.emit({
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: false,
+          duration_ms: 10,
+          duration_api_ms: 8,
+          num_turns: 1,
+          stop_reason: null,
+          errors: ["Interrupted by user"],
+          session_id: "sdk-session-compact-interrupted",
+          usage: { total_tokens: 170_000 },
+          modelUsage: {
+            "claude-opus-4-6": { contextWindow: 200_000, maxOutputTokens: 64_000 },
+          },
+        } as unknown as SDKMessage);
+        yield* Fiber.join(interruptedCompletionFiber);
+        yield* Effect.yieldNow;
+        assert.lengthOf(harness.query.applyFlagSettingsCalls, 0);
+
+        const resumedCompletionFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "resume", attachments: [] });
+        emitClaudeUsage(harness.query, { id: "compact-resumed", usedTokens: 170_000 });
+        emitClaudeSuccessfulResult(harness.query, {
+          id: "compact-resumed",
+          usedTokens: 170_000,
+          contextWindow: 200_000,
+        });
+
+        yield* Fiber.join(resumedCompletionFiber);
+        yield* Effect.yieldNow;
+        assert.lengthOf(harness.query.applyFlagSettingsCalls, 1);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect("degrades safely when the SDK cannot enable automatic compaction", () => {
+    const harness = makeHarness({ supportsAutomaticCompaction: false });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const warningFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "runtime.warning"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-claudeadapter-auto-compact-unsupported"),
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "fill context", attachments: [] });
+      emitClaudeUsage(harness.query, { id: "compact-unsupported", usedTokens: 170_000 });
+      emitClaudeSuccessfulResult(harness.query, {
+        id: "compact-unsupported",
+        usedTokens: 170_000,
+        contextWindow: 200_000,
+      });
+
+      const warning = yield* Fiber.join(warningFiber);
+      assert.equal(warning._tag, "Some");
+      if (warning._tag === "Some") {
+        assert.equal(warning.value.type, "runtime.warning");
+        if (warning.value.type === "runtime.warning") {
+          assert.equal(
+            warning.value.payload.message,
+            "Automatic context compaction is unavailable for this session. Start a new session if the context window fills.",
+          );
+        }
+      }
+      assert.deepEqual(harness.query.applyFlagSettingsCalls, []);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

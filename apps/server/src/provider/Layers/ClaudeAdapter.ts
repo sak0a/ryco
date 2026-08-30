@@ -81,6 +81,14 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import {
+  disableContextCompaction,
+  initialContextCompactionPolicyState,
+  markContextCompactionStarted,
+  observeContextCompaction,
+  settleContextCompaction,
+  type ContextCompactionPolicyState,
+} from "../contextCompactionPolicy.ts";
+import {
   createProcessDeviceToolBinding,
   type DeviceToolBinding,
 } from "../../providerTools/deviceToolGateway.ts";
@@ -208,6 +216,7 @@ interface ClaudeTaskAgentState {
 }
 
 interface ClaudeSessionContext {
+  readonly generation: number;
   session: ProviderSession;
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
@@ -278,6 +287,9 @@ interface ClaudeSessionContext {
   turnState: ClaudeTurnState | undefined;
   lastKnownContextWindow: number | undefined;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
+  compactionPolicy: ContextCompactionPolicyState;
+  readonly supportsAutomaticCompaction: boolean;
+  compactionUnavailableWarningEmitted: boolean;
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
   readonly subagentByTaskId: Map<string, SubagentRef>;
@@ -293,6 +305,13 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setModel: (model?: string) => Promise<void>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
+  /** Added in newer SDKs; optional keeps older native runtimes fail-safe. */
+  readonly applyFlagSettings?: (
+    settings: Partial<{
+      readonly autoCompactEnabled: boolean | null;
+      readonly autoCompactWindow: number | null;
+    }>,
+  ) => Promise<void>;
   readonly close: () => void;
   readonly mcpServerStatus?: () => Promise<
     ReadonlyArray<{ readonly name: string; readonly status: string }>
@@ -537,6 +556,13 @@ function normalizeClaudeTokenUsage(
       ? { durationMs: usage.duration_ms }
       : {}),
   };
+}
+
+function withAutomaticCompactionCapability(
+  usage: ThreadTokenUsageSnapshot,
+  supported: boolean,
+): ThreadTokenUsageSnapshot {
+  return supported ? { ...usage, compactsAutomatically: true } : usage;
 }
 
 function asCanonicalTurnId(value: TurnId): TurnId {
@@ -1510,6 +1536,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }) as ClaudeQueryRuntime);
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
+  let nextSessionGeneration = 0;
   const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(2_048);
   const runtimeEventQueueMetrics = yield* makeServerQueueMetrics({
     queue: "provider.adapter.runtimeEvents",
@@ -2043,6 +2070,68 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
   });
 
+  const emitCompactionUnavailableWarning = Effect.fn("emitCompactionUnavailableWarning")(function* (
+    context: ClaudeSessionContext,
+  ) {
+    if (context.compactionUnavailableWarningEmitted) return;
+    context.compactionUnavailableWarningEmitted = true;
+    yield* emitRuntimeWarning(
+      context,
+      "Automatic context compaction is unavailable for this session. Start a new session if the context window fills.",
+    );
+  });
+
+  const maybeEnableAutomaticCompaction = Effect.fn("maybeEnableAutomaticCompaction")(function* (
+    context: ClaudeSessionContext,
+    usage: ThreadTokenUsageSnapshot,
+  ) {
+    if (context.stopped || sessions.get(context.session.threadId) !== context) return;
+
+    const decision = observeContextCompaction(context.compactionPolicy, {
+      generation: context.generation,
+      usage,
+    });
+    context.compactionPolicy = decision.state;
+    const windowTokens = decision.windowTokens;
+    if (!decision.trigger || windowTokens === undefined) return;
+
+    const applyFlagSettings = context.query.applyFlagSettings;
+    if (!context.supportsAutomaticCompaction || !applyFlagSettings) {
+      context.compactionPolicy = disableContextCompaction(
+        context.compactionPolicy,
+        context.generation,
+      );
+      yield* emitCompactionUnavailableWarning(context);
+      return;
+    }
+
+    const generation = context.generation;
+    const applied = yield* Effect.tryPromise({
+      try: () =>
+        applyFlagSettings.call(context.query, {
+          autoCompactEnabled: true,
+          autoCompactWindow: windowTokens,
+        }),
+      catch: () => undefined,
+    }).pipe(
+      Effect.as(true),
+      Effect.timeout("3 seconds"),
+      Effect.catch(() => Effect.succeed(false)),
+    );
+
+    if (
+      context.stopped ||
+      context.generation !== generation ||
+      sessions.get(context.session.threadId) !== context
+    ) {
+      return;
+    }
+    if (!applied) {
+      context.compactionPolicy = disableContextCompaction(context.compactionPolicy, generation);
+      yield* emitCompactionUnavailableWarning(context);
+    }
+  });
+
   const completeTurn = Effect.fn("completeTurn")(function* (
     context: ClaudeSessionContext,
     status: ProviderRuntimeTurnStatus,
@@ -2067,7 +2156,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       accumulatedSnapshot?.totalProcessedTokens ?? accumulatedSnapshot?.usedTokens;
     const lastGoodUsage = context.lastKnownTokenUsage;
     const maxTokens = resultContextWindow ?? context.lastKnownContextWindow;
-    const usageSnapshot: ThreadTokenUsageSnapshot | undefined = lastGoodUsage
+    const rawUsageSnapshot: ThreadTokenUsageSnapshot | undefined = lastGoodUsage
       ? {
           ...lastGoodUsage,
           ...(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
@@ -2082,6 +2171,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             : {}),
         }
       : accumulatedSnapshot;
+    const usageSnapshot = rawUsageSnapshot
+      ? withAutomaticCompactionCapability(rawUsageSnapshot, context.supportsAutomaticCompaction)
+      : undefined;
 
     const turnState = context.turnState;
     if (!turnState) {
@@ -2212,6 +2304,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     };
     if (context.agentControl) yield* context.agentControl.retireTurn(turnState.turnId);
     yield* updateResumeCursor(context);
+    if (status === "completed" && usageSnapshot) {
+      yield* maybeEnableAutomaticCompaction(context, usageSnapshot);
+    }
   });
 
   const handleStreamEvent = Effect.fn("handleStreamEvent")(function* (
@@ -3032,6 +3127,23 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return;
       case "status":
+        if (message.status === "compacting") {
+          context.compactionPolicy = markContextCompactionStarted(
+            context.compactionPolicy,
+            context.generation,
+          );
+        } else if (message.compact_result === "failed") {
+          context.compactionPolicy = disableContextCompaction(
+            context.compactionPolicy,
+            context.generation,
+          );
+          yield* emitCompactionUnavailableWarning(context);
+        } else if (message.compact_result === "success") {
+          context.compactionPolicy = settleContextCompaction(
+            context.compactionPolicy,
+            context.generation,
+          );
+        }
         yield* offerRuntimeEventForContext(context, {
           ...base,
           type: "session.state.changed",
@@ -3043,6 +3155,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return;
       case "compact_boundary":
+        context.compactionPolicy = settleContextCompaction(
+          context.compactionPolicy,
+          context.generation,
+        );
+        context.lastKnownTokenUsage = undefined;
         yield* offerRuntimeEventForContext(context, {
           ...base,
           type: "thread.state.changed",
@@ -3188,7 +3305,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               createdAt: usageStamp.createdAt,
               type: "thread.token-usage.updated",
               payload: {
-                usage: normalizedUsage,
+                usage: withAutomaticCompactionCapability(
+                  normalizedUsage,
+                  context.supportsAutomaticCompaction,
+                ),
               },
             });
           }
@@ -3307,7 +3427,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               createdAt: usageStamp.createdAt,
               type: "thread.token-usage.updated",
               payload: {
-                usage: normalizedUsage,
+                usage: withAutomaticCompactionCapability(
+                  normalizedUsage,
+                  context.supportsAutomaticCompaction,
+                ),
               },
             });
           }
@@ -4212,7 +4335,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         updatedAt: startedAt,
       };
 
+      const generation = ++nextSessionGeneration;
+      const supportsAutomaticCompaction = typeof queryRuntime.applyFlagSettings === "function";
       const context: ClaudeSessionContext = {
+        generation,
         session,
         promptQueue,
         query: queryRuntime,
@@ -4243,6 +4369,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         turnState: undefined,
         lastKnownContextWindow: undefined,
         lastKnownTokenUsage: undefined,
+        compactionPolicy: initialContextCompactionPolicyState(generation),
+        supportsAutomaticCompaction,
+        compactionUnavailableWarningEmitted: false,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
         subagentByTaskId: new Map(),
