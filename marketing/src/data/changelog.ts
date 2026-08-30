@@ -21,6 +21,41 @@ const RELEASE_BASE = "https://github.com/saka-gg/ryco/releases/tag";
  */
 export const CHANGELOG_RELEASES: ChangelogRelease[] = [
   {
+    version: "0.1.15",
+    date: "August 30, 2026",
+    dateTime: "2026-08-30",
+    summary:
+      "Provider sessions, workspace content, and long-running threads now stay safer and more predictable through failures.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.15`,
+    highlights: [
+      {
+        title: "Workspace images stay inside the workspace",
+        summary:
+          "Markdown images now load through the contained binary file boundary, with strict path checks, raster validation, private caching, and hardened download headers.",
+      },
+      {
+        title: "Provider sessions recover cleanly",
+        summary:
+          "Authenticated health checks, durable resumes, cancellation-safe prompts, recovered child approvals, and shared local server ownership prevent duplicate processes and stuck sessions.",
+      },
+      {
+        title: "Failures remain visible and actionable",
+        summary:
+          "Pull-request polling reports provider failures with bounded backoff, model catalogs survive transient outages, and temporarily unavailable selections remain visible instead of silently changing.",
+      },
+      {
+        title: "Long histories replay reliably",
+        summary:
+          "Projection recovery resumes from the durable event high-water mark, while bounded title retries repair temporary generation failures without blocking thread creation.",
+      },
+      {
+        title: "Large inputs stay responsive",
+        summary:
+          "Linear-time protocol framing, bounded composer link parsing, and provider-neutral subagent model and effort metadata improve performance and make delegated work easier to understand.",
+      },
+    ],
+  },
+  {
     version: "0.1.14",
     date: "August 30, 2026",
     dateTime: "2026-08-30",
