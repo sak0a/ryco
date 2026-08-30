@@ -93,7 +93,15 @@ export const ORCHESTRATION_EVENT_PROJECTORS = {
   "project.meta-updated": [ORCHESTRATION_PROJECTOR_NAMES.projects],
   "project.avatar-set": [ORCHESTRATION_PROJECTOR_NAMES.projects],
   "project.deleted": [ORCHESTRATION_PROJECTOR_NAMES.projects],
-  "thread.created": [ORCHESTRATION_PROJECTOR_NAMES.threads],
+  "thread.created": [
+    ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
+    ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
+    ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
+    ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+    ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
+    ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals,
+    ORCHESTRATION_PROJECTOR_NAMES.threads,
+  ],
   "thread.deleted": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.archived": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.unarchived": [ORCHESTRATION_PROJECTOR_NAMES.threads],
@@ -908,7 +916,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.deleted": {
-          attachmentSideEffects.deletedThreadIds.add(event.payload.threadId);
+          // During replay the files on disk may already belong to a later
+          // incarnation of this client-generated id. Only an unsuperseded
+          // deletion is allowed to remove them.
+          const recreatedLater = yield* eventStore.hasEventAfter({
+            aggregateKind: "thread",
+            aggregateId: event.payload.threadId,
+            type: "thread.created",
+            sequenceExclusive: event.sequence,
+          });
+          if (!recreatedLater) {
+            attachmentSideEffects.deletedThreadIds.add(event.payload.threadId);
+          }
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });
@@ -1251,6 +1270,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       "applyThreadMessagesProjection",
     )(function* (event, attachmentSideEffects) {
       switch (event.type) {
+        case "thread.created":
+          yield* projectionThreadMessageRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
+
         case "thread.message-sent": {
           const existingMessage = yield* projectionThreadMessageRepository.getByMessageId({
             messageId: event.payload.messageId,
@@ -1335,6 +1360,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       "applyThreadProposedPlansProjection",
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
+        case "thread.created":
+          yield* projectionThreadProposedPlanRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
+
         case "thread.proposed-plan-upserted":
           yield* projectionThreadProposedPlanRepository.upsert({
             planId: event.payload.proposedPlan.id,
@@ -1386,6 +1417,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       "applyThreadActivitiesProjection",
     )(function* (event, attachmentSideEffects) {
       switch (event.type) {
+        case "thread.created":
+          yield* projectionThreadActivityRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          yield* projectionThreadUserInputRequestRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
+
         case "thread.activity-appended": {
           const requestId = extractActivityRequestId(event.payload.activity.payload);
           const activityPayload =
@@ -1479,6 +1519,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const applyThreadSessionsProjection: ProjectorDefinition["apply"] = Effect.fn(
       "applyThreadSessionsProjection",
     )(function* (event, _attachmentSideEffects) {
+      if (event.type === "thread.created") {
+        yield* projectionThreadSessionRepository.deleteByThreadId({
+          threadId: event.payload.threadId,
+        });
+        return;
+      }
       if (event.type !== "thread.session-set") {
         return;
       }
@@ -1500,6 +1546,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       "applyThreadTurnsProjection",
     )(function* (event, _attachmentSideEffects) {
       switch (event.type) {
+        case "thread.created":
+          yield* projectionTurnRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
+
         case "thread.turn-start-requested": {
           yield* projectionTurnRepository.replacePendingTurnStart({
             threadId: event.payload.threadId,
@@ -1758,6 +1810,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       "applyPendingApprovalsProjection",
     )(function* (event, attachmentSideEffects) {
       switch (event.type) {
+        case "thread.created":
+          yield* projectionPendingApprovalRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
+
         case "thread.activity-appended": {
           const requestId =
             extractActivityRequestId(event.payload.activity.payload) ??

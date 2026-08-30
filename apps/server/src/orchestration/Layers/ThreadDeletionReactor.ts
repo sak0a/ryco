@@ -1,7 +1,7 @@
 import type { OrchestrationEvent } from "@ryco/contracts";
 import { makeDrainableWorker } from "@ryco/shared/DrainableWorker";
 import { losslessBackpressureQueuePolicy } from "@ryco/shared/QueuePolicy";
-import { Cause, Effect, Layer, Stream } from "effect";
+import { Cause, Effect, Layer, Stream, SubscriptionRef } from "effect";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { TerminalManager } from "../../terminal/Services/Manager.ts";
@@ -83,20 +83,39 @@ const make = Effect.gen(function* () {
     process: processThreadDeletedSafely,
   });
 
+  // Track the highest event sequence handed off by the subscriber. Waiting
+  // through a create sequence covers every earlier deletion, including one
+  // that was published but had not reached the cleanup worker yet.
+  const seenSequence = yield* SubscriptionRef.make(0);
+  const noteSeen = (sequence: number) =>
+    SubscriptionRef.update(seenSequence, (seen) => Math.max(seen, sequence));
+
   const start: ThreadDeletionReactorShape["start"] = Effect.fn("start")(function* () {
+    // Acquire synchronously so a create dispatched immediately after start
+    // cannot be published before this reactor owns its subscription.
+    const subscription = yield* orchestrationEngine.subscribeDomainEvents;
     yield* Effect.forkScoped(
-      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
-        if (event.type !== "thread.deleted") {
-          return Effect.void;
-        }
-        return worker.enqueue(event);
-      }),
+      Stream.runForEach(Stream.fromSubscription(subscription), (event) =>
+        (event.type === "thread.deleted" ? worker.enqueue(event) : Effect.void).pipe(
+          Effect.andThen(noteSeen(event.sequence)),
+        ),
+      ),
     );
+  });
+
+  const drainThrough: ThreadDeletionReactorShape["drainThrough"] = Effect.fn(
+    "ThreadDeletionReactor.drainThrough",
+  )(function* (targetSequence) {
+    yield* SubscriptionRef.changes(seenSequence).pipe(
+      Stream.filter((seen) => seen >= targetSequence),
+      Stream.runHead,
+    );
+    yield* worker.drain;
   });
 
   return {
     start,
-    drain: worker.drain,
+    drainThrough,
   } satisfies ThreadDeletionReactorShape;
 });
 

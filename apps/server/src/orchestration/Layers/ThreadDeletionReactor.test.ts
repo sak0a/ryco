@@ -1,8 +1,32 @@
-import { ThreadId } from "@ryco/contracts";
-import { Cause, Effect, Exit } from "effect";
+import {
+  CommandId,
+  CorrelationId,
+  EventId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type OrchestrationEvent,
+} from "@ryco/contracts";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, PubSub, Stream } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
-import { logCleanupCauseUnlessInterrupted } from "./ThreadDeletionReactor.ts";
+import {
+  ProviderService,
+  type ProviderServiceShape,
+} from "../../provider/Services/ProviderService.ts";
+import {
+  TerminalManager,
+  type TerminalManagerShape,
+} from "../../terminal/Services/Manager.ts";
+import {
+  OrchestrationEngineService,
+  type OrchestrationEngineShape,
+} from "../Services/OrchestrationEngine.ts";
+import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
+import {
+  logCleanupCauseUnlessInterrupted,
+  ThreadDeletionReactorLive,
+} from "./ThreadDeletionReactor.ts";
 
 describe("logCleanupCauseUnlessInterrupted", () => {
   const threadId = ThreadId.make("thread-deletion-reactor-test");
@@ -32,5 +56,105 @@ describe("logCleanupCauseUnlessInterrupted", () => {
     if (Exit.isFailure(exit)) {
       expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true);
     }
+  });
+});
+
+describe("ThreadDeletionReactor recreation fence", () => {
+  it("waits for earlier deletion cleanup before releasing a new incarnation", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const now = "2026-01-01T00:00:00.000Z";
+          const threadId = ThreadId.make("thread-recreation-fence");
+          const events = yield* PubSub.unbounded<OrchestrationEvent>();
+          const cleanupStarted = yield* Deferred.make<void>();
+          const releaseCleanup = yield* Deferred.make<void>();
+          const stops: ThreadId[] = [];
+
+          const deletedEvent = {
+            sequence: 1,
+            eventId: EventId.make("event-delete-1"),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            type: "thread.deleted",
+            occurredAt: now,
+            commandId: CommandId.make("command-delete-1"),
+            causationEventId: null,
+            correlationId: CorrelationId.make("command-delete-1"),
+            metadata: {},
+            payload: { threadId, deletedAt: now },
+          } satisfies OrchestrationEvent;
+          const createdEvent = {
+            sequence: 2,
+            eventId: EventId.make("event-create-2"),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            type: "thread.created",
+            occurredAt: now,
+            commandId: CommandId.make("command-create-2"),
+            causationEventId: null,
+            correlationId: CorrelationId.make("command-create-2"),
+            metadata: {},
+            payload: {
+              threadId,
+              projectId: ProjectId.make("project-recreation-fence"),
+              title: "Retried thread",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5-codex",
+              },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+          } satisfies OrchestrationEvent;
+
+          const layer = ThreadDeletionReactorLive.pipe(
+            Layer.provide(
+              Layer.succeed(ProviderService, {
+                stopSession: ({ threadId: stoppedThreadId }: Parameters<
+                  ProviderServiceShape["stopSession"]
+                >[0]) =>
+                  Effect.gen(function* () {
+                    stops.push(stoppedThreadId);
+                    yield* Deferred.succeed(cleanupStarted, undefined);
+                    yield* Deferred.await(releaseCleanup);
+                  }),
+              } as unknown as ProviderServiceShape),
+            ),
+            Layer.provide(
+              Layer.succeed(TerminalManager, {
+                close: () => Effect.void,
+              } as unknown as TerminalManagerShape),
+            ),
+            Layer.provide(
+              Layer.succeed(OrchestrationEngineService, {
+                streamDomainEvents: Stream.fromPubSub(events),
+                subscribeDomainEvents: PubSub.subscribe(events),
+              } as unknown as OrchestrationEngineShape),
+            ),
+          );
+
+          yield* Effect.gen(function* () {
+            const reactor = yield* ThreadDeletionReactor;
+            yield* reactor.start();
+            yield* PubSub.publish(events, deletedEvent);
+            yield* Deferred.await(cleanupStarted).pipe(Effect.timeout("1 second"));
+            yield* PubSub.publish(events, createdEvent);
+
+            const drained = yield* Effect.forkChild(reactor.drainThrough(createdEvent.sequence));
+            yield* Effect.yieldNow;
+            expect(drained.pollUnsafe()).toBeUndefined();
+
+            yield* Deferred.succeed(releaseCleanup, undefined);
+            yield* Fiber.join(drained).pipe(Effect.timeout("1 second"));
+            expect(stops).toEqual([threadId]);
+          }).pipe(Effect.provide(layer));
+        }),
+      ),
+    );
   });
 });

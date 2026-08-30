@@ -1295,6 +1295,109 @@ it.layer(
 });
 
 it.layer(
+  Layer.fresh(makeProjectionPipelinePrefixedTestLayer("ryco-projection-attachments-replay-")),
+)("OrchestrationProjectionPipeline", (it) => {
+  it.effect("replay keeps files belonging to a later incarnation", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const { attachmentsDir } = yield* ServerConfig;
+      const now = "2026-01-01T00:00:00.000Z";
+      const projectId = ProjectId.make("project-attachment-replay");
+      const retriedThreadId = ThreadId.make("thread-attachment-retried");
+      const deletedThreadId = ThreadId.make("thread-attachment-deleted");
+      const retriedAttachmentPath = path.join(
+        attachmentsDir,
+        "thread-attachment-retried-00000000-0000-4000-8000-000000000001.png",
+      );
+      const deletedAttachmentPath = path.join(
+        attachmentsDir,
+        "thread-attachment-deleted-00000000-0000-4000-8000-000000000002.png",
+      );
+      const appendCreated = (threadId: ThreadId, suffix: string) =>
+        eventStore.append({
+          type: "thread.created",
+          eventId: EventId.make(`event-attachment-create-${suffix}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make(`command-attachment-create-${suffix}`),
+          causationEventId: null,
+          correlationId: CorrelationId.make(`command-attachment-create-${suffix}`),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId,
+            title: `Thread ${suffix}`,
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      const appendDeleted = (threadId: ThreadId, suffix: string) =>
+        eventStore.append({
+          type: "thread.deleted",
+          eventId: EventId.make(`event-attachment-delete-${suffix}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make(`command-attachment-delete-${suffix}`),
+          causationEventId: null,
+          correlationId: CorrelationId.make(`command-attachment-delete-${suffix}`),
+          metadata: {},
+          payload: { threadId, deletedAt: now },
+        });
+
+      yield* eventStore.append({
+        type: "project.created",
+        eventId: EventId.make("event-attachment-replay-project"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        occurredAt: now,
+        commandId: CommandId.make("command-attachment-replay-project"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("command-attachment-replay-project"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Attachment replay",
+          workspaceRoot: "/tmp/project-attachment-replay",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      yield* appendCreated(retriedThreadId, "retried-first");
+      yield* appendDeleted(retriedThreadId, "retried");
+      yield* appendCreated(retriedThreadId, "retried-second");
+      yield* appendCreated(deletedThreadId, "deleted");
+      yield* appendDeleted(deletedThreadId, "deleted");
+
+      // Files are external to the event log. At replay time the retained file
+      // already belongs to the later incarnation.
+      yield* fileSystem.makeDirectory(attachmentsDir, { recursive: true });
+      yield* fileSystem.writeFileString(retriedAttachmentPath, "later incarnation");
+      yield* fileSystem.writeFileString(deletedAttachmentPath, "deleted incarnation");
+
+      yield* projectionPipeline.bootstrap;
+
+      assert.isTrue(yield* exists(retriedAttachmentPath));
+      assert.isFalse(yield* exists(deletedAttachmentPath));
+    }),
+  );
+});
+
+it.layer(
   Layer.fresh(makeProjectionPipelinePrefixedTestLayer("ryco-projection-attachments-delete-")),
 )("OrchestrationProjectionPipeline", (it) => {
   it.effect("ignores unsafe thread ids for attachment cleanup paths", () =>
@@ -2550,6 +2653,177 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
           defaultModelSelection: '{"instanceId":"codex","model":"gpt-5"}',
         },
       ]);
+    }),
+  );
+
+  it.effect("re-creating a deleted thread id starts from empty incarnation state", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const projectId = ProjectId.make("project-incarnation-retry");
+      const threadId = ThreadId.make("thread-incarnation-retry");
+      const modelSelection = {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      };
+      const createThread = (commandId: string, title: string) =>
+        engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(commandId),
+          threadId,
+          projectId,
+          title,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        });
+      const countRowsForThread = (table: string) =>
+        sql<{ readonly count: number }>`
+          SELECT COUNT(*) AS count
+          FROM ${sql(table)}
+          WHERE thread_id = ${threadId}
+        `.pipe(Effect.map((rows) => rows[0]?.count ?? 0));
+      const incarnationTables = [
+        "projection_thread_messages",
+        "projection_thread_activities",
+        "projection_thread_sessions",
+        "projection_turns",
+        "projection_thread_proposed_plans",
+        "projection_pending_approvals",
+        "projection_thread_user_input_requests",
+      ];
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-incarnation-project"),
+        projectId,
+        title: "Incarnation retry project",
+        workspaceRoot: "/tmp/project-incarnation-retry",
+        defaultModelSelection: modelSelection,
+        createdAt,
+      });
+      yield* createThread("cmd-incarnation-create-1", "First attempt");
+      yield* engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-incarnation-turn-1"),
+        threadId,
+        message: {
+          messageId: MessageId.make("message-incarnation-1"),
+          role: "user",
+          text: "first attempt",
+          attachments: [],
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-incarnation-approval-1"),
+        threadId,
+        activity: {
+          id: EventId.make("activity-incarnation-approval-1"),
+          tone: "info",
+          kind: "approval.requested",
+          summary: "approval requested",
+          payload: { requestId: "request-incarnation-approval-1" },
+          turnId: null,
+          createdAt,
+        },
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-incarnation-user-input-1"),
+        threadId,
+        activity: {
+          id: EventId.make("activity-incarnation-user-input-1"),
+          tone: "info",
+          kind: "user-input.requested",
+          summary: "input requested",
+          payload: { requestId: "request-incarnation-user-input-1" },
+          turnId: null,
+          createdAt,
+        },
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.proposed-plan.upsert",
+        commandId: CommandId.make("cmd-incarnation-plan-1"),
+        threadId,
+        proposedPlan: {
+          id: "plan-incarnation-1",
+          turnId: null,
+          planMarkdown: "# Plan",
+          implementedAt: null,
+          implementationThreadId: null,
+          createdAt,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-incarnation-session-1"),
+        threadId,
+        session: {
+          threadId,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "full-access",
+          activeTurnId: TurnId.make("turn-incarnation-1"),
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      });
+
+      for (const table of incarnationTables) {
+        assert.isAbove(yield* countRowsForThread(table), 0, `${table} should be populated`);
+      }
+
+      yield* engine.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("cmd-incarnation-delete"),
+        threadId,
+      });
+      yield* createThread("cmd-incarnation-create-2", "Second attempt");
+
+      const rows = yield* sql<{
+        readonly title: string;
+        readonly latestTurnId: string | null;
+        readonly pendingApprovalCount: number;
+        readonly pendingUserInputCount: number;
+        readonly hasActionableProposedPlan: number;
+        readonly deletedAt: string | null;
+      }>`
+        SELECT
+          title,
+          latest_turn_id AS "latestTurnId",
+          pending_approval_count AS "pendingApprovalCount",
+          pending_user_input_count AS "pendingUserInputCount",
+          has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          deleted_at AS "deletedAt"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+      assert.deepEqual(rows, [
+        {
+          title: "Second attempt",
+          latestTurnId: null,
+          pendingApprovalCount: 0,
+          pendingUserInputCount: 0,
+          hasActionableProposedPlan: 0,
+          deletedAt: null,
+        },
+      ]);
+      for (const table of incarnationTables) {
+        assert.strictEqual(yield* countRowsForThread(table), 0, `${table} should be empty`);
+      }
     }),
   );
 });

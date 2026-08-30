@@ -78,6 +78,10 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "./orchestration/Services/OrchestrationEngine.ts";
+import {
+  ThreadDeletionReactor,
+  type ThreadDeletionReactorShape,
+} from "./orchestration/Services/ThreadDeletionReactor.ts";
 import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
 import {
   ProjectionSnapshotQuery,
@@ -471,6 +475,7 @@ const buildAppUnderTest = (options?: {
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
+    threadDeletionReactor?: Partial<ThreadDeletionReactorShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     statisticsQuery?: Partial<StatisticsQueryShape>;
     projectionWorktreeRepository?: Partial<ProjectionWorktreeRepositoryShape>;
@@ -796,22 +801,29 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(OrchestrationEngineService)({
-          readEvents: () => Stream.empty,
-          readEventsPage: (fromSequenceExclusive) =>
-            Effect.succeed({
-              events: [],
-              nextSequence: fromSequenceExclusive,
-              hasMore: false,
+        Layer.mergeAll(
+          Layer.mock(OrchestrationEngineService)({
+            readEvents: () => Stream.empty,
+            readEventsPage: (fromSequenceExclusive) =>
+              Effect.succeed({
+                events: [],
+                nextSequence: fromSequenceExclusive,
+                hasMore: false,
+              }),
+            dispatch: () => Effect.succeed({ sequence: 0 }),
+            streamDomainEvents: Stream.empty,
+            subscribeDomainEvents: Effect.gen(function* () {
+              const pubsub = yield* PubSub.unbounded<OrchestrationEvent>();
+              return yield* PubSub.subscribe(pubsub);
             }),
-          dispatch: () => Effect.succeed({ sequence: 0 }),
-          streamDomainEvents: Stream.empty,
-          subscribeDomainEvents: Effect.gen(function* () {
-            const pubsub = yield* PubSub.unbounded<OrchestrationEvent>();
-            return yield* PubSub.subscribe(pubsub);
+            ...options?.layers?.orchestrationEngine,
           }),
-          ...options?.layers?.orchestrationEngine,
-        }),
+          Layer.mock(ThreadDeletionReactor)({
+            start: () => Effect.void,
+            drainThrough: () => Effect.void,
+            ...options?.layers?.threadDeletionReactor,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mergeAll(
@@ -6242,6 +6254,175 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         setupActivities.every((command) => command.activity.kind !== "setup-script.failed"),
       );
       assertTrue(dispatchedCommands.every((command) => command.type !== "thread.delete"));
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("fences deletion cleanup before a recreated thread can own resources", () =>
+    Effect.gen(function* () {
+      const trace: string[] = [];
+      let nextSequence = 1;
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                trace.push(`dispatch:${command.type}`);
+                return { sequence: nextSequence++ };
+              }),
+            readEvents: () => Stream.empty,
+          },
+          threadDeletionReactor: {
+            drainThrough: (sequence) => Effect.sync(() => trace.push(`drain:${sequence}`)),
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.create",
+            commandId: CommandId.make("cmd-direct-recreation-fence"),
+            threadId: ThreadId.make("thread-direct-recreation-fence"),
+            projectId: defaultProjectId,
+            title: "Direct recreation",
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+          }),
+        ),
+      );
+      assert.deepEqual(trace, ["dispatch:thread.create", "drain:1"]);
+
+      trace.length = 0;
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-bootstrap-recreation-fence"),
+            threadId: ThreadId.make("thread-bootstrap-recreation-fence"),
+            message: {
+              messageId: MessageId.make("message-bootstrap-recreation-fence"),
+              role: "user",
+              text: "retry",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "Bootstrap recreation",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: null,
+                worktreePath: null,
+                createdAt,
+              },
+              runSetupScript: false,
+            },
+            createdAt,
+          }),
+        ),
+      );
+      assert.deepEqual(trace, ["dispatch:thread.create", "drain:2", "dispatch:thread.turn.start"]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("retries first send with the same thread id after partial bootstrap failure", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-bootstrap-partial-retry");
+      const dispatched: OrchestrationCommand[] = [];
+      let failFirstTurnStart = true;
+      let nextSequence = 1;
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) => {
+              dispatched.push(command);
+              if (command.type === "thread.turn.start" && failFirstTurnStart) {
+                failFirstTurnStart = false;
+                return Effect.fail(
+                  new OrchestrationListenerCallbackError({
+                    listener: "domain-event",
+                    detail: "provider admission failed",
+                  }),
+                );
+              }
+              return Effect.succeed({ sequence: nextSequence++ });
+            },
+            readEvents: () => Stream.empty,
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const makeFirstSend = (commandId: string, messageId: string) => ({
+        type: "thread.turn.start" as const,
+        commandId: CommandId.make(commandId),
+        threadId,
+        message: {
+          messageId: MessageId.make(messageId),
+          role: "user" as const,
+          text: "retry",
+          attachments: [],
+        },
+        modelSelection: defaultModelSelection,
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        bootstrap: {
+          createThread: {
+            projectId: defaultProjectId,
+            title: "Partial bootstrap retry",
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access" as const,
+            interactionMode: "default" as const,
+            branch: null,
+            worktreePath: null,
+            createdAt,
+          },
+          runSetupScript: false,
+        },
+        createdAt,
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            const first = yield* Effect.result(
+              client[ORCHESTRATION_WS_METHODS.dispatchCommand](
+                makeFirstSend("cmd-bootstrap-partial-retry-1", "message-bootstrap-partial-retry-1"),
+              ),
+            );
+            assertTrue(first._tag === "Failure");
+
+            const second = yield* client[ORCHESTRATION_WS_METHODS.dispatchCommand](
+              makeFirstSend("cmd-bootstrap-partial-retry-2", "message-bootstrap-partial-retry-2"),
+            );
+            assert.equal(second.sequence, 4);
+          }),
+        ),
+      );
+
+      assert.deepEqual(
+        dispatched.map((command) => ({
+          type: command.type,
+          threadId: "threadId" in command ? command.threadId : null,
+        })),
+        [
+          { type: "thread.create", threadId },
+          { type: "thread.turn.start", threadId },
+          { type: "thread.delete", threadId },
+          { type: "thread.create", threadId },
+          { type: "thread.turn.start", threadId },
+        ],
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

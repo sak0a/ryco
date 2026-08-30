@@ -253,6 +253,36 @@ describe("commandInvariants", () => {
     ).rejects.toThrow("already exists");
   });
 
+  it("allows re-creating a thread id after the prior incarnation was deleted", async () => {
+    const threadId = ThreadId.make("thread-1");
+    const previous = readModel.threads.find((thread) => thread.id === threadId)!;
+    const afterDeletion: OrchestrationReadModel = {
+      ...readModel,
+      threads: readModel.threads.map((thread) =>
+        thread.id === threadId ? { ...thread, deletedAt: now, updatedAt: now } : thread,
+      ),
+    };
+    const retry: OrchestrationCommand = {
+      type: "thread.create",
+      commandId: CommandId.make("cmd-retry"),
+      threadId,
+      projectId: previous.projectId,
+      title: previous.title,
+      modelSelection: previous.modelSelection,
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "approval-required",
+      branch: null,
+      worktreePath: null,
+      createdAt: now,
+    };
+
+    await expect(
+      Effect.runPromise(
+        requireThreadAbsent({ readModel: afterDeletion, command: retry, threadId }),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it("requires non-negative integers", async () => {
     await Effect.runPromise(
       requireNonNegativeInteger({

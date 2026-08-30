@@ -32,6 +32,7 @@ import { makeOpenCodeMcpAdapter } from "../mcp/adapters/OpenCodeMcpAdapter.ts";
 import { makeProviderMcpRegistry } from "../mcp/ProviderMcpRegistry.ts";
 import { Open, resolveAvailableEditors } from "../open.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ThreadDeletionReactor } from "../orchestration/Services/ThreadDeletionReactor.ts";
 import { ContextHandoffInspection } from "../orchestration/Services/ContextHandoffInspection.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { StatisticsQuery } from "../statistics/StatisticsQuery.ts";
@@ -115,6 +116,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const usageServiceOption = yield* Effect.serviceOption(UsageService);
     const usageService = Option.getOrElse(usageServiceOption, () => UsageServiceTest);
     const orchestrationEngine = yield* OrchestrationEngineService;
+    const threadDeletionReactor = yield* ThreadDeletionReactor;
     // Most server route tests intentionally provide only the services used by
     // the RPC under test. Keep this additive capability optional at context
     // construction; production provides it in `makeServerWsRpcLayer`.
@@ -475,7 +477,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
 
         const bootstrapProgram = Effect.gen(function* () {
           if (bootstrap?.createThread) {
-            yield* orchestrationEngine.dispatch({
+            const created = yield* orchestrationEngine.dispatch({
               type: "thread.create",
               commandId: serverCommandId("bootstrap-thread-create"),
               threadId: command.threadId,
@@ -488,6 +490,10 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
               worktreePath: bootstrap.createThread.worktreePath,
               createdAt: bootstrap.createThread.createdAt,
             });
+            // The create event is an exact fence in the serialized command
+            // stream. Drain every earlier deletion before setup or turn start
+            // can acquire resources under the reused id.
+            yield* threadDeletionReactor.drainThrough(created.sequence);
             createdThread = true;
           }
 
@@ -552,13 +558,16 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       const dispatchEffect =
         normalizedCommand.type === "thread.turn.start" && normalizedCommand.bootstrap
           ? dispatchBootstrapTurnStart(normalizedCommand)
-          : orchestrationEngine
-              .dispatch(normalizedCommand)
-              .pipe(
-                Effect.mapError((cause) =>
-                  toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
-                ),
-              );
+          : orchestrationEngine.dispatch(normalizedCommand).pipe(
+              Effect.tap(({ sequence }) =>
+                normalizedCommand.type === "thread.create"
+                  ? threadDeletionReactor.drainThrough(sequence)
+                  : Effect.void,
+              ),
+              Effect.mapError((cause) =>
+                toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
+              ),
+            );
 
       return startup
         .enqueueCommand(dispatchEffect)

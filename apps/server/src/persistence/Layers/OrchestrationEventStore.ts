@@ -14,7 +14,7 @@ import {
 } from "@ryco/contracts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Option, Schema, Stream } from "effect";
 
 import {
   toPersistenceDecodeError,
@@ -56,6 +56,13 @@ const OrchestrationEventPersistedRowSchema = Schema.Struct({
   correlationId: Schema.NullOr(CommandId),
   payload: UnknownFromJsonString,
   metadata: EventMetadataFromJsonString,
+});
+
+const HasEventAfterRequestSchema = Schema.Struct({
+  aggregateKind: OrchestrationAggregateKind,
+  aggregateId: Schema.String,
+  type: OrchestrationEventType,
+  sequenceExclusive: NonNegativeInt,
 });
 
 const ReadFromSequenceRequestSchema = Schema.Struct({
@@ -193,6 +200,22 @@ const makeEventStore = Effect.gen(function* () {
       ORDER BY sequence DESC
       LIMIT ${limit}
     `,
+  });
+
+  const findEventAfter = SqlSchema.findOneOption({
+    Request: HasEventAfterRequestSchema,
+    Result: Schema.Struct({ sequence: NonNegativeInt }),
+    execute: (request) =>
+      sql`
+        SELECT sequence
+        FROM orchestration_events
+        WHERE aggregate_kind = ${request.aggregateKind}
+          AND stream_id = ${request.aggregateId}
+          AND event_type = ${request.type}
+          AND sequence > ${request.sequenceExclusive}
+        ORDER BY sequence ASC
+        LIMIT 1
+      `,
   });
 
   const append: OrchestrationEventStoreShape["append"] = (event) =>
@@ -338,12 +361,24 @@ const makeEventStore = Effect.gen(function* () {
       ),
     );
 
+  const hasEventAfter: OrchestrationEventStoreShape["hasEventAfter"] = (input) =>
+    findEventAfter(input).pipe(
+      Effect.map(Option.isSome),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "OrchestrationEventStore.hasEventAfter:query",
+          "OrchestrationEventStore.hasEventAfter:decodeRow",
+        ),
+      ),
+    );
+
   return {
     append,
     readPage,
     readRecent,
     readFromSequence,
     readAll: () => readFromSequence(0, Number.MAX_SAFE_INTEGER),
+    hasEventAfter,
   } satisfies OrchestrationEventStoreShape;
 });
 

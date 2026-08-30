@@ -80,6 +80,11 @@ export interface ProjectionPendingApprovalRepositoryShape {
   readonly deleteByRequestId: (
     input: DeleteProjectionPendingApprovalInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /** Delete every pending approval belonging to a thread incarnation. */
+  readonly deleteByThreadId: (
+    input: ListProjectionPendingApprovalsInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 /**
