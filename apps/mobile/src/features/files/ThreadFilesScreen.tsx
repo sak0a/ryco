@@ -16,6 +16,7 @@ import { EnvironmentId, ThreadId } from "@ryco/contracts";
 
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
+import { NavigationHeaderButton } from "../../components/NavigationHeaderButton";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { cn } from "../../lib/cn";
@@ -294,18 +295,13 @@ export function ThreadFilesScreen(props: {
       // compact browser back on this SAME route.
       title: "Files",
       headerRight: undefined,
-      headerLeft: navigation.canGoBack()
-        ? undefined
-        : () => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Back to task"
-              onPress={goToThread}
-              className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
-            >
-              <SymbolView name="chevron.left" size={19} tintColor={iconColor} type="monochrome" />
-            </Pressable>
-          ),
+      headerLeft: () => (
+        <NavigationHeaderButton
+          action="back"
+          accessibilityLabel="Back to task"
+          onPress={() => (navigation.canGoBack() ? navigation.goBack() : goToThread())}
+        />
+      ),
     });
   }, [goToThread, iconColor, navigation, presentation]);
 

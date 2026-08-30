@@ -30,6 +30,7 @@ import { EnvironmentId, ThreadId } from "@ryco/contracts";
 
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
+import { NavigationHeaderButton } from "../../components/NavigationHeaderButton";
 import { CopyTextButton } from "../../components/CopyTextButton";
 import { EmptyState } from "../../components/EmptyState";
 import { cn } from "../../lib/cn";
@@ -749,18 +750,13 @@ export function ThreadFileScreen(props: {
       ),
       // A deep link straight to a file has nothing beneath it; the browser is
       // where its "back" belongs.
-      headerLeft: navigation.canGoBack()
-        ? undefined
-        : () => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Back to files"
-              onPress={goToFiles}
-              className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
-            >
-              <SymbolView name="chevron.left" size={19} tintColor={iconColor} type="monochrome" />
-            </Pressable>
-          ),
+      headerLeft: () => (
+        <NavigationHeaderButton
+          action="back"
+          accessibilityLabel="Back to files"
+          onPress={() => (navigation.canGoBack() ? navigation.goBack() : goToFiles())}
+        />
+      ),
     });
   }, [
     goToFiles,

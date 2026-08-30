@@ -193,6 +193,23 @@ describe("MVP route config", () => {
     }
   });
 
+  it("gives every visible native header an explicit navigation action", () => {
+    for (const [name, descriptor] of Object.entries(MVP_ROOT_ROUTES)) {
+      if (descriptor.headerPreset === "none" || name === "Home") {
+        expect(descriptor.headerAction, name).toBe("none");
+      } else {
+        expect(["back", "close"], name).toContain(descriptor.headerAction);
+      }
+    }
+
+    expect(MVP_ROOT_ROUTES.AddProject.headerAction).toBe("close");
+    expect(MVP_ROOT_ROUTES.ConnectionsNew.headerAction).toBe("back");
+    expect(MVP_SETTINGS_SHEET_ROUTES.Settings.headerAction).toBe("none");
+    for (const [name, descriptor] of Object.entries(MVP_SETTINGS_SHEET_ROUTES)) {
+      if (name !== "Settings") expect(descriptor.headerAction, name).toBe("back");
+    }
+  });
+
   it("keeps every nested settings linking path distinct", () => {
     const paths = Object.values(MVP_SETTINGS_SHEET_ROUTES).map((route) => route.linking);
     expect(new Set(paths).size).toBe(paths.length);
@@ -253,5 +270,24 @@ describe("the settings navigator matches the settings route table", () => {
     );
     expect(security).toContain('StackActions.push("SettingsNodeVerification"');
     expect(security).toContain("exactNodeRouteParams(target.node)");
+  });
+
+  it("keeps an explicit dismissal control on every headerless workspace overlay", () => {
+    const dismissalControls = {
+      Connections: ["features/nodes/NodesScreen.tsx", 'accessibilityLabel="Close Machines"'],
+      ThreadReviewComment: [
+        "features/review/ReviewCommentComposerSheet.tsx",
+        'accessibilityLabel="Cancel review comment"',
+      ],
+      SettingsSheet: [
+        "features/settings/SettingsRouteScreen.tsx",
+        'accessibilityLabel="Close Settings"',
+      ],
+    } as const;
+
+    for (const [name, [path, marker]] of Object.entries(dismissalControls)) {
+      expect(MVP_ROOT_ROUTES[name as keyof typeof MVP_ROOT_ROUTES].headerPreset, name).toBe("none");
+      expect(readFileSync(join(SRC, path), "utf8"), name).toContain(marker);
+    }
   });
 });
