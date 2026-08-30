@@ -13,6 +13,8 @@ const hoisted = vi.hoisted(() => ({
   clearMobileHostedSessionToken: vi.fn(async () => undefined),
   invalidateMobileHostedRuntime: vi.fn(),
   ensureMobileHostedSession: vi.fn(async () => undefined),
+  parentDispatch: vi.fn(),
+  stackReplace: vi.fn((name: string) => ({ type: "STACK_REPLACE", payload: { name } })),
   order: [] as string[],
   mountEffects: [] as (() => void)[],
 }));
@@ -29,7 +31,11 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 vi.mock("@react-navigation/native", () => ({
-  useNavigation: () => ({ navigate: () => undefined, getParent: () => null }),
+  StackActions: { replace: hoisted.stackReplace },
+  useNavigation: () => ({
+    navigate: () => undefined,
+    getParent: () => ({ dispatch: hoisted.parentDispatch }),
+  }),
 }));
 vi.mock("expo-sqlite/kv-store", () => ({
   default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
@@ -102,6 +108,28 @@ function findProps(node: unknown, type: string): Record<string, unknown> | null 
   return findProps((element.props as { children?: unknown } | undefined)?.children, type);
 }
 
+function findPropsByLabel(
+  node: unknown,
+  type: string,
+  label: string,
+): Record<string, unknown> | null {
+  if (node === null || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findPropsByLabel(child, type, label);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  const element = node as ReactElement<Record<string, unknown>>;
+  if (element.type === type && element.props.label === label) return element.props;
+  return findPropsByLabel(
+    (element.props as { children?: unknown } | undefined)?.children,
+    type,
+    label,
+  );
+}
+
 beforeEach(async () => {
   hoisted.order.length = 0;
   hoisted.mountEffects.length = 0;
@@ -134,5 +162,21 @@ describe("Hub domain change", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(hoisted.forgetHubOrigin).not.toHaveBeenCalled();
+  });
+});
+
+describe("Hub settings navigation", () => {
+  it("replaces the Settings root with Machines instead of navigating underneath it", () => {
+    const row = findPropsByLabel(SettingsHubRouteScreen(), "SettingsRow", "Machines");
+
+    expect(typeof row?.onPress).toBe("function");
+    if (typeof row?.onPress !== "function") throw new Error("Machines row is not actionable");
+    row.onPress();
+
+    expect(hoisted.stackReplace).toHaveBeenCalledWith("Connections");
+    expect(hoisted.parentDispatch).toHaveBeenCalledWith({
+      type: "STACK_REPLACE",
+      payload: { name: "Connections" },
+    });
   });
 });

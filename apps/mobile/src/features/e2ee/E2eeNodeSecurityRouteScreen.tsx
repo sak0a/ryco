@@ -89,6 +89,16 @@ export function E2eeNodeSecurityRouteScreen(props: Props) {
       className="flex-1 bg-screen"
       contentContainerStyle={{ paddingTop: 4, paddingBottom: 40 }}
     >
+      <View
+        accessibilityLabel={`Machine: ${target.node.label}`}
+        className="mx-5 mt-2 mb-3 rounded-2xl border border-border bg-card px-4 py-3"
+      >
+        <Text className="font-sans text-xs font-ryco-medium text-foreground-muted">Machine</Text>
+        <Text className="mt-1 font-sans text-sm font-ryco-bold text-foreground">
+          {target.node.label}
+        </Text>
+      </View>
+
       <E2eeChannelCard claim={view.claim} label={view.channelLabel} message={view.channelMessage} />
 
       {/* §13.2.1: the surface names the selection and says which of the three

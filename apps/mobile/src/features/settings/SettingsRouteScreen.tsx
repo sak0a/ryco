@@ -8,6 +8,7 @@ import { useHostedHubStore } from "../../hostedHub/state";
 import { exactNodeRouteParams } from "../e2ee/exactNodeRouteModel";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
+import { openMachinesFromSettings } from "./openMachinesFromSettings";
 
 export function SettingsRouteScreen() {
   const navigation = useNavigation();
@@ -59,7 +60,7 @@ export function SettingsRouteScreen() {
               );
               return;
             }
-            navigation.getParent()?.navigate("Connections" as never);
+            openMachinesFromSettings(navigation);
           }}
         />
       </SettingsSection>
