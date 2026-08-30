@@ -97,11 +97,11 @@ npx ryco-cli
 
 Get the latest installer from [GitHub Releases](https://github.com/sak0a/ryco/releases) or use a package manager:
 
-| Platform | Format              | Install                                 |
-| -------- | ------------------- | --------------------------------------- |
-| macOS    | `.dmg` (arm64, x64) | Run `Install Ryco.command` from the DMG |
-| Linux    | `.AppImage` (x64)   | `yay -S ryco-bin` (AUR)                 |
-| Windows  | NSIS `.exe` (x64)   | Download from Releases                  |
+| Platform | Format                 | Install                                 |
+| -------- | ---------------------- | --------------------------------------- |
+| macOS    | `.dmg` (Apple Silicon) | Run `Install Ryco.command` from the DMG |
+| Linux    | `.AppImage` (x64)      | `yay -S ryco-bin` (AUR)                 |
+| Windows  | NSIS `.exe` (x64)      | Download from Releases                  |
 
 macOS releases are currently unsigned and not notarized because Apple requires a paid Developer ID account for notarization. If macOS says Ryco is damaged, use the `Install Ryco.command` helper included in the DMG or run:
 

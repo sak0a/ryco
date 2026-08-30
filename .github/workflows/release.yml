@@ -140,11 +140,6 @@ jobs:
             platform: mac
             target: dmg
             arch: arm64
-          - label: macOS x64
-            runner: macos-15-intel
-            platform: mac
-            target: dmg
-            arch: x64
           - label: Linux x64
             runner: ubuntu-24.04
             platform: linux
@@ -416,17 +411,6 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: release-assets
-
-      - name: Merge macOS updater manifests
-        run: |
-          shopt -s nullglob
-          for x64_manifest in release-assets/*-mac-x64.yml; do
-            arm64_manifest="${x64_manifest%-x64.yml}.yml"
-            if [[ -f "$arm64_manifest" ]]; then
-              node scripts/merge-update-manifests.ts --platform mac "$arm64_manifest" "$x64_manifest"
-              rm -f "$x64_manifest"
-            fi
-          done
 
       - name: Merge Windows updater manifests
         run: |
