@@ -54,7 +54,7 @@ const baseProps = {
   workspaceRoot: undefined,
 };
 
-describe("overview panel layouts", () => {
+describe("overview panel Status Board", () => {
   beforeEach(() => {
     Reflect.deleteProperty(globalThis, "localStorage");
   });
@@ -63,25 +63,8 @@ describe("overview panel layouts", () => {
     Reflect.deleteProperty(globalThis, "localStorage");
   });
 
-  it("renders the stack layout by default (sticky metric strip, no tiles)", () => {
-    const markup = renderToStaticMarkup(<PlanSidebar {...baseProps} />);
-    expect(markup).toContain("Changes");
-    expect(markup).toContain("Diff");
-    expect(markup).not.toContain("grid-cols-2");
-    expect(markup).not.toContain('aria-expanded="true"');
-  });
-
-  it("renders glanceable metric tiles in the hybrid layout", () => {
+  it("ignores a retired layout preference and renders expandable Status Board lanes", () => {
     setPanelLayout("hybrid");
-    const markup = renderToStaticMarkup(<PlanSidebar {...baseProps} />);
-    expect(markup).toContain("grid-cols-4");
-    expect(markup).toContain("Diff");
-    expect(markup).toContain("Plan");
-    expect(markup).not.toContain('aria-expanded="true"');
-  });
-
-  it("renders expandable lanes in the status board layout", () => {
-    setPanelLayout("board");
     const markup = renderToStaticMarkup(<PlanSidebar {...baseProps} />);
     expect(markup).not.toContain('aria-expanded="true"');
     expect(markup).toContain('data-slot="overview-section-lane-header"');
@@ -91,7 +74,6 @@ describe("overview panel layouts", () => {
   });
 
   it("renders environment metadata once without an empty disclosure", () => {
-    setPanelLayout("board");
     const markup = renderToStaticMarkup(
       <PlanSidebar
         {...baseProps}
@@ -111,7 +93,6 @@ describe("overview panel layouts", () => {
   });
 
   it("keeps a distinct environment status visible once", () => {
-    setPanelLayout("board");
     const markup = renderToStaticMarkup(
       <PlanSidebar
         {...baseProps}
@@ -134,7 +115,6 @@ describe("overview panel layouts", () => {
   });
 
   it("renders an independent pull request link only when a URL exists", () => {
-    setPanelLayout("board");
     const pullRequest = {
       number: 264,
       title: "Make the status board compact",

@@ -5,14 +5,11 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 import PlanSidebar from "./PlanSidebar";
-import { APPEARANCE_PREFERENCES_STORAGE_KEY } from "../themes/appearancePreferences";
 import type { ThreadSubagentView } from "../threadWorkspaceViewModel";
 
 describe("PlanSidebar overview panel", () => {
-  // PlanSidebar reads `panelLayout` from persisted appearance preferences; keep
-  // these cases on the default (stack) layout regardless of prior tests.
   beforeEach(() => {
-    localStorage.removeItem(APPEARANCE_PREFERENCES_STORAGE_KEY);
+    localStorage.clear();
   });
   it("keeps the sidebar content-sized when overview content is short", async () => {
     const host = document.createElement("div");
@@ -124,7 +121,7 @@ describe("PlanSidebar overview panel", () => {
     }
   });
 
-  it("renders pull request checks inline in an expanded section", async () => {
+  it("renders pull request checks after expanding the Status Board lane", async () => {
     const host = document.createElement("div");
     host.style.width = "380px";
     host.style.height = "640px";
@@ -168,6 +165,13 @@ describe("PlanSidebar overview panel", () => {
     );
 
     try {
+      const checksButton = Array.from(
+        host.querySelectorAll<HTMLButtonElement>("button[aria-expanded]"),
+      ).find((button) => (button.textContent ?? "").includes("Checks"));
+      expect(checksButton).toBeDefined();
+      checksButton!.click();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
       const text = host.textContent ?? "";
       expect(text).toContain("#124");
       expect(text).toContain("Branch");
@@ -183,11 +187,6 @@ describe("PlanSidebar overview panel", () => {
   });
 
   it("keeps status-board lanes compact and separates the pull request link", async () => {
-    localStorage.setItem(
-      APPEARANCE_PREFERENCES_STORAGE_KEY,
-      JSON.stringify({ panelLayout: "board" }),
-    );
-
     const host = document.createElement("div");
     host.style.width = "380px";
     host.style.height = "640px";
