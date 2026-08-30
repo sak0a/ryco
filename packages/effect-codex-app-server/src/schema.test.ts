@@ -4,6 +4,73 @@ import { describe, expect, it } from "vite-plus/test";
 import * as CodexSchema from "./schema.ts";
 
 describe("Codex app-server schema compatibility", () => {
+  it("accepts Codex 0.150 multi-agent values", () => {
+    const activityKindSchemas = [
+      CodexSchema.ServerNotification__SubAgentActivityKind,
+      CodexSchema.V2ItemStartedNotification__SubAgentActivityKind,
+      CodexSchema.V2ItemCompletedNotification__SubAgentActivityKind,
+      CodexSchema.V2ThreadReadResponse__SubAgentActivityKind,
+      CodexSchema.V2ThreadResumeResponse__SubAgentActivityKind,
+    ];
+
+    for (const schema of activityKindSchemas) {
+      expect(Schema.is(schema)("completed")).toBe(true);
+    }
+
+    for (const tool of ["sendMessage", "followupTask", "interruptAgent", "listAgents"]) {
+      expect(Schema.is(CodexSchema.ServerNotification__CollabAgentTool)(tool)).toBe(true);
+      expect(Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentTool)(tool)).toBe(true);
+    }
+
+    expect(
+      Schema.is(CodexSchema.ServerNotification__CollabAgentToolCallStatus)("interrupted"),
+    ).toBe(true);
+    expect(
+      Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentToolCallStatus)("interrupted"),
+    ).toBe(true);
+
+    expect(
+      Schema.is(CodexSchema.V2ThreadResumeResponse)({
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
+        cwd: "/tmp/project",
+        model: "gpt-5.6-sol",
+        modelProvider: "openai",
+        sandbox: { type: "dangerFullAccess" },
+        thread: {
+          cliVersion: "0.150.0",
+          createdAt: 0,
+          cwd: "/tmp/project",
+          ephemeral: false,
+          id: "root-thread",
+          modelProvider: "openai",
+          preview: "",
+          sessionId: "session-1",
+          source: "cli",
+          status: { type: "idle" },
+          turns: [
+            {
+              id: "turn-1",
+              status: "completed",
+              items: [
+                {
+                  agentsStates: {},
+                  id: "item-1",
+                  receiverThreadIds: ["child-thread"],
+                  senderThreadId: "root-thread",
+                  status: "interrupted",
+                  tool: "followupTask",
+                  type: "collabAgentToolCall",
+                },
+              ],
+            },
+          ],
+          updatedAt: 0,
+        },
+      }),
+    ).toBe(true);
+  });
+
   it("accepts max and ultra reasoning efforts in model-list responses", () => {
     const decoded = Schema.decodeUnknownSync(CodexSchema.V2ModelListResponse)({
       data: [
