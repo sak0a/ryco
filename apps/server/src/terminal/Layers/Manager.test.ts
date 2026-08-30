@@ -199,7 +199,10 @@ interface CreateManagerOptions {
   shellResolver?: () => string;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
-  subprocessChecker?: (terminalPid: number) => Effect.Effect<boolean>;
+  processTableSnapshotter?: () => Effect.Effect<
+    { readonly childrenByParent: ReadonlyMap<number, ReadonlyArray<number>> },
+    Error
+  >;
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
@@ -241,8 +244,8 @@ const createManager = (
         ...(options.shellResolver !== undefined ? { shellResolver: options.shellResolver } : {}),
         ...(options.platform !== undefined ? { platform: options.platform } : {}),
         ...(options.env !== undefined ? { env: options.env } : {}),
-        ...(options.subprocessChecker !== undefined
-          ? { subprocessChecker: options.subprocessChecker }
+        ...(options.processTableSnapshotter !== undefined
+          ? { processTableSnapshotter: options.processTableSnapshotter }
           : {}),
         ...(options.subprocessPollIntervalMs !== undefined
           ? { subprocessPollIntervalMs: options.subprocessPollIntervalMs }
@@ -614,7 +617,12 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
     Effect.gen(function* () {
       let hasRunningSubprocess = false;
       const { manager, getEvents } = yield* createManager(5, {
-        subprocessChecker: () => Effect.succeed(hasRunningSubprocess),
+        processTableSnapshotter: () =>
+          Effect.succeed({
+            childrenByParent: hasRunningSubprocess
+              ? new Map([[9000, [100]]])
+              : new Map<number, number[]>(),
+          }),
         subprocessPollIntervalMs: 20,
       });
 
@@ -641,23 +649,103 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
 
   it.effect("does not invoke subprocess polling until a terminal session is running", () =>
     Effect.gen(function* () {
-      let checks = 0;
+      let snapshots = 0;
       const { manager } = yield* createManager(5, {
-        subprocessChecker: () => {
-          checks += 1;
-          return Effect.succeed(false);
+        processTableSnapshotter: () => {
+          snapshots += 1;
+          return Effect.succeed({ childrenByParent: new Map() });
         },
         subprocessPollIntervalMs: 20,
       });
 
       yield* Effect.sleep("80 millis");
-      assert.equal(checks, 0);
+      assert.equal(snapshots, 0);
 
       yield* manager.open(openInput());
       yield* waitFor(
-        Effect.sync(() => checks > 0),
+        Effect.sync(() => snapshots > 0),
         "1200 millis",
       );
+    }),
+  );
+
+  it.effect("derives activity for multiple terminals from one process-table snapshot", () =>
+    Effect.gen(function* () {
+      let snapshotCalls = 0;
+      let recordSnapshots = false;
+      const { manager, getEvents } = yield* createManager(5, {
+        processTableSnapshotter: () => {
+          if (recordSnapshots) snapshotCalls += 1;
+          return Effect.succeed({
+            childrenByParent: recordSnapshots
+              ? new Map([
+                  [9000, [100]],
+                  [9001, [200]],
+                ])
+              : new Map<number, number[]>(),
+          });
+        },
+        subprocessPollIntervalMs: 1_000,
+      });
+
+      yield* manager.open(openInput());
+      yield* manager.open(openInput({ threadId: "thread-2" }));
+
+      // The initial wake-up may race the second open. Start counting after it
+      // has completed, when both running terminals are present for one tick.
+      yield* Effect.sleep("50 millis");
+      recordSnapshots = true;
+
+      yield* waitFor(
+        Effect.map(getEvents, (events) => {
+          const activeThreads = new Set(
+            events
+              .filter((event) => event.type === "activity" && event.hasRunningSubprocess === true)
+              .map((event) => event.threadId),
+          );
+          return activeThreads.has("thread-1") && activeThreads.has("thread-2");
+        }),
+        "1500 millis",
+      );
+
+      assert.equal(snapshotCalls, 1);
+    }),
+  );
+
+  it.effect("keeps last known activity when process-table enumeration fails", () =>
+    Effect.gen(function* () {
+      let failSnapshot = false;
+      let failedSnapshots = 0;
+      const { manager, getEvents } = yield* createManager(5, {
+        processTableSnapshotter: () => {
+          if (failSnapshot) {
+            failedSnapshots += 1;
+            return Effect.fail(new Error("simulated process snapshot failure"));
+          }
+          return Effect.succeed({
+            childrenByParent: new Map([[9000, [100]]]),
+          });
+        },
+        subprocessPollIntervalMs: 20,
+      });
+
+      yield* manager.open(openInput());
+      yield* waitFor(
+        Effect.map(getEvents, (events) =>
+          events.some((event) => event.type === "activity" && event.hasRunningSubprocess === true),
+        ),
+        "1200 millis",
+      );
+
+      failSnapshot = true;
+      yield* waitFor(
+        Effect.sync(() => failedSnapshots >= 2),
+        "1200 millis",
+      );
+
+      const activityEvents = (yield* getEvents).filter((event) => event.type === "activity");
+      expect(activityEvents.length).toBeGreaterThan(0);
+      expect(activityEvents.every((event) => event.hasRunningSubprocess === true)).toBe(true);
     }),
   );
 

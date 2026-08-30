@@ -74,8 +74,10 @@ class TerminalSubprocessCheckError extends Schema.TaggedError<TerminalSubprocess
   {
     message: Schema.String,
     cause: Schema.optional(Schema.Defect()),
-    terminalPid: Schema.Number,
-    command: Schema.Literals(["powershell", "pgrep", "ps"]),
+    command: Schema.Literals(["powershell", "ps"]),
+    exitCode: Schema.optional(Schema.NullOr(Schema.Number)),
+    timedOut: Schema.optional(Schema.Boolean),
+    stdoutTruncated: Schema.optional(Schema.Boolean),
   },
 ) {}
 
@@ -88,8 +90,12 @@ class TerminalProcessSignalError extends Schema.TaggedError<TerminalProcessSigna
   },
 ) {}
 
-interface TerminalSubprocessChecker {
-  (terminalPid: number): Effect.Effect<boolean, TerminalSubprocessCheckError>;
+interface TerminalProcessTableSnapshot {
+  readonly childrenByParent: ReadonlyMap<number, ReadonlyArray<number>>;
+}
+
+interface TerminalProcessTableSnapshotter {
+  (): Effect.Effect<TerminalProcessTableSnapshot, TerminalSubprocessCheckError | Error>;
 }
 
 interface ShellCandidate {
@@ -512,107 +518,111 @@ function isRetryableShellSpawnError(error: PtySpawnError): boolean {
   );
 }
 
-function checkWindowsSubprocessActivity(
-  terminalPid: number,
-): Effect.Effect<boolean, TerminalSubprocessCheckError> {
-  const command = [
-    `$children = Get-CimInstance Win32_Process -Filter "ParentProcessId = ${terminalPid}" -ErrorAction SilentlyContinue`,
-    "if ($children) { exit 0 }",
-    "exit 1",
-  ].join("; ");
-  return Effect.tryPromise({
-    try: () =>
-      runProcess("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
-        timeoutMs: 1_500,
-        allowNonZeroExit: true,
-        maxBufferBytes: 32_768,
-        outputMode: "truncate",
-      }),
-    catch: (cause) =>
-      new TerminalSubprocessCheckError({
-        message: "Failed to check Windows terminal subprocess activity.",
-        cause,
-        terminalPid,
-        command: "powershell",
-      }),
-  }).pipe(Effect.map((result) => result.code === 0));
+function parsePosixProcessTable(stdout: string): TerminalProcessTableSnapshot {
+  const childrenByParent = new Map<number, number[]>();
+  for (const line of stdout.split(/\r?\n/g)) {
+    const match = /^\s*(\d+)\s+(\d+)(?:\s|$)/.exec(line);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const parentPid = Number(match[2]);
+    if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) continue;
+    const children = childrenByParent.get(parentPid) ?? [];
+    children.push(pid);
+    childrenByParent.set(parentPid, children);
+  }
+  return { childrenByParent };
 }
 
-const checkPosixSubprocessActivity = Effect.fn("terminal.checkPosixSubprocessActivity")(function* (
-  terminalPid: number,
-): Effect.fn.Return<boolean, TerminalSubprocessCheckError> {
-  const runPgrep = Effect.tryPromise({
-    try: () =>
-      runProcess("pgrep", ["-P", String(terminalPid)], {
-        timeoutMs: 1_000,
-        allowNonZeroExit: true,
-        maxBufferBytes: 32_768,
-        outputMode: "truncate",
-      }),
-    catch: (cause) =>
-      new TerminalSubprocessCheckError({
-        message: "Failed to inspect terminal subprocesses with pgrep.",
-        cause,
-        terminalPid,
-        command: "pgrep",
-      }),
-  });
+function parseWindowsProcessTable(stdout: string): TerminalProcessTableSnapshot {
+  const childrenByParent = new Map<number, number[]>();
+  for (const line of stdout.split(/\r?\n/g)) {
+    const [pidRaw, parentPidRaw] = line.trim().split("|", 2);
+    const pid = Number(pidRaw);
+    const parentPid = Number(parentPidRaw);
+    if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) continue;
+    const children = childrenByParent.get(parentPid) ?? [];
+    children.push(pid);
+    childrenByParent.set(parentPid, children);
+  }
+  return { childrenByParent };
+}
 
-  const runPs = Effect.tryPromise({
+const POSIX_PS_ABSOLUTE_PATHS = ["/bin/ps", "/usr/bin/ps"] as const;
+
+const resolvePosixPsCommand = Effect.fn("terminal.resolvePosixPsCommand")(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  for (const candidate of POSIX_PS_ABSOLUTE_PATHS) {
+    const exists = yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false));
+    if (exists) return candidate;
+  }
+  return "ps";
+});
+
+const snapshotPosixProcessTable = Effect.fn("terminal.snapshotPosixProcessTable")(function* (
+  psCommand: string,
+): Effect.fn.Return<TerminalProcessTableSnapshot, TerminalSubprocessCheckError> {
+  const result = yield* Effect.tryPromise({
     try: () =>
-      runProcess("ps", ["-eo", "pid=,ppid="], {
+      runProcess(psCommand, ["-eo", "pid=,ppid="], {
         timeoutMs: 1_000,
         allowNonZeroExit: true,
-        maxBufferBytes: 262_144,
+        maxBufferBytes: 524_288,
         outputMode: "truncate",
       }),
     catch: (cause) =>
       new TerminalSubprocessCheckError({
-        message: "Failed to inspect terminal subprocesses with ps.",
+        message: "Failed to snapshot POSIX processes.",
         cause,
-        terminalPid,
         command: "ps",
       }),
   });
 
-  const pgrepResult = yield* Effect.exit(runPgrep);
-  if (pgrepResult._tag === "Success") {
-    if (pgrepResult.value.code === 0) {
-      return pgrepResult.value.stdout.trim().length > 0;
-    }
-    if (pgrepResult.value.code === 1) {
-      return false;
-    }
+  if (result.code !== 0 || result.timedOut || result.stdoutTruncated) {
+    return yield* new TerminalSubprocessCheckError({
+      message: "POSIX process snapshot was incomplete.",
+      command: "ps",
+      exitCode: result.code,
+      timedOut: result.timedOut,
+      stdoutTruncated: result.stdoutTruncated,
+    });
   }
-
-  const psResult = yield* Effect.exit(runPs);
-  if (psResult._tag === "Failure" || psResult.value.code !== 0) {
-    return false;
-  }
-
-  for (const line of psResult.value.stdout.split(/\r?\n/g)) {
-    const [pidRaw, ppidRaw] = line.trim().split(/\s+/g);
-    const pid = Number(pidRaw);
-    const ppid = Number(ppidRaw);
-    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
-    if (ppid === terminalPid) {
-      return true;
-    }
-  }
-  return false;
+  return parsePosixProcessTable(result.stdout);
 });
 
-const defaultSubprocessChecker = Effect.fn("terminal.defaultSubprocessChecker")(function* (
-  terminalPid: number,
-): Effect.fn.Return<boolean, TerminalSubprocessCheckError> {
-  if (!Number.isInteger(terminalPid) || terminalPid <= 0) {
-    return false;
-  }
-  if (process.platform === "win32") {
-    return yield* checkWindowsSubprocessActivity(terminalPid);
-  }
-  return yield* checkPosixSubprocessActivity(terminalPid);
-});
+const snapshotWindowsProcessTable = Effect.fn("terminal.snapshotWindowsProcessTable")(
+  function* (): Effect.fn.Return<TerminalProcessTableSnapshot, TerminalSubprocessCheckError> {
+    const command = [
+      "$processes = Get-CimInstance Win32_Process -ErrorAction Stop",
+      'foreach ($process in $processes) { Write-Output "$($process.ProcessId)|$($process.ParentProcessId)" }',
+    ].join("; ");
+    const result = yield* Effect.tryPromise({
+      try: () =>
+        runProcess("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+          timeoutMs: 1_500,
+          allowNonZeroExit: true,
+          maxBufferBytes: 524_288,
+          outputMode: "truncate",
+        }),
+      catch: (cause) =>
+        new TerminalSubprocessCheckError({
+          message: "Failed to snapshot Windows processes.",
+          cause,
+          command: "powershell",
+        }),
+    });
+
+    if (result.code !== 0 || result.timedOut || result.stdoutTruncated) {
+      return yield* new TerminalSubprocessCheckError({
+        message: "Windows process snapshot was incomplete.",
+        command: "powershell",
+        exitCode: result.code,
+        timedOut: result.timedOut,
+        stdoutTruncated: result.stdoutTruncated,
+      });
+    }
+    return parseWindowsProcessTable(result.stdout);
+  },
+);
 
 function capHistory(history: string, maxLines: number): string {
   if (history.length === 0) return history;
@@ -861,7 +871,7 @@ interface TerminalManagerOptions {
   shellResolver?: () => string;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
-  subprocessChecker?: TerminalSubprocessChecker;
+  processTableSnapshotter?: TerminalProcessTableSnapshotter;
   subprocessPollIntervalMs?: number;
   processKillGraceMs?: number;
   maxRetainedInactiveSessions?: number;
@@ -892,7 +902,15 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
     const platform = options.platform ?? process.platform;
     const baseEnv = options.env ?? process.env;
     const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
-    const subprocessChecker = options.subprocessChecker ?? defaultSubprocessChecker;
+    const posixPsCommand =
+      options.processTableSnapshotter === undefined && platform !== "win32"
+        ? yield* resolvePosixPsCommand()
+        : null;
+    const processTableSnapshotter =
+      options.processTableSnapshotter ??
+      (platform === "win32"
+        ? snapshotWindowsProcessTable
+        : () => snapshotPosixProcessTable(posixPsCommand ?? "ps"));
     const subprocessPollIntervalMs =
       options.subprocessPollIntervalMs ?? DEFAULT_SUBPROCESS_POLL_INTERVAL_MS;
     const processKillGraceMs = options.processKillGraceMs ?? DEFAULT_PROCESS_KILL_GRACE_MS;
@@ -1754,25 +1772,30 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         return;
       }
 
+      // One process-table enumeration serves every running terminal in this
+      // tick. Spawning pgrep/ps per session scales with terminal count and can
+      // create enough short-lived processes to exhaust host PID capacity.
+      const processTable = yield* processTableSnapshotter().pipe(
+        Effect.map(Option.some),
+        Effect.catch((reason) =>
+          Effect.logWarning("failed to snapshot processes for terminal subprocess polling", {
+            reason,
+          }).pipe(Effect.as(Option.none<TerminalProcessTableSnapshot>())),
+        ),
+      );
+
+      // A failed or partial snapshot is not authoritative. Keep the last
+      // known state rather than incorrectly marking every terminal idle.
+      if (Option.isNone(processTable)) {
+        return;
+      }
+
       const checkSubprocessActivity = Effect.fn("terminal.checkSubprocessActivity")(function* (
         session: TerminalSessionState & { pid: number },
       ) {
         const terminalPid = session.pid;
-        const hasRunningSubprocess = yield* subprocessChecker(terminalPid).pipe(
-          Effect.map(Option.some),
-          Effect.catch((reason) =>
-            Effect.logWarning("failed to check terminal subprocess activity", {
-              threadId: session.threadId,
-              terminalId: session.terminalId,
-              terminalPid,
-              reason,
-            }).pipe(Effect.as(Option.none<boolean>())),
-          ),
-        );
-
-        if (Option.isNone(hasRunningSubprocess)) {
-          return;
-        }
+        const hasRunningSubprocess =
+          (processTable.value.childrenByParent.get(terminalPid)?.length ?? 0) > 0;
 
         const event = yield* modifyManagerState((state) => {
           const liveSession: Option.Option<TerminalSessionState> = Option.fromNullishOr(
@@ -1782,12 +1805,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             Option.isNone(liveSession) ||
             liveSession.value.status !== "running" ||
             liveSession.value.pid !== terminalPid ||
-            liveSession.value.hasRunningSubprocess === hasRunningSubprocess.value
+            liveSession.value.hasRunningSubprocess === hasRunningSubprocess
           ) {
             return [Option.none(), state] as const;
           }
 
-          liveSession.value.hasRunningSubprocess = hasRunningSubprocess.value;
+          liveSession.value.hasRunningSubprocess = hasRunningSubprocess;
           liveSession.value.updatedAt = new Date().toISOString();
 
           return [
@@ -1796,7 +1819,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               threadId: liveSession.value.threadId,
               terminalId: liveSession.value.terminalId,
               createdAt: new Date().toISOString(),
-              hasRunningSubprocess: hasRunningSubprocess.value,
+              hasRunningSubprocess,
             }),
             state,
           ] as const;
