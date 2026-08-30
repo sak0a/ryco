@@ -2084,6 +2084,43 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       fallbackErrorMessage: "git worktree add failed",
     });
 
+    const gitmodulesPath = path.join(worktreePath, ".gitmodules");
+    const hasGitmodules = yield* fileSystem.exists(gitmodulesPath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            operation: "GitVcsDriver.createWorktree.inspectSubmodules",
+            command: "inspect .gitmodules",
+            cwd: worktreePath,
+            detail: `Failed to inspect ${gitmodulesPath} after creating the worktree.`,
+            cause,
+          }),
+      ),
+    );
+
+    if (hasGitmodules) {
+      const submoduleArgs = ["submodule", "update", "--init", "--recursive"];
+      yield* executeGit(
+        "GitVcsDriver.createWorktree.initializeSubmodules",
+        worktreePath,
+        submoduleArgs,
+        {
+          timeoutMs: 120_000,
+          fallbackErrorMessage: "git submodule initialization failed",
+        },
+      ).pipe(
+        Effect.mapError((error) =>
+          createGitCommandError(
+            "GitVcsDriver.createWorktree.initializeSubmodules",
+            worktreePath,
+            submoduleArgs,
+            `The worktree was created, but its submodules could not be initialized: ${error.detail}`,
+            error,
+          ),
+        ),
+      );
+    }
+
     if (input.dependencyHydration === "copyInstallDirs") {
       yield* copyWorktreeDependencyInstallDirs({ cwd: input.cwd, worktreePath });
     }
