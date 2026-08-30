@@ -21,6 +21,114 @@ const RELEASE_BASE = "https://github.com/saka-gg/ryco/releases/tag";
  */
 export const CHANGELOG_RELEASES: ChangelogRelease[] = [
   {
+    version: "0.1.14",
+    date: "August 30, 2026",
+    dateTime: "2026-08-30",
+    summary:
+      "Everyday agent work becomes safer and more resilient, from reconnects and worktrees to attachments and provider controls.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.14`,
+    highlights: [
+      {
+        title: "Files reach the providers that can use them",
+        summary:
+          "Provider-aware attachments add bounded general-file support, preserve workspace references elsewhere, and harden server reads against unsafe paths and file swaps.",
+      },
+      {
+        title: "Sessions recover instead of getting stuck",
+        summary:
+          "Reconnect refreshes, bounded activity persistence, safer interrupts, terminal snapshots, and startup reconciliation keep long-running work responsive through failures.",
+      },
+      {
+        title: "Worktrees repair themselves",
+        summary:
+          "New worktrees initialize submodules, missing recorded worktrees can be recreated, partial bootstraps can be retried, and feature branches publish under the correct name.",
+      },
+      {
+        title: "Provider lifecycles get sharper",
+        summary:
+          "Context compaction, stable subagent attribution, hardened child sessions, current multi-agent events, and recoverable approvals improve behavior across providers.",
+      },
+      {
+        title: "Faster controls with clearer feedback",
+        summary:
+          "Provider settings gain a responsive master-detail editor, threads gain keyboard pinning, and native session failures now explain what users can safely do next.",
+      },
+    ],
+  },
+  {
+    version: "0.1.13",
+    date: "August 30, 2026",
+    dateTime: "2026-08-30",
+    summary:
+      "Hosted node configuration now reaches native clients reliably across startup and reconnect.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.13`,
+    highlights: [
+      {
+        title: "Native clients see the right node configuration",
+        summary:
+          "Hub configuration projection is repaired so phone and desktop clients stay aligned with the node they are actually using.",
+      },
+    ],
+  },
+  {
+    version: "0.1.12",
+    date: "August 29, 2026",
+    dateTime: "2026-08-29",
+    summary: "Desktop settings remain bound to the node that owns them, even as routing changes.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.12`,
+    highlights: [
+      {
+        title: "Desktop settings stay on their machine",
+        summary:
+          "Routed desktop sessions keep settings reads and writes on the intended node instead of silently falling back to another environment.",
+      },
+    ],
+  },
+  {
+    version: "0.1.11",
+    date: "August 29, 2026",
+    dateTime: "2026-08-29",
+    summary: "Selecting another node now routes its settings requests to the correct machine.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.11`,
+    highlights: [
+      {
+        title: "Settings follow the selected node",
+        summary:
+          "Machine-specific settings now load and save through the active routed connection, making multi-node administration predictable.",
+      },
+    ],
+  },
+  {
+    version: "0.1.10",
+    date: "August 29, 2026",
+    dateTime: "2026-08-29",
+    summary:
+      "Cross-node trust, hosted recovery, and machine-scoped settings become safer and clearer.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.10`,
+    highlights: [
+      {
+        title: "Stronger cross-node boundaries",
+        summary:
+          "Trust establishment, request targeting, and client parity are hardened so remote nodes agree on identity and authority before accepting work.",
+      },
+      {
+        title: "Hosted sessions recover without losing their place",
+        summary:
+          "Cold routes survive node recovery, desktop claims retry safely, and mobile source-control connections stay fenced to their active lifecycle.",
+      },
+      {
+        title: "Settings explain where they live",
+        summary:
+          "Machine-scoped values now show their provenance, making it easier to understand which node owns each setting.",
+      },
+      {
+        title: "A browsable release history",
+        summary:
+          "The marketing site gains a dedicated changelog with editorial summaries and direct links to every public release.",
+      },
+    ],
+  },
+  {
     version: "0.1.9",
     date: "August 29, 2026",
     dateTime: "2026-08-29",
