@@ -4583,7 +4583,7 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("task.started carries model/effort; subagent snapshots refine the model", () => {
+  it.effect("subagent snapshots refine model linkage without guessing from the parent", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -4612,8 +4612,8 @@ describe("ClaudeAdapterLive", () => {
         attachments: [],
       });
 
-      // No explicit model/effort on the launch input: the task inherits the
-      // session's selection.
+      // No launch input is available, so model identity stays pending until
+      // the subagent reports its own authoritative assistant snapshot.
       harness.query.emit({
         type: "system",
         subtype: "task_started",
@@ -4650,7 +4650,7 @@ describe("ClaudeAdapterLive", () => {
       const started = taskEvents[0];
       assert.equal(started?.type, "task.started");
       if (started?.type === "task.started") {
-        assert.equal(started.payload.model, "claude-opus-4-6");
+        assert.equal(started.payload.model, undefined);
         assert.equal(started.payload.effort, "high");
       }
       const progress = taskEvents[1];
@@ -4659,6 +4659,122 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(progress.payload.model, "claude-sonnet-4-6");
         assert.equal(progress.payload.effort, "high");
       }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("does not race delayed subagent model identity with a later parent turn", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const itemStartedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "item.started"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const taskEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type.startsWith("task.")),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-claudeadapter-delayed-task-model"),
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("claudeAgent"),
+          "claude-opus-4-6",
+        ),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "delegate on a smaller model",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-delayed-task-model",
+        uuid: "stream-delayed-task-model",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "toolu_delayed_agent",
+            name: "Task",
+            input: {
+              description: "Run a focused check",
+              prompt: "Check the narrow surface",
+              subagent_type: "general-purpose",
+              model: "claude-haiku-4-5",
+            },
+          },
+        },
+      } as unknown as SDKMessage);
+      yield* Fiber.join(itemStartedFiber);
+
+      // A later parent turn changes the mutable session model before the SDK
+      // delivers task_started for the already-launched background task.
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "continue on the new parent model",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("claudeAgent"),
+          "claude-sonnet-4-6",
+        ),
+        attachments: [],
+      });
+      harness.query.emit({
+        type: "system",
+        subtype: "task_started",
+        task_id: "task-delayed-model",
+        description: "Run a focused check",
+        task_type: "local_agent",
+        tool_use_id: "toolu_delayed_agent",
+        uuid: "task-delayed-model-started",
+        session_id: "sdk-session-delayed-task-model",
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "assistant",
+        parent_tool_use_id: "toolu_delayed_agent",
+        message: {
+          model: "claude-haiku-4-5-20251001",
+          content: [],
+        },
+        uuid: "task-delayed-model-snapshot",
+        session_id: "sdk-session-delayed-task-model",
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-delayed-model",
+        description: "Run a focused check",
+        usage: { total_tokens: 50, tool_uses: 1, duration_ms: 5 },
+        uuid: "task-delayed-model-progress",
+        session_id: "sdk-session-delayed-task-model",
+      } as unknown as SDKMessage);
+
+      const taskEvents = Array.from(yield* Fiber.join(taskEventsFiber));
+      const started = taskEvents[0];
+      assert.equal(started?.type, "task.started");
+      if (started?.type === "task.started") {
+        assert.equal(started.payload.model, "claude-haiku-4-5");
+      }
+      const progress = taskEvents[1];
+      assert.equal(progress?.type, "task.progress");
+      if (progress?.type === "task.progress") {
+        assert.equal(progress.payload.model, "claude-haiku-4-5-20251001");
+      }
+      assert.deepEqual(harness.query.setModelCalls, ["claude-sonnet-4-6"]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
