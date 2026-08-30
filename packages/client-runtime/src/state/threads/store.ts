@@ -204,21 +204,21 @@ function mapSession(session: OrchestrationSession): ThreadSession {
 }
 
 function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage): ChatMessage {
-  const attachments = message.attachments?.map((attachment) => ({
-    type: "image" as const,
-    id: attachment.id,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    sizeBytes: attachment.sizeBytes,
-    ...(getThreadsRuntimeConfiguration().isHostedHubMode()
-      ? {}
-      : {
-          previewUrl: getThreadsRuntimeConfiguration().resolveAttachmentPreviewUrl({
-            environmentId,
-            attachmentId: attachment.id,
-          }),
-        }),
-  }));
+  const attachments = message.attachments?.map((attachment) =>
+    attachment.type === "image"
+      ? {
+          ...attachment,
+          ...(getThreadsRuntimeConfiguration().isHostedHubMode()
+            ? {}
+            : {
+                previewUrl: getThreadsRuntimeConfiguration().resolveAttachmentPreviewUrl({
+                  environmentId,
+                  attachmentId: attachment.id,
+                }),
+              }),
+        }
+      : { ...attachment },
+  );
 
   return {
     id: message.id,

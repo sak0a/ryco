@@ -6,7 +6,7 @@ import {
 } from "@ryco/client-runtime/rpc";
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
-  IMAGE_ONLY_BOOTSTRAP_PROMPT,
+  ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   commitSendTurnDispatch,
 } from "@ryco/client-runtime/state/composer";
 
@@ -40,7 +40,7 @@ async function sendQueuedThreadMessage(message: QueuedThreadMessage): Promise<vo
     isServerThread: true,
     title: "",
     messageId: message.messageId,
-    outgoingMessageText: message.text.trim() || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+    outgoingMessageText: message.text.trim() || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
     turnAttachments,
     modelSelection: message.modelSelection,
     hasSelectedModel: true,

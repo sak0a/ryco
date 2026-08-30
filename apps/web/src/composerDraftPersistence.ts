@@ -112,7 +112,7 @@ export function hydrateImagesFromPersistedWithFailures(
       continue;
     }
     images.push({
-      type: "image" as const,
+      type: attachment.type ?? (attachment.mimeType.startsWith("image/") ? "image" : "file"),
       id: attachment.id,
       name: attachment.name,
       mimeType: attachment.mimeType,

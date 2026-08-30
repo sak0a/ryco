@@ -1,7 +1,6 @@
-import { readFile } from "node:fs/promises";
-
 import {
   DEFAULT_AGENT_TOKEN_MODE,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES,
   ProviderInstanceId,
   ThreadId,
   TurnId,
@@ -22,7 +21,7 @@ import {
 import { Effect, Option } from "effect";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { readPersistedAttachment } from "../../attachmentStore.ts";
 import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import {
   ProviderAdapterProcessError,
@@ -390,40 +389,49 @@ export const makeSendTurn =
   (input) =>
     Effect.gen(function* () {
       const record = yield* deps.requireSession(input.threadId);
+      const declaredAttachmentBytes = (input.attachments ?? []).reduce(
+        (total, attachment) => total + attachment.sizeBytes,
+        0,
+      );
+      if (declaredAttachmentBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
+        return yield* new ProviderAdapterRequestError({
+          provider: COPILOT_DRIVER_KIND,
+          method: "session.send",
+          detail: `Attachments total ${declaredAttachmentBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES} bytes.`,
+        });
+      }
+      let attachmentTotalBytes = 0;
       const attachments: MessageOptions["attachments"] = yield* Effect.forEach(
         input.attachments ?? [],
         (attachment) =>
           Effect.gen(function* () {
-            const filePath = resolveAttachmentPath({
+            const persisted = readPersistedAttachment({
               attachmentsDir: deps.serverConfig.attachmentsDir,
               attachment,
             });
-            if (!filePath) {
+            if (!persisted.ok) {
               return yield* new ProviderAdapterRequestError({
                 provider: COPILOT_DRIVER_KIND,
                 method: "session.send",
-                detail: `Invalid attachment id '${attachment.id}'.`,
+                detail: persisted.reason,
               });
             }
-            const bytes = yield* Effect.tryPromise({
-              try: () => readFile(filePath),
-              catch: (cause) =>
-                new ProviderAdapterRequestError({
-                  provider: COPILOT_DRIVER_KIND,
-                  method: "session.send",
-                  detail: `Failed to read attachment '${attachment.name}'.`,
-                  cause,
-                }),
-            });
+            attachmentTotalBytes += persisted.sizeBytes;
+            if (attachmentTotalBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
+              return yield* new ProviderAdapterRequestError({
+                provider: COPILOT_DRIVER_KIND,
+                method: "session.send",
+                detail: `Attachments total ${attachmentTotalBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES} bytes.`,
+              });
+            }
             return {
               type: "blob" as const,
-              data: bytes.toString("base64"),
+              data: persisted.bytes.toString("base64"),
               mimeType: attachmentMimeType(attachment),
               displayName: attachment.name,
             };
           }),
       );
-
       const copilotModelSelection = selectionTargetsCopilotInstance(
         input.modelSelection,
         deps.instanceId,

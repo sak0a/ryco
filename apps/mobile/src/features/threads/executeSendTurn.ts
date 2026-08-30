@@ -8,7 +8,7 @@ import type {
   ThreadId,
 } from "@ryco/contracts";
 import {
-  IMAGE_ONLY_BOOTSTRAP_PROMPT,
+  ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   buildSendTurnBootstrap,
   buildSendTurnDispatchAttachment,
   commitSendTurnDispatch,
@@ -76,7 +76,7 @@ export async function executeSendTurn(input: ExecuteSendTurnInput): Promise<bool
   const imagesSnapshot = [...input.composer.images];
   const messageId = newMessageId();
   const createdAt = new Date().toISOString();
-  const outgoingMessageText = promptSnapshot.trim() || IMAGE_ONLY_BOOTSTRAP_PROMPT;
+  const outgoingMessageText = promptSnapshot.trim() || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT;
 
   try {
     // Attachment-neutral send path: encode each RN uri/bytes to the outgoing

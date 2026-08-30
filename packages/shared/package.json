@@ -203,6 +203,10 @@
     "./aiFocusSettings": {
       "types": "./src/aiFocusSettings.ts",
       "import": "./src/aiFocusSettings.ts"
+    },
+    "./providerCapabilities": {
+      "types": "./src/providerCapabilities.ts",
+      "import": "./src/providerCapabilities.ts"
     }
   },
   "scripts": {

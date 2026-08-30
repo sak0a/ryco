@@ -7,7 +7,7 @@ export interface WebAttachmentInput {
 
 function asWebAttachmentInput(value: unknown): WebAttachmentInput {
   if (typeof value !== "object" || value === null || !("file" in value)) {
-    throw new Error("Expected a composer image attachment.");
+    throw new Error("Expected a composer attachment.");
   }
   return value as WebAttachmentInput;
 }
@@ -17,7 +17,7 @@ export const webAttachmentCodec: AttachmentCodecService = {
     const attachment = asWebAttachmentInput(value);
     return {
       id: attachment.id,
-      mime: attachment.file.type,
+      mime: attachment.file.type || "application/octet-stream",
       size: attachment.file.size,
       bytes: new Uint8Array(await attachment.file.arrayBuffer()),
     };

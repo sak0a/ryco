@@ -461,7 +461,10 @@ export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const PROVIDER_SEND_TURN_MAX_FILE_BYTES = 50 * 1024 * 1024;
+export const PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024;
 const PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS = 14_000_000;
+const PROVIDER_SEND_TURN_MAX_FILE_DATA_URL_CHARS = 70_000_000;
 const CHAT_ATTACHMENT_ID_MAX_CHARS = 128;
 // Correlation id is command id by design in this model.
 export const CorrelationId = CommandId;
@@ -473,19 +476,28 @@ const ChatAttachmentId = TrimmedNonEmptyString.check(
 );
 export type ChatAttachmentId = typeof ChatAttachmentId.Type;
 
+const ChatAttachmentName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(255),
+  Schema.isPattern(/^[^/\\\u0000-\u001f\u007f]+$/),
+);
+const ChatAttachmentMimeType = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(100),
+  Schema.isPattern(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i),
+);
+
 export const ChatImageAttachment = Schema.Struct({
   type: Schema.Literal("image"),
   id: ChatAttachmentId,
-  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
-  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^image\//i)),
+  name: ChatAttachmentName,
+  mimeType: ChatAttachmentMimeType.check(Schema.isPattern(/^image\//i)),
   sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
 });
 export type ChatImageAttachment = typeof ChatImageAttachment.Type;
 
 const UploadChatImageAttachment = Schema.Struct({
   type: Schema.Literal("image"),
-  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
-  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^image\//i)),
+  name: ChatAttachmentName,
+  mimeType: ChatAttachmentMimeType.check(Schema.isPattern(/^image\//i)),
   sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
   dataUrl: TrimmedNonEmptyString.check(
     Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS),
@@ -493,10 +505,36 @@ const UploadChatImageAttachment = Schema.Struct({
 });
 export type UploadChatImageAttachment = typeof UploadChatImageAttachment.Type;
 
-export const ChatAttachment = Schema.Union([ChatImageAttachment]);
+export const ChatFileAttachment = Schema.Struct({
+  type: Schema.Literal("file"),
+  id: ChatAttachmentId,
+  name: ChatAttachmentName,
+  mimeType: ChatAttachmentMimeType,
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_FILE_BYTES)),
+});
+export type ChatFileAttachment = typeof ChatFileAttachment.Type;
+
+const UploadChatFileAttachment = Schema.Struct({
+  type: Schema.Literal("file"),
+  name: ChatAttachmentName,
+  mimeType: ChatAttachmentMimeType,
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_FILE_BYTES)),
+  dataUrl: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_FILE_DATA_URL_CHARS),
+  ),
+});
+export type UploadChatFileAttachment = typeof UploadChatFileAttachment.Type;
+
+export const ChatAttachment = Schema.Union([ChatImageAttachment, ChatFileAttachment]);
 export type ChatAttachment = typeof ChatAttachment.Type;
-const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
+const UploadChatAttachment = Schema.Union([UploadChatImageAttachment, UploadChatFileAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
+const ChatAttachments = Schema.Array(ChatAttachment).check(
+  Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS),
+);
+const UploadChatAttachments = Schema.Array(UploadChatAttachment).check(
+  Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS),
+);
 
 export const ProjectScriptIcon = Schema.Literals([
   "play",
@@ -1173,7 +1211,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
     messageId: MessageId,
     role: Schema.Literal("user"),
     text: Schema.String,
-    attachments: Schema.Array(ChatAttachment),
+    attachments: ChatAttachments,
   }),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
@@ -1196,7 +1234,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
     messageId: MessageId,
     role: Schema.Literal("user"),
     text: Schema.String,
-    attachments: Schema.Array(UploadChatAttachment),
+    attachments: UploadChatAttachments,
   }),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
@@ -1218,7 +1256,7 @@ export const ThreadTurnSteerCommand = Schema.Struct({
     messageId: MessageId,
     role: Schema.Literal("user"),
     text: Schema.String,
-    attachments: Schema.Array(ChatAttachment),
+    attachments: ChatAttachments,
   }),
   createdAt: IsoDateTime,
   requestedAt: IsoDateTime,
@@ -1234,7 +1272,7 @@ const ClientThreadTurnSteerCommand = Schema.Struct({
     messageId: MessageId,
     role: Schema.Literal("user"),
     text: Schema.String,
-    attachments: Schema.Array(UploadChatAttachment),
+    attachments: UploadChatAttachments,
   }),
   createdAt: IsoDateTime,
   requestedAt: IsoDateTime,

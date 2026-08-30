@@ -27,6 +27,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@ryco/contracts";
+import { providerSupportsGeneralFileAttachments } from "@ryco/shared/providerCapabilities";
 import {
   Cause,
   Duration,
@@ -1113,6 +1114,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       });
       metricProvider = routed.adapter.provider;
       metricModel = input.modelSelection?.model;
+      const unsupportedFile = input.attachments.find((attachment) => attachment.type === "file");
+      if (unsupportedFile && !providerSupportsGeneralFileAttachments(routed.adapter.provider)) {
+        return yield* toValidationError(
+          "ProviderService.sendTurn",
+          `Provider '${routed.adapter.provider}' does not accept general file attachments. Add '${unsupportedFile.name}' to the workspace and reference its path instead.`,
+        );
+      }
       yield* Effect.annotateCurrentSpan({
         "provider.kind": routed.adapter.provider,
         ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
@@ -1208,6 +1216,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
     if (!routed.isActive || routed.session === undefined) {
       return yield* new ProviderSessionNotFoundError({ threadId: input.threadId });
+    }
+    const unsupportedFile = input.attachments.find((attachment) => attachment.type === "file");
+    if (unsupportedFile && !providerSupportsGeneralFileAttachments(routed.adapter.provider)) {
+      return yield* toValidationError(
+        "ProviderService.steerTurn",
+        `Provider '${routed.adapter.provider}' does not accept general file attachments. Add '${unsupportedFile.name}' to the workspace and reference its path instead.`,
+      );
     }
     if (routed.session.activeTurnId !== input.expectedTurnId) {
       return yield* toValidationError(
