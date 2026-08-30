@@ -27,6 +27,7 @@ function makeRegistry(input?: {
     buildFetchingState: (current) => ({ ...current, fetching: true, error: null }),
     buildSuccessState: (data) => ({ data: data as string, fetching: false, error: null }),
     buildErrorState: (current, error) => ({ ...current, fetching: false, error }),
+    isErrorState: (state) => state.error !== null,
   });
 }
 
@@ -154,6 +155,60 @@ describe("keyed query retention", () => {
 
     releaseTwo();
     releaseThree();
+  });
+});
+
+describe("keyed query reconnect refresh", () => {
+  it("retries an active failed query once across duplicate refresh requests", async () => {
+    const registry = makeRegistry();
+    const run = vi
+      .fn<(key: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue("ready");
+    const binding = makeBinding(registry, run);
+    const input = { key: "failed" };
+    const compositeKey = binding.targetKey(input) as string;
+    const release = binding.watch(input);
+    await registry.controllers.get(compositeKey)?.inFlightPromise;
+
+    expect(binding.snapshotFor(input).error?.message).toBe("offline");
+    await Promise.all([
+      registry.refreshActiveEnvironment(environmentId),
+      registry.refreshActiveEnvironment(environmentId),
+    ]);
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(binding.snapshotFor(input)).toEqual({ data: "ready", fetching: false, error: null });
+    release();
+    registry.dispose();
+  });
+
+  it("fences a late result from the superseded transport generation", async () => {
+    const registry = makeRegistry();
+    const resolvers: Array<(value: string) => void> = [];
+    const binding = makeBinding(
+      registry,
+      () =>
+        new Promise<string>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const input = { key: "generation" };
+    const compositeKey = binding.targetKey(input) as string;
+    const release = binding.watch(input);
+    const stale = registry.controllers.get(compositeKey)?.inFlightPromise;
+
+    registry.fenceActiveEnvironment(environmentId);
+    const current = registry.refreshActiveEnvironment(environmentId);
+    expect(resolvers).toHaveLength(2);
+    resolvers[1]?.("current");
+    await current;
+    resolvers[0]?.("stale");
+    await stale;
+
+    expect(binding.snapshotFor(input).data).toBe("current");
+    release();
+    registry.dispose();
   });
 });
 

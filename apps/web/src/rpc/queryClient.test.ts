@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { EnvironmentId } from "@ryco/contracts";
 
 import { QueryClient } from "./queryClient.ts";
 
@@ -86,5 +87,82 @@ describe("QueryClient retention", () => {
 
     unsubscribe();
     client.clear();
+  });
+});
+
+describe("QueryClient reconnect refresh", () => {
+  const environmentId = EnvironmentId.make("environment-query-client-test");
+
+  it("retries each active failed query once and deduplicates shared observers", async () => {
+    const client = new QueryClient();
+    const key = ["query", environmentId] as const;
+    const run = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue("ready");
+    await expect(client.fetch(key, run, { retry: false })).rejects.toThrow("offline");
+
+    const refetch = () => client.fetch(key, run, { retry: false, force: true });
+    const removeFirst = client.addObserver(key, {
+      environmentId,
+      staleTime: Infinity,
+      refetch,
+    });
+    const removeSecond = client.addObserver(key, {
+      environmentId,
+      staleTime: Infinity,
+      refetch,
+    });
+
+    await client.refreshActiveQueriesForEnvironment(environmentId);
+
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(client.getQueryData(key)).toBe("ready");
+    removeFirst();
+    removeSecond();
+  });
+
+  it("refreshes stale active data without touching an inactive query", async () => {
+    vi.useFakeTimers();
+    const client = new QueryClient();
+    const activeKey = ["query", environmentId, "active"] as const;
+    const inactiveKey = ["query", environmentId, "inactive"] as const;
+    client.setQueryData(activeKey, "cached-active");
+    client.setQueryData(inactiveKey, "cached-inactive");
+    const refetch = vi.fn(() => client.fetch(activeKey, () => Promise.resolve("fresh")));
+    const remove = client.addObserver(activeKey, { environmentId, staleTime: 1_000, refetch });
+
+    await client.refreshActiveQueriesForEnvironment(environmentId);
+    expect(refetch).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await client.refreshActiveQueriesForEnvironment(environmentId);
+
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData(activeKey)).toBe("fresh");
+    expect(client.getQueryData(inactiveKey)).toBe("cached-inactive");
+    remove();
+  });
+
+  it("fences a late result from the superseded transport generation", async () => {
+    const client = new QueryClient();
+    const key = ["query", environmentId, "generation"] as const;
+    let resolveStale: ((value: string) => void) | undefined;
+    const stale = client.fetch(
+      key,
+      () =>
+        new Promise<string>((resolve) => {
+          resolveStale = resolve;
+        }),
+      { retry: false },
+    );
+    const refetch = vi.fn(() => client.fetch(key, () => Promise.resolve("current")));
+    const remove = client.addObserver(key, { environmentId, staleTime: 0, refetch });
+
+    client.fenceActiveQueriesForEnvironment(environmentId);
+    await client.refreshActiveQueriesForEnvironment(environmentId);
+    resolveStale?.("stale");
+    await stale;
+
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(client.getQueryData(key)).toBe("current");
+    remove();
   });
 });

@@ -6,6 +6,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
+import type { EnvironmentId } from "@ryco/contracts";
 import { createVisibilityAwarePoller } from "../lib/visibilityPolling";
 import { webAppLifecycle } from "../platform/appLifecycle";
 
@@ -60,7 +61,9 @@ interface QueryEntry {
 }
 
 interface QueryObserver {
-  readonly refetch: () => void;
+  readonly environmentId?: EnvironmentId;
+  readonly staleTime?: number;
+  readonly refetch: () => unknown;
 }
 
 function stableStringify(value: unknown): string {
@@ -344,11 +347,43 @@ export class QueryClient {
       }
       if (entry.observers.size > 0) {
         for (const observer of entry.observers) {
-          observer.refetch();
+          void observer.refetch();
         }
       }
     }
     return Promise.resolve();
+  }
+
+  fenceActiveQueriesForEnvironment(environmentId: EnvironmentId): void {
+    for (const entry of this.cache.values()) {
+      if (![...entry.observers].some((observer) => observer.environmentId === environmentId)) {
+        continue;
+      }
+      entry.fetchId += 1;
+      entry.promise = null;
+      if (entry.state.fetchStatus === "fetching") {
+        this.setState(entry, { ...entry.state, fetchStatus: "idle" });
+      }
+    }
+  }
+
+  async refreshActiveQueriesForEnvironment(environmentId: EnvironmentId): Promise<void> {
+    const refreshes: Array<Promise<unknown>> = [];
+    for (const entry of this.cache.values()) {
+      const observers = [...entry.observers].filter(
+        (candidate) => candidate.environmentId === environmentId,
+      );
+      const observer = observers[0];
+      if (!observer) continue;
+      if (
+        entry.state.status !== "error" &&
+        !observers.some((candidate) => this.isStale(entry.key, candidate.staleTime ?? 0))
+      ) {
+        continue;
+      }
+      refreshes.push(Promise.resolve(observer.refetch()).catch(() => undefined));
+    }
+    await Promise.all(refreshes);
   }
 
   async fetch<TData>(
@@ -478,6 +513,7 @@ export function QueryClientProvider(props: {
 export interface UseQueryOptions<TQueryFnData = unknown, TData = TQueryFnData> {
   readonly queryKey: QueryKey;
   readonly queryFn: () => Promise<TQueryFnData>;
+  readonly environmentId?: EnvironmentId | null;
   readonly enabled?: boolean;
   readonly staleTime?: number;
   readonly gcTime?: number;
@@ -607,9 +643,10 @@ export function useQuery<TQueryFnData = unknown, TData = TQueryFnData>(
     if (!enabled) return;
     const current = optionsRef.current;
     const observer: QueryObserver = {
-      refetch: () => {
-        void client.fetch(current.queryKey, current.queryFn, { retry: current.retry, force: true });
-      },
+      ...(current.environmentId ? { environmentId: current.environmentId } : {}),
+      staleTime: current.staleTime ?? 0,
+      refetch: () =>
+        client.fetch(current.queryKey, current.queryFn, { retry: current.retry, force: true }),
     };
     const removeObserver = client.addObserver(current.queryKey, observer);
 
@@ -686,11 +723,12 @@ export function useQueries<TQueryFnData = unknown, TData = TQueryFnData>(config:
   useEffect(() => {
     const removeObservers = queriesRef.current.map((query) => {
       const observer: QueryObserver = {
-        refetch: () => {
-          if (query.enabled ?? true) {
-            void client.fetch(query.queryKey, query.queryFn, { retry: query.retry, force: true });
-          }
-        },
+        ...(query.environmentId ? { environmentId: query.environmentId } : {}),
+        staleTime: query.staleTime ?? 0,
+        refetch: () =>
+          (query.enabled ?? true)
+            ? client.fetch(query.queryKey, query.queryFn, { retry: query.retry, force: true })
+            : Promise.resolve(undefined),
       };
       return client.addObserver(query.queryKey, observer);
     });

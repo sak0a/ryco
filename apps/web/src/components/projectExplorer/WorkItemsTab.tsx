@@ -163,6 +163,7 @@ export function WorkItemsTab(props: WorkItemsTabProps) {
   );
   const branchRefsQuery = useQuery({
     queryKey: ["workItems", "localBranches", props.environmentId, props.cwd ?? null] as const,
+    environmentId: props.environmentId,
     queryFn: async () => {
       const api = props.environmentId ? readEnvironmentApi(props.environmentId) : null;
       if (!api || !props.cwd) return [];

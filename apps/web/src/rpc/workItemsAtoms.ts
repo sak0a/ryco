@@ -66,6 +66,7 @@ const workItemsRegistry = createKeyedQueryRegistry<WorkItemQueryState<unknown>>(
     isError: true,
     error,
   }),
+  isErrorState: (state) => state.isError,
 });
 
 const { controllers, setQueryState, runController } = workItemsRegistry;

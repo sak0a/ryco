@@ -149,6 +149,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
       props.cwd ?? null,
       props.workItemKey,
     ] as const,
+    environmentId: props.environmentId,
     queryFn: async () => {
       const api = props.environmentId ? readEnvironmentApi(props.environmentId) : null;
       if (!api || !props.cwd) return [];
