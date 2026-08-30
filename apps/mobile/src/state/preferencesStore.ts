@@ -1,6 +1,10 @@
 import { useSyncExternalStore } from "react";
 import { AI_FOCUS_REFRESH_INTERVAL_OPTIONS } from "@ryco/shared/aiFocusSettings";
-import type { AiFocusRefreshIntervalMs } from "@ryco/contracts/settings";
+import {
+  SIDEBAR_AUTO_SETTLE_DAY_OPTIONS,
+  type AiFocusRefreshIntervalMs,
+  type SidebarAutoSettleAfterDays,
+} from "@ryco/contracts/settings";
 
 import { mobileKV } from "../platform/kv";
 
@@ -27,6 +31,7 @@ export interface Preferences {
   readonly threadListV2Enabled?: boolean;
   readonly aiFocusEnabled?: boolean;
   readonly aiFocusRefreshIntervalMs?: AiFocusRefreshIntervalMs;
+  readonly sidebarAutoSettleAfterDays?: SidebarAutoSettleAfterDays;
 }
 
 export function sanitizePreferences(parsed: Preferences): Preferences {
@@ -43,6 +48,7 @@ export function sanitizePreferences(parsed: Preferences): Preferences {
     threadListV2Enabled?: boolean;
     aiFocusEnabled?: boolean;
     aiFocusRefreshIntervalMs?: AiFocusRefreshIntervalMs;
+    sidebarAutoSettleAfterDays?: SidebarAutoSettleAfterDays;
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
@@ -86,6 +92,15 @@ export function sanitizePreferences(parsed: Preferences): Preferences {
   ) {
     preferences.aiFocusRefreshIntervalMs =
       parsed.aiFocusRefreshIntervalMs as AiFocusRefreshIntervalMs;
+  }
+  if (
+    parsed.sidebarAutoSettleAfterDays === null ||
+    (typeof parsed.sidebarAutoSettleAfterDays === "number" &&
+      SIDEBAR_AUTO_SETTLE_DAY_OPTIONS.includes(
+        parsed.sidebarAutoSettleAfterDays as Exclude<SidebarAutoSettleAfterDays, null>,
+      ))
+  ) {
+    preferences.sidebarAutoSettleAfterDays = parsed.sidebarAutoSettleAfterDays;
   }
   return preferences;
 }

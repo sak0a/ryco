@@ -1,8 +1,12 @@
 import { EnvironmentId, type ModelSelection, type ServerConfig } from "@ryco/contracts";
 import { getWsConnectionStatusForEnvironment } from "@ryco/client-runtime/rpc";
 import { createModelSelection } from "@ryco/shared/model";
-import { DEFAULT_CLIENT_SETTINGS } from "@ryco/contracts/settings";
-import { InfoIcon, RefreshCwIcon, SparklesIcon } from "lucide-react";
+import {
+  DEFAULT_CLIENT_SETTINGS,
+  SIDEBAR_AUTO_SETTLE_DAY_OPTIONS,
+  type SidebarAutoSettleAfterDays,
+} from "@ryco/contracts/settings";
+import { ArchiveIcon, InfoIcon, RefreshCwIcon, SparklesIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -41,6 +45,54 @@ import { refreshWebThreadPrioritiesNow } from "../../threadPriorityRefreshRuntim
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An unexpected error occurred.";
+}
+
+export function AutoSettleSettingsSection(props: {
+  readonly value: SidebarAutoSettleAfterDays;
+  readonly onChange: (value: SidebarAutoSettleAfterDays) => void;
+}) {
+  return (
+    <SettingsSection title="Housekeeping" icon={<ArchiveIcon className="size-3.5" />}>
+      <SettingsRow
+        title="Auto-settle inactive tasks"
+        description="Move inactive tasks to Settled after their last message or turn. Running work, queued messages, pending input, open pull requests, and tasks kept active are protected."
+        control={
+          <Select
+            value={props.value?.toString() ?? "off"}
+            onValueChange={(value) => {
+              const parsed = value === "off" ? null : Number(value);
+              if (
+                parsed === null ||
+                SIDEBAR_AUTO_SETTLE_DAY_OPTIONS.includes(
+                  parsed as Exclude<SidebarAutoSettleAfterDays, null>,
+                )
+              ) {
+                props.onChange(parsed as SidebarAutoSettleAfterDays);
+              }
+            }}
+          >
+            <SelectTrigger className="w-48" aria-label="Auto-settle inactive tasks">
+              <SelectValue>
+                {props.value === null
+                  ? "Off"
+                  : `After ${props.value} ${props.value === 1 ? "day" : "days"}`}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="off">
+                Off
+              </SelectItem>
+              {SIDEBAR_AUTO_SETTLE_DAY_OPTIONS.map((days) => (
+                <SelectItem key={days} hideIndicator value={String(days)}>
+                  After {days} {days === 1 ? "day" : "days"}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        }
+      />
+    </SettingsSection>
+  );
 }
 
 function useEnvironmentConnectionSnapshot() {
@@ -225,6 +277,11 @@ export function AiFocusSettings() {
 
   return (
     <SettingsPageContainer>
+      <AutoSettleSettingsSection
+        value={settings.sidebarAutoSettleAfterDays}
+        onChange={(sidebarAutoSettleAfterDays) => updateSettings({ sidebarAutoSettleAfterDays })}
+      />
+
       <SettingsSection title="AI Focus" icon={<SparklesIcon className="size-3.5" />}>
         <SettingsRow
           title="Prioritize the Inbox"

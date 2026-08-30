@@ -233,6 +233,7 @@ export default function Sidebar() {
   const sidebarProjectSortOrder = useSettings((s) => s.sidebarProjectSortOrder);
   const sidebarProjectGroupingMode = useSettings((s) => s.sidebarProjectGroupingMode);
   const aiFocusEnabled = useSettings((s) => s.aiFocusEnabled);
+  const sidebarAutoSettleAfterDays = useSettings((s) => s.sidebarAutoSettleAfterDays);
   const projectGroupingSettings = useSettings((settings) => ({
     sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
     sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
@@ -1364,6 +1365,7 @@ export default function Sidebar() {
         <InboxSidebar
           activeThreadKey={activeRouteThreadKey}
           aiFocusEnabled={aiFocusEnabled}
+          autoSettleAfterDays={sidebarAutoSettleAfterDays}
           deliveryUnknownThreadKeys={deliveryUnknownThreadKeys}
           environments={inboxEnvironments}
           localQueuedThreadKeys={localQueuedThreadKeys}

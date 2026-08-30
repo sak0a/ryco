@@ -217,6 +217,35 @@ describe("thread inbox", () => {
     expect(reopened.settled).toEqual([]);
   });
 
+  it("auto-settles from activity time, protects open PRs, and exposes one next boundary", () => {
+    const inactive = makeThread(environmentA, "thread-inactive", {
+      latestUserMessageAt: "2026-07-23T12:00:00.000Z",
+      updatedAt: "2026-07-31T11:59:00.000Z",
+    });
+    const future = makeThread(environmentA, "thread-future", {
+      latestUserMessageAt: "2026-07-30T12:00:00.000Z",
+    });
+    const openPr = makeThread(environmentA, "thread-open-pr", {
+      worktreeId,
+      worktreePath: `/tmp/${environmentA}/worktree`,
+      latestUserMessageAt: "2026-07-23T12:00:00.000Z",
+    });
+    const inbox = buildThreadInbox(
+      baseInput({
+        autoSettleAfterDays: 7,
+        threads: [inactive, future, openPr],
+        worktrees: [makeWorktree(environmentA, { prState: "open" })],
+      }),
+    );
+
+    expect(inbox.settled.map((entry) => entry.thread?.id)).toEqual([inactive.id]);
+    expect(inbox.active.map((entry) => entry.thread?.id)).toEqual([future.id, openPr.id]);
+    expect(inbox.nextSettlementEvaluationAtMs).toBe(Date.parse("2026-08-06T12:00:00.000Z"));
+    expect(inbox.settled[0]?.lifecycle.effectiveSettlementTimestamp).toBe(
+      "2026-07-30T12:00:00.000Z",
+    );
+  });
+
   it("excludes archived threads and worktrees before applying filters", () => {
     const archivedThread = makeThread(environmentA, "thread-archived", {
       archivedAt: "2026-07-31T10:00:00.000Z",
@@ -271,6 +300,17 @@ describe("thread inbox", () => {
       "delivery-unknown",
       "local-queue",
     ]);
+    expect(inbox.settled).toEqual([]);
+  });
+
+  it("treats an actionable proposed plan as pending input", () => {
+    const thread = makeThread(environmentA, "thread-plan", {
+      hasActionableProposedPlan: true,
+      latestUserMessageAt: "2026-07-01T00:00:00.000Z",
+    });
+    const inbox = buildThreadInbox(baseInput({ threads: [thread], autoSettleAfterDays: 7 }));
+
+    expect(inbox.active[0]?.lifecycle.settlementBlocker).toBe("pending-user-input");
     expect(inbox.settled).toEqual([]);
   });
 

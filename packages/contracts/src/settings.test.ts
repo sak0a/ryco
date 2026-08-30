@@ -8,6 +8,8 @@ import {
   ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_SERVER_SETTINGS,
+  SIDEBAR_AUTO_SETTLE_DAY_OPTIONS,
+  SidebarAutoSettleAfterDays,
   ServerSettings,
   ServerSettingsPatch,
 } from "./settings.ts";
@@ -16,6 +18,24 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
 const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
+
+describe("Inbox auto-settle settings", () => {
+  it("keeps historical clients opted out", () => {
+    expect(decodeClientSettings({}).sidebarAutoSettleAfterDays).toBeNull();
+    expect(DEFAULT_CLIENT_SETTINGS.sidebarAutoSettleAfterDays).toBeNull();
+  });
+
+  it("accepts Off and the supported day presets, but rejects arbitrary values", () => {
+    const decodeAutoSettle = Schema.decodeUnknownSync(SidebarAutoSettleAfterDays);
+    for (const days of [null, ...SIDEBAR_AUTO_SETTLE_DAY_OPTIONS]) {
+      expect(decodeAutoSettle(days)).toBe(days);
+      expect(decodeClientSettingsPatch({ sidebarAutoSettleAfterDays: days })).toMatchObject({
+        sidebarAutoSettleAfterDays: days,
+      });
+    }
+    expect(() => decodeAutoSettle(2)).toThrow();
+  });
+});
 
 describe("AI Focus settings", () => {
   it("decodes historical client settings as disabled with a ten-minute interval", () => {

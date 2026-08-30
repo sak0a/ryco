@@ -5,6 +5,7 @@ import type {
   SidebarWorktreeSummary,
 } from "@ryco/client-runtime/state/threads";
 import type { EnvironmentId, ScopedThreadRef } from "@ryco/contracts";
+import type { SidebarAutoSettleAfterDays } from "@ryco/contracts/settings";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -18,7 +19,7 @@ import {
   ServerIcon,
   Undo2Icon,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { readEnvironmentApi } from "../../environmentApi";
 import { newCommandId } from "../../lib/utils";
@@ -29,7 +30,7 @@ import { SidebarContent } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
-  buildInboxSidebarSections,
+  buildInboxSidebarModel,
   describeInboxFocus,
   type InboxSidebarEnvironment,
   type InboxSidebarRow,
@@ -45,6 +46,7 @@ export interface InboxSidebarProps {
   readonly localQueuedThreadKeys: ReadonlySet<string>;
   readonly activeThreadKey: string | null;
   readonly aiFocusEnabled: boolean;
+  readonly autoSettleAfterDays: SidebarAutoSettleAfterDays;
   readonly pinnedThreadKeys: ReadonlySet<string>;
   readonly onOpenThread: (threadRef: ScopedThreadRef) => void;
 }
@@ -111,7 +113,7 @@ function InboxThreadRow(props: {
     <button
       type="button"
       aria-current={props.active ? "page" : undefined}
-      className={`group/row relative flex w-full min-w-0 overflow-hidden rounded-lg border border-transparent text-left outline-hidden ring-ring transition-[background-color,border-color,box-shadow,translate,scale] duration-200 ease-out will-change-transform hover:-translate-y-px hover:border-sidebar-border/60 hover:bg-sidebar-accent hover:shadow-sm/5 focus-visible:ring-2 active:translate-y-0 active:scale-[0.995] motion-reduce:translate-none motion-reduce:scale-100 motion-reduce:transition-colors aria-[current=page]:border-sidebar-border/60 aria-[current=page]:bg-sidebar-accent aria-[current=page]:shadow-xs/5 ${props.row.settled ? "items-center gap-2 px-2.5 py-2 pr-18 text-muted-foreground" : "flex-col gap-1 px-2.5 py-2"}`}
+      className={`group/row relative flex w-full min-w-0 overflow-hidden rounded-lg border border-transparent text-left outline-hidden ring-ring transition-[background-color,border-color,box-shadow,translate,scale] duration-200 ease-out hover:-translate-y-px hover:border-sidebar-border/60 hover:bg-sidebar-accent hover:shadow-sm/5 focus-visible:ring-2 active:translate-y-0 active:scale-[0.995] motion-reduce:translate-none motion-reduce:scale-100 motion-reduce:transition-colors aria-[current=page]:border-sidebar-border/60 aria-[current=page]:bg-sidebar-accent aria-[current=page]:shadow-xs/5 ${props.row.settled ? "items-center gap-2 px-2.5 py-2 pr-18 text-muted-foreground" : "flex-col gap-1 px-2.5 py-2"}`}
       data-testid="inbox-thread-row"
       onClick={props.onOpen}
     >
@@ -190,7 +192,10 @@ function InboxThreadRow(props: {
   );
 
   return (
-    <div className="group/inbox-row relative">
+    <div
+      className={`group/inbox-row relative [content-visibility:auto] ${props.row.settled ? "[contain-intrinsic-block-size:auto_2rem]" : "[contain-intrinsic-block-size:auto_4.75rem]"}`}
+      data-testid="inbox-thread-row-shell"
+    >
       <Tooltip>
         <TooltipTrigger closeDelay={80} delay={140} render={navigationButton} />
         <TooltipPopup align="start" className="w-72 p-2" side="right" sideOffset={8}>
@@ -290,6 +295,7 @@ export function InboxSidebar(props: InboxSidebarProps) {
   const [environmentId, setEnvironmentId] = useState<EnvironmentId | null>(null);
   const [status, setStatus] = useState<InboxSidebarStatusFilter>("all");
   const [settledOpen, setSettledOpen] = useState(false);
+  const [settlementNowMs, setSettlementNowMs] = useState(() => Date.now());
   const setThreadSettlement = useCallback(
     async (row: InboxSidebarRow, settled: boolean): Promise<boolean> => {
       const api = readEnvironmentApi(row.environmentId);
@@ -328,9 +334,9 @@ export function InboxSidebar(props: InboxSidebarProps) {
     },
     [],
   );
-  const sections = useMemo(
+  const model = useMemo(
     () =>
-      buildInboxSidebarSections({
+      buildInboxSidebarModel({
         projects: props.projects,
         worktrees: props.worktrees,
         threads: props.threads,
@@ -340,12 +346,15 @@ export function InboxSidebar(props: InboxSidebarProps) {
         localQueuedThreadKeys: props.localQueuedThreadKeys,
         activeThreadKey: props.activeThreadKey,
         aiFocusEnabled: props.aiFocusEnabled,
+        autoSettleAfterDays: props.autoSettleAfterDays,
         pinnedThreadKeys: props.pinnedThreadKeys,
+        nowMs: Math.max(settlementNowMs, Date.now()),
       }),
     [
       environmentId,
       props.activeThreadKey,
       props.aiFocusEnabled,
+      props.autoSettleAfterDays,
       props.deliveryUnknownThreadKeys,
       props.environments,
       props.localQueuedThreadKeys,
@@ -354,9 +363,21 @@ export function InboxSidebar(props: InboxSidebarProps) {
       props.threads,
       props.worktrees,
       query,
+      settlementNowMs,
       status,
     ],
   );
+  useEffect(() => {
+    if (model.nextSettlementEvaluationAtMs === null) return;
+    const maxTimeoutMs = 2_147_483_647;
+    const delayMs = Math.min(
+      maxTimeoutMs,
+      Math.max(1, model.nextSettlementEvaluationAtMs - Date.now() + 1),
+    );
+    const timer = window.setTimeout(() => setSettlementNowMs(Date.now()), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [model.nextSettlementEvaluationAtMs]);
+  const sections = model.sections;
   const hasFilters = query.trim().length > 0 || environmentId !== null || status !== "all";
 
   return (

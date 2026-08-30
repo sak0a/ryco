@@ -66,6 +66,7 @@ export function HomeScreen() {
         nodeScope: home.nodeScopeByMode.inbox,
         localQueuedThreadIds,
         aiFocusEnabled: preferences.aiFocusEnabled ?? false,
+        autoSettleAfterDays: preferences.sidebarAutoSettleAfterDays ?? null,
         nowMs,
       }),
     [
@@ -75,6 +76,7 @@ export function HomeScreen() {
       localQueuedThreadIds,
       nowMs,
       preferences.aiFocusEnabled,
+      preferences.sidebarAutoSettleAfterDays,
       projects,
       threads,
       worktrees,

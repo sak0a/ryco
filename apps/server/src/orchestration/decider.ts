@@ -503,6 +503,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         sessionStatus: thread.session?.status ?? null,
         latestTurnState: thread.latestTurn?.state ?? null,
         latestTurnRequestedAt: thread.latestTurn?.requestedAt ?? null,
+        latestTurnStartedAt: thread.latestTurn?.startedAt ?? null,
         latestTurnCompletedAt: thread.latestTurn?.completedAt ?? null,
         latestUserMessageAt: latestUserMessageAt(thread),
         hasPendingApprovals: pendingRequests.hasPendingApprovals,
@@ -513,6 +514,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         worktreeUpdatedAt: worktree?.updatedAt ?? null,
         updatedAt: thread.updatedAt,
         createdAt: thread.createdAt,
+        autoSettleAfterDays: null,
         nowMs: Date.parse(occurredAt),
       });
       if (!eligibility.canSettle) {

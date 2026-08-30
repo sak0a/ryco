@@ -6,6 +6,7 @@ import type {
 } from "@ryco/client-runtime/state/threads";
 import { buildThreadInbox } from "@ryco/client-runtime/state/threads";
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
+import type { SidebarAutoSettleAfterDays } from "@ryco/contracts/settings";
 import type { ThreadSettlementBlocker } from "@ryco/shared/threadSettlement";
 import {
   describeThreadPriorityFocus,
@@ -125,6 +126,7 @@ export interface BuildInboxInput {
   readonly localQueuedThreadIds?: ReadonlySet<string>;
   readonly pinnedThreadKeys?: ReadonlySet<string> | ReadonlyArray<string>;
   readonly aiFocusEnabled?: boolean;
+  readonly autoSettleAfterDays?: SidebarAutoSettleAfterDays;
   readonly nowMs?: number;
 }
 
@@ -203,6 +205,7 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
     deliveryUnknownThreadKeys: deliveryUnknown,
     pinnedThreadKeys: input.pinnedThreadKeys,
     aiFocusEnabled: input.aiFocusEnabled ?? false,
+    autoSettleAfterDays: input.autoSettleAfterDays ?? null,
     filters: {
       ...(input.nodeScope ? { environmentIds: [input.nodeScope] } : {}),
       text: input.query,

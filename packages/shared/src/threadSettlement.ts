@@ -2,10 +2,12 @@ import type {
   OrchestrationLatestTurnState,
   OrchestrationSessionStatus,
   PullRequestState,
+  SidebarAutoSettleAfterDays,
   ThreadSettlementOverride,
 } from "@ryco/contracts";
 
 export const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
+export const THREAD_AUTO_SETTLE_DAY_MS = 24 * 60 * 60 * 1_000;
 
 export type ThreadSettlementBlocker =
   | "unsupported"
@@ -30,6 +32,7 @@ export interface ThreadSettlementInput {
   readonly sessionStatus: OrchestrationSessionStatus | null;
   readonly latestTurnState: OrchestrationLatestTurnState | null;
   readonly latestTurnRequestedAt: string | null;
+  readonly latestTurnStartedAt: string | null;
   readonly latestTurnCompletedAt: string | null;
   readonly latestUserMessageAt: string | null;
   readonly hasPendingApprovals: boolean;
@@ -40,6 +43,7 @@ export interface ThreadSettlementInput {
   readonly worktreeUpdatedAt: string | null;
   readonly updatedAt: string | null;
   readonly createdAt: string;
+  readonly autoSettleAfterDays: SidebarAutoSettleAfterDays;
   readonly nowMs: number;
 }
 
@@ -108,20 +112,71 @@ function newestValidTimestamp(candidates: ReadonlyArray<string | null>): string 
   return newest?.value ?? null;
 }
 
+export function getThreadLastActivityTimestamp(input: ThreadSettlementInput): string | null {
+  return newestValidTimestamp([
+    input.latestUserMessageAt,
+    input.latestTurnRequestedAt,
+    input.latestTurnStartedAt,
+    input.latestTurnCompletedAt,
+  ]);
+}
+
+function autoSettleBoundaryMs(input: ThreadSettlementInput): number | null {
+  if (
+    input.autoSettleAfterDays === null ||
+    !Number.isInteger(input.autoSettleAfterDays) ||
+    input.autoSettleAfterDays < 1 ||
+    input.autoSettleAfterDays > 90
+  ) {
+    return null;
+  }
+  const lastActivityAt = timestampMs(getThreadLastActivityTimestamp(input));
+  if (lastActivityAt === null) return null;
+  const boundaryMs = lastActivityAt + input.autoSettleAfterDays * THREAD_AUTO_SETTLE_DAY_MS;
+  return Number.isFinite(boundaryMs) ? boundaryMs : null;
+}
+
+function canUseInactivitySettlement(input: ThreadSettlementInput): boolean {
+  return input.settledOverride === null && input.prState === null;
+}
+
+export function getNextThreadSettlementEvaluationAtMs(input: ThreadSettlementInput): number | null {
+  if (!canUseInactivitySettlement(input) || !Number.isFinite(input.nowMs)) return null;
+  const autoSettleAtMs = autoSettleBoundaryMs(input);
+  if (autoSettleAtMs === null) return null;
+
+  const eligibility = canSettleThread(input);
+  if (!eligibility.canSettle && eligibility.blocker !== "queued-turn") return null;
+
+  const candidates: number[] = [];
+  if (autoSettleAtMs > input.nowMs) candidates.push(autoSettleAtMs);
+  if (eligibility.blocker === "queued-turn") {
+    const latestUserMessageAtMs = timestampMs(input.latestUserMessageAt);
+    if (latestUserMessageAtMs !== null) {
+      const queuedTurnGraceEndsAtMs = latestUserMessageAtMs + QUEUED_TURN_START_GRACE_MS + 1;
+      if (queuedTurnGraceEndsAtMs > input.nowMs) candidates.push(queuedTurnGraceEndsAtMs);
+    }
+  }
+  return candidates.length > 0 ? Math.min(...candidates) : null;
+}
+
 export function getEffectiveSettlementTimestamp(input: ThreadSettlementInput): string | null {
   if (input.settledOverride === "settled") {
     return timestampMs(input.settledAt) === null ? null : input.settledAt;
   }
-  if (input.prState !== "merged" && input.prState !== "closed") {
-    return null;
+  if (input.prState === "merged" || input.prState === "closed") {
+    return newestValidTimestamp([
+      input.worktreeUpdatedAt,
+      input.latestTurnCompletedAt,
+      input.latestUserMessageAt,
+      input.updatedAt,
+      input.createdAt,
+    ]);
   }
-  return newestValidTimestamp([
-    input.worktreeUpdatedAt,
-    input.latestTurnCompletedAt,
-    input.latestUserMessageAt,
-    input.updatedAt,
-    input.createdAt,
-  ]);
+  if (!canUseInactivitySettlement(input) || !canSettleThread(input).canSettle) return null;
+  const boundaryMs = autoSettleBoundaryMs(input);
+  if (boundaryMs === null || !Number.isFinite(input.nowMs) || input.nowMs < boundaryMs) return null;
+  return new Date(boundaryMs).toISOString();
 }
 
 export function classifyThreadSettlement(
@@ -141,6 +196,7 @@ export function classifyThreadSettlement(
   ) {
     return "settled";
   }
+  if (getEffectiveSettlementTimestamp(input) !== null) return "settled";
   return "active";
 }
 
