@@ -65,6 +65,10 @@ import { useStore, selectSidebarThreadSummaryByRef, selectThreadByRef } from "~/
 import { useTerminalStateStore } from "~/terminalStateStore";
 import type { WsProtocolCloseContext } from "@ryco/client-runtime/rpc";
 import { createDeviceRpcClient } from "@ryco/client-runtime/rpc";
+import {
+  environmentQueryRefresh,
+  isHostedEnvironmentQueryRefreshReady,
+} from "../../rpc/environmentQueryRefresh";
 import { applySettingsUpdated, getServerConfig } from "../../rpc/serverState";
 import { DeviceWsTransport, HostedWsTransport, WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
@@ -708,10 +712,47 @@ export function applyEnvironmentThreadDetailEvent(
   applyRecoveredEventBatch([event], environmentId);
 }
 
-function createEnvironmentConnectionHandlers(hostedGeneration: number | null = null) {
+function createEnvironmentConnectionHandlers(
+  hostedGeneration: number | null = null,
+  initialRefreshEnvironmentId?: EnvironmentId,
+) {
   const acceptsEvent = () =>
     hostedGeneration === null || useHostedHubStore.getState().generation === hostedGeneration;
+  let queryRefreshGeneration = initialRefreshEnvironmentId
+    ? environmentQueryRefresh.begin(initialRefreshEnvironmentId)
+    : null;
+  const beginQueryRefresh = (environmentId: EnvironmentId) => {
+    if (!acceptsEvent()) return;
+    queryRefreshGeneration = environmentQueryRefresh.begin(environmentId);
+  };
+  const completeQueryRefresh = (environmentId: EnvironmentId) => {
+    const refreshGeneration = queryRefreshGeneration;
+    if (refreshGeneration === null) return;
+    const isAuthoritativelyReady = () => {
+      if (hostedGeneration === null) return true;
+      return isHostedEnvironmentQueryRefreshReady(
+        useHostedHubStore.getState(),
+        environmentId,
+        hostedGeneration,
+      );
+    };
+    void environmentQueryRefresh
+      .ready(environmentId, refreshGeneration, isAuthoritativelyReady)
+      .catch(() => undefined);
+  };
   return {
+    onResubscribe: (environmentId: EnvironmentId) => {
+      if (!acceptsEvent()) return;
+      beginQueryRefresh(environmentId);
+      if (hostedGeneration !== null) {
+        markHostedSessionReplaying(environmentId, hostedGeneration);
+      }
+    },
+    onShellError: (environmentId: EnvironmentId) => {
+      if (hostedGeneration !== null && acceptsEvent()) {
+        reportHostedShellSnapshotFailure(environmentId, hostedGeneration);
+      }
+    },
     resetShellProjection: (environmentId: EnvironmentId) => {
       if (!acceptsEvent()) return;
       getEnvironmentSupervisor().resetShellProjection(environmentId);
@@ -725,9 +766,11 @@ function createEnvironmentConnectionHandlers(hostedGeneration: number | null = n
       getEnvironmentSupervisor().syncShellSnapshot(snapshot, environmentId, {
         onCurrent: () => {
           if (hostedGeneration !== null) markHostedSessionReady(environmentId, hostedGeneration);
+          completeQueryRefresh(environmentId);
         },
         onReady: () => {
           if (hostedGeneration !== null) markHostedSessionReady(environmentId, hostedGeneration);
+          completeQueryRefresh(environmentId);
         },
       });
     },
@@ -963,15 +1006,10 @@ function createPrimaryEnvironmentConnection(): EnvironmentConnection {
       kind: "primary",
       knownEnvironment,
       client: createPrimaryEnvironmentClient(knownEnvironment),
-      ...(hostedGeneration !== null
-        ? {
-            onResubscribe: (environmentId: EnvironmentId) =>
-              markHostedSessionReplaying(environmentId, hostedGeneration),
-            onShellError: (environmentId: EnvironmentId) =>
-              reportHostedShellSnapshotFailure(environmentId, hostedGeneration),
-          }
-        : {}),
-      ...createEnvironmentConnectionHandlers(hostedGeneration),
+      ...createEnvironmentConnectionHandlers(
+        hostedGeneration,
+        hostedGeneration !== null ? knownEnvironment.environmentId : undefined,
+      ),
     }),
   );
 }

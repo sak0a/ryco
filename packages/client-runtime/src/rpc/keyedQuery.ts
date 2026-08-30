@@ -57,6 +57,7 @@ export interface KeyedQueryRegistryConfig<TState> {
   readonly buildFetchingState: (current: TState) => TState;
   readonly buildSuccessState: (data: unknown) => TState;
   readonly buildErrorState: (current: TState, error: Error) => TState;
+  readonly isErrorState?: (state: TState) => boolean;
   readonly selectPollData?: (state: TState) => unknown;
   readonly gcTime?: number;
   readonly maxEntries?: number;
@@ -99,6 +100,8 @@ export interface KeyedQueryRegistry<TState> {
     readonly environmentId?: EnvironmentId;
     readonly family?: string;
   }): ReadonlySet<string>;
+  fenceActiveEnvironment(environmentId: EnvironmentId): void;
+  refreshActiveEnvironment(environmentId: EnvironmentId): Promise<void>;
   clearEnvironment(environmentId: EnvironmentId): void;
   resetForTests(): void;
   dispose(): void;
@@ -106,12 +109,30 @@ export interface KeyedQueryRegistry<TState> {
 
 interface KeyedQueryEnvironmentCleanup {
   clearEnvironment(environmentId: EnvironmentId): void;
+  fenceActiveEnvironment(environmentId: EnvironmentId): void;
+  refreshActiveEnvironment(environmentId: EnvironmentId): Promise<void>;
 }
 
 const keyedQueryEnvironmentCleanups = new Set<KeyedQueryEnvironmentCleanup>();
 
 export function clearKeyedQueriesForEnvironment(environmentId: EnvironmentId): void {
   for (const cleanup of keyedQueryEnvironmentCleanups) cleanup.clearEnvironment(environmentId);
+}
+
+export function fenceActiveKeyedQueriesForEnvironment(environmentId: EnvironmentId): void {
+  for (const cleanup of keyedQueryEnvironmentCleanups) {
+    cleanup.fenceActiveEnvironment(environmentId);
+  }
+}
+
+export async function refreshActiveKeyedQueriesForEnvironment(
+  environmentId: EnvironmentId,
+): Promise<void> {
+  await Promise.all(
+    [...keyedQueryEnvironmentCleanups].map((cleanup) =>
+      cleanup.refreshActiveEnvironment(environmentId),
+    ),
+  );
 }
 
 export function createKeyedQueryRegistry<TState>(
@@ -447,6 +468,32 @@ export function createKeyedQueryRegistry<TState>(
     }
   }
 
+  function fenceActiveEnvironment(environmentId: EnvironmentId): void {
+    for (const compositeKey of controllerKeys({ environmentId })) {
+      const controller = controllers.get(compositeKey);
+      if (!controller || controller.subscriberCount <= 0) continue;
+      cancelController(controller);
+    }
+  }
+
+  async function refreshActiveEnvironment(environmentId: EnvironmentId): Promise<void> {
+    const runs: Array<Promise<void>> = [];
+    const now = Date.now();
+    for (const compositeKey of controllerKeys({ environmentId })) {
+      const controller = controllers.get(compositeKey);
+      if (!controller || controller.subscriberCount <= 0) continue;
+      const state = getQueryState(compositeKey);
+      const isStale =
+        !controller.hasData ||
+        config.isErrorState?.(state) === true ||
+        (controller.staleTime !== Infinity &&
+          now - controller.lastFetchedAt >= controller.staleTime);
+      if (!isStale) continue;
+      runs.push(runController(controller));
+    }
+    await Promise.all(runs);
+  }
+
   const registry: KeyedQueryRegistry<TState> = {
     KEY_SEP,
     knownStateKeys,
@@ -466,6 +513,8 @@ export function createKeyedQueryRegistry<TState>(
     scheduleGc: scheduleControllerGc,
     evict,
     controllerKeys,
+    fenceActiveEnvironment,
+    refreshActiveEnvironment,
     clearEnvironment,
     resetForTests,
     dispose,

@@ -62,6 +62,7 @@ const atlassianRegistry = createKeyedQueryRegistry<AtlassianQueryState<unknown>>
     isError: true,
     error,
   }),
+  isErrorState: (state) => state.isError,
 });
 
 const { controllers, runController } = atlassianRegistry;

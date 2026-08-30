@@ -181,6 +181,7 @@ export function issueListQueryOptions(input: {
       input.state,
       input.limit,
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId) {
         throw new Error("Issue list is unavailable.");
@@ -212,6 +213,7 @@ export function issueDetailQueryOptions(input: {
       input.reference ?? "",
       fullContent,
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId || !input.reference) {
         throw new Error("Issue detail is unavailable.");
@@ -246,6 +248,7 @@ export function searchIssuesQueryOptions(input: {
       input.query,
       input.limit,
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId) {
         throw new Error("Issue search is unavailable.");
@@ -280,6 +283,7 @@ export function changeRequestListQueryOptions(input: {
       input.state,
       input.limit,
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId) {
         throw new Error("Change request list is unavailable.");
@@ -310,6 +314,7 @@ export function searchChangeRequestsQueryOptions(input: {
       input.query,
       input.limit,
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId) {
         throw new Error("Change request search is unavailable.");
@@ -342,6 +347,7 @@ export function changeRequestDiffQueryOptions(input: {
       input.cwd,
       input.reference ?? "",
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId || !input.reference) {
         throw new Error("Change request diff is unavailable.");
@@ -376,6 +382,7 @@ export function changeRequestDetailQueryOptions(input: {
       input.reference ?? "",
       fullContent,
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId || !input.reference) {
         throw new Error("Change request detail is unavailable.");
@@ -412,6 +419,7 @@ export function workflowRunsQueryOptions(input: {
       input.commitSha,
       input.limit,
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId) {
         throw new Error("Workflow runs are unavailable.");
@@ -445,6 +453,7 @@ export function workflowRunJobsQueryOptions(input: {
       input.cwd,
       input.runId ?? "",
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId || !input.runId) {
         throw new Error("Workflow jobs are unavailable.");
@@ -475,6 +484,7 @@ export function workflowJobLogQueryOptions(input: {
       input.runId ?? "",
       input.jobId ?? "",
     ),
+    environmentId: input.environmentId,
     queryFn: async () => {
       if (!input.cwd || !input.environmentId || !input.runId || !input.jobId) {
         throw new Error("Workflow logs are unavailable.");

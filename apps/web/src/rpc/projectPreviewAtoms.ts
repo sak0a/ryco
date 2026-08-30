@@ -54,6 +54,7 @@ const projectPreviewRegistry = createKeyedQueryRegistry<ProjectPreviewQueryState
     isFetching: false,
     error,
   }),
+  isErrorState: (state) => state.error !== null,
 });
 
 export type ProjectPreviewQuery<TInput, TData> = KeyedQueryByKey<

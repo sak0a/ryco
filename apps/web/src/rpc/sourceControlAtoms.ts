@@ -91,6 +91,7 @@ const sourceControlRegistry = createKeyedQueryRegistry<SourceControlQueryState<u
     isFetching: false,
     error,
   }),
+  isErrorState: (state) => state.error !== null,
   selectPollData: (state) => state.data,
   onRunStart: (controller) => {
     controller.fetching = true;
