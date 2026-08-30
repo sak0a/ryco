@@ -76,6 +76,18 @@ export interface OrchestrationEventStoreShape {
    * @returns Stream containing all stored events.
    */
   readonly readAll: () => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
+
+  /**
+   * Check whether an aggregate has an event of the requested type after a
+   * sequence. Replay-time side effects use this to avoid acting on an event
+   * that a later incarnation superseded.
+   */
+  readonly hasEventAfter: (input: {
+    readonly aggregateKind: OrchestrationEvent["aggregateKind"];
+    readonly aggregateId: string;
+    readonly type: OrchestrationEvent["type"];
+    readonly sequenceExclusive: number;
+  }) => Effect.Effect<boolean, OrchestrationEventStoreError>;
 }
 
 /**

@@ -22,10 +22,11 @@ export interface ThreadDeletionReactorShape {
   readonly start: () => Effect.Effect<void, never, Scope.Scope>;
 
   /**
-   * Resolves when the internal processing queue is empty and idle.
-   * Intended for test use to replace timing-sensitive sleeps.
+   * Resolves once every deletion at or before the supplied event sequence has
+   * reached the worker and the worker is empty and idle. A successful create
+   * event is the fence before a new incarnation may own runtime resources.
    */
-  readonly drain: Effect.Effect<void>;
+  readonly drainThrough: (sequence: number) => Effect.Effect<void>;
 }
 
 /**
