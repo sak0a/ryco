@@ -478,7 +478,7 @@ export type ChatAttachmentId = typeof ChatAttachmentId.Type;
 
 const ChatAttachmentName = TrimmedNonEmptyString.check(
   Schema.isMaxLength(255),
-  Schema.isPattern(/^[^/\\\u0000-\u001f\u007f]+$/),
+  Schema.isPattern(/^[^/\\\p{Cc}]+$/u),
 );
 const ChatAttachmentMimeType = TrimmedNonEmptyString.check(
   Schema.isMaxLength(100),
