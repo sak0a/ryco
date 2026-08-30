@@ -2,8 +2,13 @@ import type {
   DiagnosticsDurationBucket,
   DiagnosticsResourceSample,
   DiagnosticsSnapshot,
+  DiagnosticsSpanStatus,
   DiagnosticsSpanNameSummary,
 } from "@ryco/contracts";
+
+export function isDiagnosticsSpanFailure(status: DiagnosticsSpanStatus): boolean {
+  return status === "failure" || status === "error";
+}
 
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";

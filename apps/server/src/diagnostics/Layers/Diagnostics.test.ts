@@ -65,6 +65,16 @@ const makeOtlpErrorRecord = (): TraceRecord => ({
   },
 });
 
+const makeInterruptedTraceRecord = (): EffectTraceRecord => ({
+  ...makeTraceRecord(),
+  name: "ws.rpc.orchestration.subscribeThreadWindow",
+  spanId: "span-interrupted",
+  exit: {
+    _tag: "Interrupted",
+    cause: "InterruptError: All fibers interrupted without error",
+  },
+});
+
 const makeMalformedEffectSpanRecord = (): TraceRecord =>
   ({
     type: "effect-span",
@@ -286,6 +296,38 @@ describe("Diagnostics", () => {
           true,
         );
         fs.rmSync(tempDir, { recursive: true, force: true });
+      }),
+    ),
+  );
+
+  it.effect("keeps interrupted spans visible without presenting them as failures", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-diag-"));
+        const config = makeDiagnosticsConfig(tempDir);
+
+        try {
+          const diagnostics = yield* makeDiagnosticsService(config);
+          diagnostics.recordTraceRecords([makeInterruptedTraceRecord()]);
+          const snapshot = yield* diagnostics.getSnapshot({
+            providers: [],
+            terminals: [],
+          });
+
+          const interruptedSpan = snapshot.tracing.recentSpans.find(
+            (span) => span.spanId === "span-interrupted",
+          );
+          assert.equal(interruptedSpan?.status, "interrupted");
+          assert.equal(interruptedSpan?.failureMessage, undefined);
+          assert.equal(
+            snapshot.failures.latest.some((failure) =>
+              failure.message.includes("All fibers interrupted without error"),
+            ),
+            false,
+          );
+        } finally {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
       }),
     ),
   );
