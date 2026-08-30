@@ -1,5 +1,5 @@
 import { LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import {
   defaultInstanceIdForDriver,
   ProviderDriverKind,
@@ -33,6 +33,15 @@ import { Button } from "../ui/button";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
+import {
   canOneClickUpdateProviderCandidate,
   isProviderUpdateCandidate,
   isProviderUpdateActive,
@@ -40,7 +49,13 @@ import {
 } from "../ProviderUpdateLaunchNotification.logic";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
-import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
+import { ProviderInstanceListItem } from "./ProviderInstanceListItem";
+import { getDriverOption } from "./providerDriverMeta";
+import {
+  deriveProviderSettingsInstanceRows,
+  resolveProviderSettingsListNavigationIndex,
+  resolveSelectedProviderSettingsInstance,
+} from "./providerSettingsInstances";
 import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
@@ -53,9 +68,17 @@ import { useServerProviders } from "../../rpc/serverState";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
-const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
-  provider: definition.value,
-}));
+type PendingProviderDestructiveAction =
+  | {
+      readonly kind: "delete";
+      readonly instanceId: ProviderInstanceId;
+      readonly displayName: string;
+    }
+  | {
+      readonly kind: "reset";
+      readonly driver: ProviderDriverKind;
+      readonly displayName: string;
+    };
 
 function withoutProviderInstanceKey<V>(
   record: Readonly<Record<ProviderInstanceId, V>> | undefined,
@@ -111,17 +134,12 @@ export function ProvidersSettingsPanel() {
   const serverProviders = useServerProviders();
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | null>(null);
+  const [pendingDestructiveAction, setPendingDestructiveAction] =
+    useState<PendingProviderDestructiveAction | null>(null);
   const [updatingProviderInstanceIds, setUpdatingProviderInstanceIds] = useState<
     ReadonlySet<ProviderInstanceId>
   >(new Set());
-  // Collapsible state per provider-instance card, keyed by the instance id.
-  // `Record<string, boolean>` so we don't need to preseed an entry for every
-  // configured instance — an absent key reads as collapsed. Default-slot
-  // rows share this state: their id is the driver slug
-  // (`defaultInstanceIdForDriver(driver)`), which is also `ProviderDriverKind` at
-  // runtime, so a pre-existing open key for e.g. "codex" persists across
-  // the legacy/unified render swap.
-  const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({});
   const refreshingRef = useRef(false);
   const applyProviderSnapshot = useCallback(
     (providers: typeof serverProviders) => {
@@ -168,15 +186,6 @@ export function ProvidersSettingsPanel() {
       });
   }, [applyProviderSnapshot, readTargetServer]);
 
-  const visibleProviderSettings = PROVIDER_SETTINGS.filter(
-    (providerSettings) =>
-      providerSettings.provider !== "cursor" ||
-      serverProviders.some(
-        (provider) =>
-          provider.instanceId === defaultInstanceIdForDriver(ProviderDriverKind.make("cursor")),
-      ),
-  );
-
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenInstanceId = textGenerationModelSelection.instanceId;
   const textGenModel = textGenerationModelSelection.model;
@@ -208,122 +217,12 @@ export function ProvidersSettingsPanel() {
         )
       : null;
 
-  /**
-   * Build the list of rows to render, one per configured instance. Each
-   * row carries enough context to drive `ProviderInstanceCard` without
-   * threading storage concerns: whether it's a built-in default slot (in
-   * which case `isDefault` is true, deletion is gated off, and the
-   * effective envelope may have been synthesized from legacy just for
-   * this render), the driver kind narrow for the in-card model-slug
-   * normalization, and whether a reset-to-factory action is warranted.
-   *
-   * Ordering mirrors the prior split: visible built-in default slots
-   * first (one per visible kind), then user-authored custom instances
-   * grouped by driver after their default sibling, then orphan instances
-   * whose driver isn't in the visible-defaults set.
-   */
-  interface InstanceRow {
-    readonly instanceId: ProviderInstanceId;
-    readonly instance: ProviderInstanceConfig;
-    readonly driver: ProviderDriverKind;
-    /** True for the slot whose id is `defaultInstanceIdForDriver(driver)`. */
-    readonly isDefault: boolean;
-    /**
-     * True when this default slot differs from the factory defaults —
-     * either through an explicit `providerInstances[defaultId]` entry,
-     * or through a non-default legacy `settings.providers[kind]` struct
-     * that we're still bridging. Used to show the reset-to-factory
-     * affordance. Undefined for custom rows (they have a delete button
-     * instead; "factory defaults" isn't meaningful).
-     */
-    readonly isDirty?: boolean;
-  }
-
-  const instancesByDriver = new Map<
-    ProviderDriverKind,
-    Array<[ProviderInstanceId, ProviderInstanceConfig]>
-  >();
-  for (const [rawId, instance] of Object.entries(settings.providerInstances ?? {})) {
-    const driver = instance.driver;
-    const list = instancesByDriver.get(driver) ?? [];
-    list.push([rawId as ProviderInstanceId, instance]);
-    instancesByDriver.set(driver, list);
-  }
-
-  const defaultSlotIdsBySource = new Set<string>(
-    visibleProviderSettings.map((providerSettings) =>
-      String(defaultInstanceIdForDriver(providerSettings.provider)),
-    ),
-  );
-
-  const rows: InstanceRow[] = [];
-  const visibleDriverKinds = new Set<ProviderDriverKind>(
-    visibleProviderSettings.map((providerSettings) => providerSettings.provider),
-  );
-
-  for (const providerSettings of visibleProviderSettings) {
-    type LegacyProviderSettings = (typeof settings.providers)[keyof typeof settings.providers];
-    const legacyProviders = settings.providers as Record<string, LegacyProviderSettings>;
-    const defaultLegacyProviders = DEFAULT_UNIFIED_SETTINGS.providers as Record<
-      string,
-      LegacyProviderSettings
-    >;
-    const driver = providerSettings.provider;
-    const defaultInstanceId = defaultInstanceIdForDriver(driver);
-    // Prefer an explicit `providerInstances[defaultId]` entry when one
-    // exists (every edit via this UI promotes the default slot into
-    // that map); fall back to synthesizing one from the legacy
-    // `settings.providers[kind]` struct so first-time viewers still see
-    // their persisted config.
-    const explicitInstance = settings.providerInstances?.[defaultInstanceId];
-    const legacyConfig = legacyProviders[providerSettings.provider]!;
-    const defaultLegacyConfig = defaultLegacyProviders[providerSettings.provider]!;
-    const effectiveInstance: ProviderInstanceConfig =
-      explicitInstance ??
-      ({
-        driver,
-        enabled: legacyConfig.enabled,
-        config: legacyConfig,
-      } satisfies ProviderInstanceConfig);
-    const isDirty =
-      explicitInstance !== undefined || !Equal.equals(legacyConfig, defaultLegacyConfig);
-    rows.push({
-      instanceId: defaultInstanceId,
-      instance: effectiveInstance,
-      driver,
-      isDefault: true,
-      isDirty,
-    });
-    // Non-default customs for this driver kind follow their default.
-    for (const [id, instance] of instancesByDriver.get(providerSettings.provider) ?? []) {
-      if (id === defaultInstanceId) continue;
-      rows.push({
-        instanceId: id,
-        instance,
-        driver: instance.driver,
-        isDefault: false,
-      });
-    }
-  }
-  // Orphan instances: drivers the visible-defaults list doesn't cover
-  // (e.g. Cursor when the server hasn't reported it but the user has
-  // authored a Cursor instance anyway, or fork drivers not shipped by
-  // this build). Preserve insertion order within each driver.
-  for (const [driver, list] of instancesByDriver) {
-    if (visibleDriverKinds.has(driver)) continue;
-    for (const [id, instance] of list) {
-      const isDefaultSlot = defaultSlotIdsBySource.has(String(id));
-      rows.push({
-        instanceId: id,
-        instance,
-        driver: instance.driver,
-        isDefault: isDefaultSlot,
-      });
-    }
-  }
+  const rows = deriveProviderSettingsInstanceRows(settings, serverProviders);
+  const selectedRow = resolveSelectedProviderSettingsInstance(rows, selectedInstanceId);
+  const effectiveSelectedInstanceId = selectedRow?.instanceId ?? null;
 
   const updateProviderInstance = (
-    row: InstanceRow,
+    row: NonNullable<typeof selectedRow>,
     next: ProviderInstanceConfig,
     options?: {
       readonly textGenerationModelSelection?: Parameters<
@@ -348,6 +247,11 @@ export function ProvidersSettingsPanel() {
       providerInstances: withoutProviderInstanceKey(settings.providerInstances, id),
       providerModelPreferences: withoutProviderInstanceKey(settings.providerModelPreferences, id),
       favorites: withoutProviderInstanceFavorites(settings.favorites ?? [], id),
+      ...(textGenInstanceId === id
+        ? {
+            textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+          }
+        : {}),
     });
   };
 
@@ -448,7 +352,86 @@ export function ProvidersSettingsPanel() {
         defaultInstanceId,
       ),
       favorites: withoutProviderInstanceFavorites(settings.favorites ?? [], defaultInstanceId),
+      ...(textGenInstanceId === defaultInstanceId
+        ? {
+            textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+          }
+        : {}),
     });
+  };
+
+  const liveProvidersByInstance = new Map(
+    serverProviders.map((provider) => [provider.instanceId, provider] as const),
+  );
+  const selectedDriverOption = selectedRow ? getDriverOption(selectedRow.driver) : undefined;
+  const selectedLiveProvider = selectedRow
+    ? liveProvidersByInstance.get(selectedRow.instanceId)
+    : undefined;
+  const selectedDisplayName = selectedRow
+    ? selectedRow.instance.displayName?.trim() ||
+      selectedDriverOption?.label ||
+      String(selectedRow.driver)
+    : null;
+  const selectedUpdateCandidate =
+    selectedLiveProvider && isProviderUpdateCandidate(selectedLiveProvider)
+      ? selectedLiveProvider
+      : null;
+  const canRunSelectedUpdate =
+    selectedUpdateCandidate !== null &&
+    canOneClickUpdateProviderCandidate(selectedUpdateCandidate, serverProviders);
+  const isUpdatingSelected =
+    Boolean(selectedLiveProvider && isProviderUpdateActive(selectedLiveProvider)) ||
+    (selectedRow ? updatingProviderInstanceIds.has(selectedRow.instanceId) : false);
+  const selectedModelPreferences = selectedRow
+    ? (settings.providerModelPreferences?.[selectedRow.instanceId] ?? {
+        hiddenModels: [],
+        modelOrder: [],
+      })
+    : { hiddenModels: [], modelOrder: [] };
+  const selectedFavoriteModels = selectedRow
+    ? (settings.favorites ?? [])
+        .filter((favorite) => favorite.provider === selectedRow.instanceId)
+        .map((favorite) => favorite.model)
+    : [];
+  const providerEditorId = "provider-instance-editor";
+
+  const handleProviderListKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+  ) => {
+    const navigationKey = event.key;
+    if (
+      navigationKey !== "ArrowDown" &&
+      navigationKey !== "ArrowUp" &&
+      navigationKey !== "Home" &&
+      navigationKey !== "End"
+    ) {
+      return;
+    }
+    const nextIndex = resolveProviderSettingsListNavigationIndex(
+      currentIndex,
+      navigationKey,
+      rows.length,
+    );
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextRow = rows[nextIndex];
+    if (!nextRow) return;
+    setSelectedInstanceId(nextRow.instanceId);
+    const list = event.currentTarget.closest<HTMLElement>("[data-provider-instance-list]");
+    const buttons = list?.querySelectorAll<HTMLButtonElement>("[data-provider-instance-row]");
+    buttons?.[nextIndex]?.focus();
+  };
+
+  const confirmPendingDestructiveAction = () => {
+    const action = pendingDestructiveAction;
+    if (!action) return;
+    setPendingDestructiveAction(null);
+    if (action.kind === "delete") {
+      deleteProviderInstance(action.instanceId);
+      return;
+    }
+    resetDefaultInstance(action.driver);
   };
 
   return (
@@ -545,22 +528,6 @@ export function ProvidersSettingsPanel() {
                     size="icon-xs"
                     variant="ghost"
                     className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
-                    aria-label="Add provider instance"
-                  >
-                    <PlusIcon className="size-3" />
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top">Add provider instance</TooltipPopup>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
                     disabled={isRefreshingProviders}
                     onClick={() => void refreshProviders()}
                     aria-label="Refresh provider status"
@@ -578,101 +545,187 @@ export function ProvidersSettingsPanel() {
           </div>
         }
       >
-        {rows.map((row) => {
-          const driverOption = getDriverOption(row.driver);
-          const liveProvider = serverProviders.find(
-            (candidate) => candidate.instanceId === row.instanceId,
-          );
-          const updateCandidate =
-            liveProvider && isProviderUpdateCandidate(liveProvider) ? liveProvider : null;
-          const canRunOneClickUpdate =
-            updateCandidate !== null &&
-            canOneClickUpdateProviderCandidate(updateCandidate, serverProviders);
-          const isUpdating =
-            Boolean(liveProvider && isProviderUpdateActive(liveProvider)) ||
-            updatingProviderInstanceIds.has(row.instanceId);
-          const modelPreferences = settings.providerModelPreferences?.[row.instanceId] ?? {
-            hiddenModels: [],
-            modelOrder: [],
-          };
-          const favoriteModels = (settings.favorites ?? [])
-            .filter((favorite) => favorite.provider === row.instanceId)
-            .map((favorite) => favorite.model);
-          const resetLabel = driverOption?.label ?? String(row.driver);
-          const headerAction =
-            row.isDefault && row.isDirty ? (
-              <SettingResetButton
-                label={`${resetLabel} provider settings`}
-                onClick={() => resetDefaultInstance(row.driver)}
-              />
-            ) : null;
-          return (
-            <ProviderInstanceCard
-              key={row.instanceId}
-              instanceId={row.instanceId}
-              instance={row.instance}
-              driverOption={driverOption}
-              liveProvider={liveProvider}
-              isExpanded={openInstanceDetails[row.instanceId] ?? false}
-              onExpandedChange={(open) =>
-                setOpenInstanceDetails((existing) => ({
-                  ...existing,
-                  [row.instanceId]: open,
-                }))
-              }
-              onUpdate={(next) => {
-                // When the user disables the exact instance the text-gen
-                // selection points at, fall back to the global default so we
-                // don't leave the selection dangling on a disabled instance.
-                // Prior kind-level behavior cleared on any kind-matching
-                // disable; instance-level addressing makes this narrower and
-                // more accurate (other instances of the same kind stay
-                // untouched).
-                const wasEnabled = row.instance.enabled ?? true;
-                const isDisabling = next.enabled === false && wasEnabled;
-                const shouldClearTextGen = isDisabling && textGenInstanceId === row.instanceId;
-                if (shouldClearTextGen) {
-                  updateProviderInstance(row, next, {
-                    textGenerationModelSelection:
-                      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                  });
-                } else {
-                  updateProviderInstance(row, next);
+        <div className="grid min-h-[34rem] md:grid-cols-[minmax(13.5rem,0.75fr)_minmax(0,1.55fr)]">
+          <aside className="app-muted-surface min-w-0 border-b border-border/70 md:border-r md:border-b-0">
+            <div className="flex items-center justify-between gap-3 border-b border-border/70 px-3 py-3">
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">
+                  Instances
+                </h3>
+                <p className="text-[11px] text-muted-foreground">{rows.length} configured</p>
+              </div>
+              <Button
+                size="xs"
+                variant="outline"
+                className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+                onClick={() => setIsAddInstanceDialogOpen(true)}
+                aria-label="Add provider instance"
+              >
+                <PlusIcon className="size-3" />
+                Add
+              </Button>
+            </div>
+
+            <nav
+              aria-label="Provider instances"
+              data-provider-instance-list
+              className="grid max-h-64 gap-1 overflow-y-auto p-2 md:max-h-[min(44rem,calc(100dvh-15rem))]"
+            >
+              {rows.map((row, index) => (
+                <ProviderInstanceListItem
+                  key={row.instanceId}
+                  instanceId={row.instanceId}
+                  instance={row.instance}
+                  driverOption={getDriverOption(row.driver)}
+                  liveProvider={liveProvidersByInstance.get(row.instanceId)}
+                  isDefault={row.isDefault}
+                  selected={row.instanceId === effectiveSelectedInstanceId}
+                  editorId={providerEditorId}
+                  onSelect={() => setSelectedInstanceId(row.instanceId)}
+                  onKeyDown={(event) => handleProviderListKeyDown(event, index)}
+                />
+              ))}
+            </nav>
+          </aside>
+
+          <section
+            id={providerEditorId}
+            aria-label={selectedDisplayName ? `Edit ${selectedDisplayName}` : "Provider editor"}
+            className="min-w-0 bg-card"
+          >
+            {selectedRow ? (
+              <ProviderInstanceCard
+                key={selectedRow.instanceId}
+                instanceId={selectedRow.instanceId}
+                instance={selectedRow.instance}
+                driverOption={selectedDriverOption}
+                liveProvider={selectedLiveProvider}
+                isDefault={selectedRow.isDefault}
+                onUpdate={(next) => {
+                  // When the user disables the exact instance the text-gen
+                  // selection points at, fall back to the global default so we
+                  // don't leave the selection dangling on a disabled instance.
+                  // Prior kind-level behavior cleared on any kind-matching
+                  // disable; instance-level addressing makes this narrower and
+                  // more accurate (other instances of the same kind stay
+                  // untouched).
+                  const wasEnabled = selectedRow.instance.enabled ?? true;
+                  const isDisabling = next.enabled === false && wasEnabled;
+                  const shouldClearTextGen =
+                    isDisabling && textGenInstanceId === selectedRow.instanceId;
+                  if (shouldClearTextGen) {
+                    updateProviderInstance(selectedRow, next, {
+                      textGenerationModelSelection:
+                        DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+                    });
+                  } else {
+                    updateProviderInstance(selectedRow, next);
+                  }
+                }}
+                onDelete={
+                  selectedRow.isDefault
+                    ? undefined
+                    : () =>
+                        setPendingDestructiveAction({
+                          kind: "delete",
+                          instanceId: selectedRow.instanceId,
+                          displayName: selectedDisplayName ?? String(selectedRow.instanceId),
+                        })
                 }
-              }}
-              onDelete={row.isDefault ? undefined : () => deleteProviderInstance(row.instanceId)}
-              headerAction={headerAction}
-              hiddenModels={modelPreferences.hiddenModels}
-              favoriteModels={favoriteModels}
-              modelOrder={modelPreferences.modelOrder}
-              onHiddenModelsChange={(hiddenModels) =>
-                updateProviderModelPreferences(row.instanceId, {
-                  ...modelPreferences,
-                  hiddenModels,
-                })
-              }
-              onFavoriteModelsChange={(favoriteModels) =>
-                updateProviderFavoriteModels(row.instanceId, favoriteModels)
-              }
-              onModelOrderChange={(modelOrder) =>
-                updateProviderModelPreferences(row.instanceId, {
-                  ...modelPreferences,
-                  modelOrder,
-                })
-              }
-              onRunUpdate={
-                canRunOneClickUpdate ? () => runProviderUpdate(updateCandidate) : undefined
-              }
-              isUpdating={isUpdating}
-            />
-          );
-        })}
+                headerAction={
+                  selectedRow.isDefault && selectedRow.isDirty ? (
+                    <SettingResetButton
+                      label={`${selectedDisplayName ?? String(selectedRow.driver)} provider settings`}
+                      onClick={() =>
+                        setPendingDestructiveAction({
+                          kind: "reset",
+                          driver: selectedRow.driver,
+                          displayName: selectedDisplayName ?? String(selectedRow.driver),
+                        })
+                      }
+                    />
+                  ) : null
+                }
+                hiddenModels={selectedModelPreferences.hiddenModels}
+                favoriteModels={selectedFavoriteModels}
+                modelOrder={selectedModelPreferences.modelOrder}
+                onHiddenModelsChange={(hiddenModels) =>
+                  updateProviderModelPreferences(selectedRow.instanceId, {
+                    ...selectedModelPreferences,
+                    hiddenModels,
+                  })
+                }
+                onFavoriteModelsChange={(favoriteModels) =>
+                  updateProviderFavoriteModels(selectedRow.instanceId, favoriteModels)
+                }
+                onModelOrderChange={(modelOrder) =>
+                  updateProviderModelPreferences(selectedRow.instanceId, {
+                    ...selectedModelPreferences,
+                    modelOrder,
+                  })
+                }
+                onRunUpdate={
+                  canRunSelectedUpdate
+                    ? () => runProviderUpdate(selectedUpdateCandidate)
+                    : undefined
+                }
+                isUpdating={isUpdatingSelected}
+              />
+            ) : (
+              <div className="grid min-h-64 place-items-center px-6 py-12 text-center">
+                <div className="max-w-xs space-y-1">
+                  <h3 className="text-sm font-semibold text-foreground">No provider instances</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Add an instance to configure a provider for this environment.
+                  </p>
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
       </SettingsSection>
 
       <AddProviderInstanceDialog
         open={isAddInstanceDialogOpen}
         onOpenChange={setIsAddInstanceDialogOpen}
+        onCreated={setSelectedInstanceId}
       />
+
+      <AlertDialog
+        open={pendingDestructiveAction !== null}
+        onOpenChange={(open) => !open && setPendingDestructiveAction(null)}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingDestructiveAction?.kind === "delete"
+                ? `Delete ${pendingDestructiveAction.displayName}?`
+                : `Reset ${pendingDestructiveAction?.displayName ?? "provider"}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDestructiveAction?.kind === "delete"
+                ? "This removes the instance, its model preferences, and its favorites. Existing threads that reference it may no longer start; text generation returns to its default if needed."
+                : "This restores the built-in instance configuration, removes its model preferences and favorites, and resets text generation if it uses this instance."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {pendingDestructiveAction?.kind === "delete" ? (
+            <div className="px-6 pb-4">
+              <code className="block rounded-md border border-border/70 bg-muted/40 px-3 py-2 text-xs text-foreground">
+                {pendingDestructiveAction.instanceId}
+              </code>
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button
+              variant={pendingDestructiveAction?.kind === "delete" ? "destructive" : "default"}
+              onClick={confirmPendingDestructiveAction}
+            >
+              {pendingDestructiveAction?.kind === "delete" ? "Delete instance" : "Reset settings"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
     </SettingsPageContainer>
   );
 }

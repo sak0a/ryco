@@ -5,6 +5,7 @@ import {
   type AuthAccessSnapshot,
   AuthSessionId,
   DEFAULT_SERVER_SETTINGS,
+  defaultInstanceIdForDriver,
   EnvironmentId,
   type DesktopBridge,
   type DesktopUpdateChannel,
@@ -17,7 +18,7 @@ import {
   type SourceControlDiscoveryResult,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 import { QueryClient, QueryClientProvider } from "~/rpc/queryClient";
@@ -1535,7 +1536,7 @@ describe("GeneralSettingsPanel observability", () => {
       </AppAtomRegistryProvider>,
     );
 
-    await page.getByLabelText("Toggle OpenCode details").click();
+    await page.getByRole("button", { name: "Edit OpenCode default provider instance" }).click();
 
     // The unified provider-instance card renders field labels without a
     // driver-name prefix (the driver name is already shown in the card
@@ -1545,6 +1546,142 @@ describe("GeneralSettingsPanel observability", () => {
     await expect.element(page.getByPlaceholder("http://127.0.0.1:4096")).toBeInTheDocument();
     await expect.element(page.getByText("Server password")).toBeInTheDocument();
     await expect.element(page.getByPlaceholder("Optional")).toBeInTheDocument();
+  });
+
+  it("opens the existing instance wizard from the master list", async () => {
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ProvidersSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await page.getByRole("button", { name: "Add provider instance" }).click();
+    await expect
+      .element(page.getByRole("heading", { name: "Add provider instance" }))
+      .toBeInTheDocument();
+    await expect.element(page.getByText("Step 1", { exact: true })).toBeInTheDocument();
+  });
+
+  it("keeps multiple instances scannable and supports arrow-key editor selection", async () => {
+    const workInstanceId = ProviderInstanceId.make("codex_work");
+    setServerConfigSnapshot({
+      ...createBaseServerConfig(),
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: {
+          [workInstanceId]: {
+            driver: ProviderDriverKind.make("codex"),
+            enabled: true,
+            displayName: "Work Codex",
+          },
+        },
+      },
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ProvidersSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect
+      .element(page.getByRole("navigation", { name: "Provider instances" }))
+      .toBeInTheDocument();
+    const workRow = page.getByRole("button", {
+      name: "Edit Work Codex custom provider instance",
+    });
+    await expect.element(workRow).toBeInTheDocument();
+    workRow.element().focus();
+    await userEvent.keyboard("{ArrowDown}");
+
+    const claudeRow = page.getByRole("button", {
+      name: "Edit Claude default provider instance",
+    });
+    await expect.element(claudeRow).toHaveAttribute("aria-current", "true");
+    await expect.element(page.getByRole("region", { name: "Edit Claude" })).toBeInTheDocument();
+  });
+
+  it("requires confirmation before deleting a custom instance", async () => {
+    const customInstanceId = ProviderInstanceId.make("codex_work");
+    const updateSettings = vi
+      .fn<LocalApi["server"]["updateSettings"]>()
+      .mockResolvedValue(DEFAULT_SERVER_SETTINGS);
+    installSettingsNativeApi({ updateSettings });
+    setServerConfigSnapshot({
+      ...createBaseServerConfig(),
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: {
+          [customInstanceId]: {
+            driver: ProviderDriverKind.make("codex"),
+            enabled: true,
+            displayName: "Work Codex",
+          },
+        },
+      },
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ProvidersSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await page.getByRole("button", { name: "Edit Work Codex custom provider instance" }).click();
+    await page
+      .getByRole("button", { name: `Delete provider instance ${customInstanceId}` })
+      .click();
+
+    await expect
+      .element(page.getByRole("heading", { name: "Delete Work Codex?" }))
+      .toBeInTheDocument();
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    await page.getByRole("button", { name: "Delete instance" }).click();
+    await vi.waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({ providerInstances: {} });
+  });
+
+  it("requires confirmation before resetting a customized default instance", async () => {
+    const driver = ProviderDriverKind.make("codex");
+    const instanceId = defaultInstanceIdForDriver(driver);
+    const updateSettings = vi
+      .fn<LocalApi["server"]["updateSettings"]>()
+      .mockResolvedValue(DEFAULT_SERVER_SETTINGS);
+    installSettingsNativeApi({ updateSettings });
+    setServerConfigSnapshot({
+      ...createBaseServerConfig(),
+      settings: {
+        ...DEFAULT_SERVER_SETTINGS,
+        providerInstances: {
+          [instanceId]: {
+            driver,
+            enabled: true,
+            displayName: "Primary Codex",
+          },
+        },
+      },
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <ProvidersSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await page
+      .getByRole("button", { name: "Reset Primary Codex provider settings to default" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { name: "Reset Primary Codex?" }))
+      .toBeInTheDocument();
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    await page.getByRole("button", { name: "Reset settings" }).click();
+    await vi.waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({ providerInstances: {} });
   });
 
   it("runs one-click provider updates from the provider card", async () => {

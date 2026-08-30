@@ -2,7 +2,6 @@
 
 import {
   ArrowUpCircleIcon,
-  ChevronDownIcon,
   CopyIcon,
   DownloadIcon,
   LoaderIcon,
@@ -12,11 +11,9 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  isProviderDriverKind,
   type ProviderInstanceConfig,
   type ProviderInstanceEnvironmentVariable,
   type ProviderInstanceId,
-  type ProviderDriverKind,
   type ServerProvider,
   type ServerProviderModel,
   type ServerProviderRateLimits,
@@ -28,7 +25,6 @@ import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { DraftInput } from "../ui/draft-input";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
@@ -42,10 +38,9 @@ import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import {
   getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
-  getProviderSummary,
   getProviderVersionLabel,
-  type ProviderStatusKey,
 } from "./providerStatus";
+import { deriveProviderInstancePresentation } from "./providerInstancePresentation";
 import {
   availablePercent,
   clampUsedPercent,
@@ -470,8 +465,7 @@ interface ProviderInstanceCardProps {
   readonly instance: ProviderInstanceConfig;
   readonly driverOption: DriverOption | undefined;
   readonly liveProvider: ServerProvider | undefined;
-  readonly isExpanded: boolean;
-  readonly onExpandedChange: (open: boolean) => void;
+  readonly isDefault: boolean;
   readonly onUpdate: (nextInstance: ProviderInstanceConfig) => void;
   /**
    * Pass `undefined` to hide the delete button entirely. Built-in default
@@ -499,12 +493,10 @@ interface ProviderInstanceCardProps {
 }
 
 /**
- * A single configured provider-instance row in the Providers settings
- * section. Used for every row — both the built-in default instance for a
- * driver (rendered with `onDelete` omitted) and user-authored custom
- * instances (`onDelete` supplied). The only UI difference between the two
- * is whether the trash button is visible; every other field (display
- * name, config fields, models) behaves identically.
+ * The editor for one selected provider instance. Built-in defaults omit
+ * `onDelete` and may expose a reset action; custom instances expose a guarded
+ * delete action. All configuration fields continue through the same component
+ * so list selection never creates a second provider-config implementation.
  *
  * Behavior notes:
  *   - `liveProvider` is matched by the caller via `instanceId`; when no
@@ -527,8 +519,7 @@ export function ProviderInstanceCard({
   instance,
   driverOption,
   liveProvider,
-  isExpanded,
-  onExpandedChange,
+  isDefault,
   onUpdate,
   onDelete,
   headerAction,
@@ -541,28 +532,23 @@ export function ProviderInstanceCard({
   onRunUpdate,
   isUpdating = false,
 }: ProviderInstanceCardProps) {
-  const enabled = instance.enabled ?? true;
-  // The server-reported status wins when present; otherwise fall back to
-  // "disabled"/"warning" based on the local `enabled` flag so the dot
-  // reflects the persisted intent even before the first probe completes.
-  const statusKey: ProviderStatusKey =
-    (liveProvider?.status as ProviderStatusKey | undefined) ?? (enabled ? "warning" : "disabled");
+  const presentation = deriveProviderInstancePresentation({
+    instance,
+    driverOption,
+    liveProvider,
+  });
+  const { enabled, displayName, driverKind, accentColor, summary, statusKey } = presentation;
   const statusStyle = PROVIDER_STATUS_STYLES[statusKey];
-  const rawSummary = getProviderSummary(liveProvider);
   const authEmail = liveProvider?.auth.email;
   const hasAuthenticatedEmail =
     liveProvider?.auth.status === "authenticated" && Boolean(authEmail?.trim());
   const authenticatedDetail = hasAuthenticatedEmail
     ? (liveProvider?.auth.label ?? liveProvider?.auth.type ?? null)
     : null;
-  const summary = rawSummary;
   const versionLabel = getProviderVersionLabel(liveProvider?.version);
   const versionAdvisory = getProviderVersionAdvisoryPresentation(liveProvider?.versionAdvisory);
   const updateCommand = versionAdvisory?.updateCommand ?? null;
   const FallbackIconComponent = driverOption?.icon;
-  const displayName =
-    instance.displayName?.trim() || driverOption?.label || String(instance.driver);
-  const accentColor = normalizeProviderAccentColor(instance.accentColor);
   const { copyToClipboard } = useCopyToClipboard<{ providerName: string }>({
     onCopy: ({ providerName }) => {
       toastManager.add({
@@ -581,14 +567,6 @@ export function ProviderInstanceCard({
       );
     },
   });
-
-  // Narrow `instance.driver` for callers that key on the closed
-  // `ProviderDriverKind` union (e.g. `normalizeModelSlug`'s alias table). Custom
-  // fork drivers pass through as `null` and those callers fall back to
-  // verbatim behaviour.
-  const driverKind: ProviderDriverKind | null = isProviderDriverKind(instance.driver)
-    ? instance.driver
-    : null;
 
   const customModels = readConfigStringArray(instance.config, "customModels");
   // Server-returned models may lag behind settings writes. Treat probe
@@ -685,6 +663,9 @@ export function ProviderInstanceCard({
           {instanceId}
         </code>
       ) : null}
+      <Badge variant="outline" size="sm" className="shrink-0">
+        {isDefault ? "Default" : "Custom"}
+      </Badge>
       {driverOption?.badgeLabel ? (
         <Badge variant="warning" size="sm" className="shrink-0">
           {driverOption.badgeLabel}
@@ -695,30 +676,18 @@ export function ProviderInstanceCard({
 
   const titleTailNode = (
     <>
-      {headerAction ? (
-        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-          {headerAction}
-        </span>
-      ) : null}
+      {headerAction}
       {onDelete ? (
-        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  className="size-5 rounded-sm p-0 text-muted-foreground hover:text-destructive"
-                  onClick={onDelete}
-                  aria-label={`Delete provider instance ${instanceId}`}
-                >
-                  <Trash2Icon className="size-3" />
-                </Button>
-              }
-            />
-            <TooltipPopup side="top">Delete instance</TooltipPopup>
-          </Tooltip>
-        </span>
+        <Button
+          size="xs"
+          variant="ghost"
+          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-destructive"
+          onClick={onDelete}
+          aria-label={`Delete provider instance ${instanceId}`}
+        >
+          <Trash2Icon className="size-3" />
+          Delete
+        </Button>
       ) : null}
     </>
   );
@@ -746,7 +715,7 @@ export function ProviderInstanceCard({
   ) : null;
 
   return (
-    <div className="border-t border-border/60 first:border-t-0">
+    <div>
       <div className="px-4 py-3.5 sm:px-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 flex-1 space-y-1">
@@ -847,17 +816,6 @@ export function ProviderInstanceCard({
             {authRowNode}
           </div>
           <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => onExpandedChange(!isExpanded)}
-              aria-label={`Toggle ${displayName} details`}
-            >
-              <ChevronDownIcon
-                className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")}
-              />
-            </Button>
             <Switch
               checked={enabled}
               onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
@@ -867,82 +825,78 @@ export function ProviderInstanceCard({
         </div>
       </div>
 
-      <Collapsible open={isExpanded} onOpenChange={onExpandedChange}>
-        <CollapsibleContent>
-          <div className="space-y-0">
-            {liveProvider?.rateLimits ? (
-              <ProviderUsageLimitsSection rateLimits={liveProvider.rateLimits} />
-            ) : null}
+      <div className="space-y-0">
+        {liveProvider?.rateLimits ? (
+          <ProviderUsageLimitsSection rateLimits={liveProvider.rateLimits} />
+        ) : null}
 
-            <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-              <label htmlFor={`provider-instance-${instanceId}-display-name`} className="block">
-                <span className="text-xs font-medium text-foreground">Display name</span>
-                <DraftInput
-                  id={`provider-instance-${instanceId}-display-name`}
-                  className="mt-1.5"
-                  value={instance.displayName ?? ""}
-                  onCommit={updateDisplayName}
-                  placeholder={driverOption?.label ?? "Instance label"}
-                  spellCheck={false}
-                />
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Optional label shown in the provider list.
-                </span>
-              </label>
-            </div>
+        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+          <label htmlFor={`provider-instance-${instanceId}-display-name`} className="block">
+            <span className="text-xs font-medium text-foreground">Display name</span>
+            <DraftInput
+              id={`provider-instance-${instanceId}-display-name`}
+              className="mt-1.5"
+              value={instance.displayName ?? ""}
+              onCommit={updateDisplayName}
+              placeholder={driverOption?.label ?? "Instance label"}
+              spellCheck={false}
+            />
+            <span className="mt-1 block text-xs text-muted-foreground">
+              Optional label shown in the provider list.
+            </span>
+          </label>
+        </div>
 
-            <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-              <ProviderAccentColorPicker
-                displayName={displayName}
-                value={accentColor}
-                onCommit={updateAccentColor}
-              />
-            </div>
+        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+          <ProviderAccentColorPicker
+            displayName={displayName}
+            value={accentColor}
+            onCommit={updateAccentColor}
+          />
+        </div>
 
-            <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-              <ProviderEnvironmentSection
-                environment={instance.environment ?? []}
-                onChange={updateEnvironment}
-              />
-            </div>
+        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+          <ProviderEnvironmentSection
+            environment={instance.environment ?? []}
+            onChange={updateEnvironment}
+          />
+        </div>
 
-            {driverOption ? (
-              <ProviderSettingsForm
-                definition={driverOption}
-                value={instance.config}
-                idPrefix={`provider-instance-${instanceId}`}
-                variant="card"
-                onChange={updateConfig}
-              />
-            ) : null}
+        {driverOption ? (
+          <ProviderSettingsForm
+            definition={driverOption}
+            value={instance.config}
+            idPrefix={`provider-instance-${instanceId}`}
+            variant="card"
+            onChange={updateConfig}
+          />
+        ) : null}
 
-            {driverOption !== undefined ? (
-              <ProviderModelsSection
-                instanceId={instanceId}
-                driverKind={driverKind}
-                models={modelsForDisplay}
-                customModels={customModels}
-                hiddenModels={hiddenModels}
-                favoriteModels={favoriteModels}
-                modelOrder={modelOrder}
-                onChange={updateCustomModels}
-                onHiddenModelsChange={onHiddenModelsChange}
-                onFavoriteModelsChange={onFavoriteModelsChange}
-                onModelOrderChange={onModelOrderChange}
-              />
-            ) : (
-              <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-                <p className="text-xs text-muted-foreground">
-                  This instance uses a driver (
-                  <code className="text-foreground">{String(instance.driver)}</code>) that is not
-                  shipped with the current build. Configuration values are preserved but cannot be
-                  edited from this surface.
-                </p>
-              </div>
-            )}
+        {driverOption !== undefined ? (
+          <ProviderModelsSection
+            instanceId={instanceId}
+            driverKind={driverKind}
+            models={modelsForDisplay}
+            customModels={customModels}
+            hiddenModels={hiddenModels}
+            favoriteModels={favoriteModels}
+            modelOrder={modelOrder}
+            onChange={updateCustomModels}
+            onHiddenModelsChange={onHiddenModelsChange}
+            onFavoriteModelsChange={onFavoriteModelsChange}
+            onModelOrderChange={onModelOrderChange}
+          />
+        ) : (
+          <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+            <p className="text-xs text-muted-foreground">
+              This instance uses a driver (
+              <code className="text-foreground">{String(instance.driver)}</code>) that is not
+              shipped with the current build. Configuration values are preserved but cannot be
+              edited from this surface.
+            </p>
           </div>
-        </CollapsibleContent>
-      </Collapsible>
+        )}
+      </div>
     </div>
   );
 }
