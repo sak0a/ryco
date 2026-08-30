@@ -1232,6 +1232,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 <ChatMarkdown
                   text={messageText}
                   cwd={ctx.markdownCwd}
+                  environmentId={ctx.activeThreadEnvironmentId}
                   isStreaming={assistantResponseStillInProgress}
                   skills={ctx.skills}
                   searchHighlight={messageSearchHighlight}
@@ -2615,7 +2616,7 @@ const WorkEntryExpandedPanel = memo(function WorkEntryExpandedPanel(props: {
   headingLabel: string;
 }) {
   const { workEntry, panelId, headingLabel } = props;
-  const { markdownCwd, timestampFormat } = use(TimelineStableCtx);
+  const { activeThreadEnvironmentId, markdownCwd, timestampFormat } = use(TimelineStableCtx);
   const inputLine = workEntryRawCommand(workEntry);
   const cleanedOutput = workEntry.output ? workEntry.output.replace(ANSI_SGR_RE, "") : "";
   const hasOutput = cleanedOutput.length > 0;
@@ -2640,6 +2641,7 @@ const WorkEntryExpandedPanel = memo(function WorkEntryExpandedPanel(props: {
         <ChatMarkdown
           text={buildShellTranscriptFence(inputLine, cleanedOutput, workEntry.exitCode)}
           cwd={markdownCwd}
+          environmentId={activeThreadEnvironmentId}
           isStreaming={false}
         />
       ) : (

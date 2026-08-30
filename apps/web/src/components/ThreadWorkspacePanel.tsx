@@ -196,8 +196,16 @@ export function AgentThreadPanel(props: {
             {props.subagent.detail}
           </p>
         ) : null}
-        {props.subagent.tool || props.subagent.providerThreadIds.length > 0 ? (
+        {props.subagent.model ||
+        props.subagent.tool ||
+        props.subagent.providerThreadIds.length > 0 ? (
           <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+            {props.subagent.model ? (
+              <span className="rounded-md border border-border/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {props.subagent.model}
+                {props.subagent.effort ? ` · ${props.subagent.effort}` : ""}
+              </span>
+            ) : null}
             {props.subagent.tool ? (
               <span className="rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                 {props.subagent.tool}

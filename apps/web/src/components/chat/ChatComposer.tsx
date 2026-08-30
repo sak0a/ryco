@@ -708,16 +708,25 @@ export const ChatComposer = memo(
     // Instance-keyed option list so the picker can show each configured
     // instance (built-in + custom) as a first-class sidebar entry. The
     // options are server-reported models plus that exact instance's
-    // configured custom models; selected slugs are not injected into lists.
+    // configured custom models. While a provider snapshot is unavailable,
+    // keep the active slug visible so a transient catalog failure cannot
+    // make the trigger appear to switch models.
     const modelOptionsByInstance = useMemo<
       ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>
     >(() => {
       const out = new Map<ProviderInstanceId, ReadonlyArray<AppModelOption>>();
       for (const entry of providerInstanceEntries) {
-        out.set(entry.instanceId, getAppModelOptionsForInstance(settings, entry));
+        out.set(
+          entry.instanceId,
+          getAppModelOptionsForInstance(
+            settings,
+            entry,
+            entry.instanceId === selectedInstanceId ? selectedModel : undefined,
+          ),
+        );
       }
       return out;
-    }, [providerInstanceEntries, settings]);
+    }, [providerInstanceEntries, selectedInstanceId, selectedModel, settings]);
     const selectedModelForPickerWithCustomFallback = useMemo(() => {
       const currentOptions = modelOptionsByInstance.get(selectedInstanceId) ?? [];
       return currentOptions.some((option) => option.slug === selectedModelForPicker)

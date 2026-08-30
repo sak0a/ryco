@@ -56,7 +56,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       url: "http://127.0.0.1:4301",
       exitCode: Effect.never,
     }),
-  connectToOpenCodeServer: ({ serverUrl }) =>
+  connectToOpenCodeServer: ({ serverUrl, serverPassword }) =>
     Effect.gen(function* () {
       if (!serverUrl) {
         yield* Effect.addFinalizer(() =>
@@ -67,6 +67,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       }
       return {
         url: serverUrl ?? "http://127.0.0.1:4301",
+        ...(serverPassword ? { serverPassword } : {}),
         exitCode: null,
         external: Boolean(serverUrl),
       };
@@ -81,7 +82,12 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
           }),
         )
       : Effect.succeed({ stdout: runtimeMock.state.versionStdout, stderr: "", code: 0 }),
-  createOpenCodeSdkClient: () => Effect.succeed({} as unknown as OpencodeClient),
+  createOpenCodeSdkClient: () =>
+    Effect.succeed({
+      global: {
+        health: async () => ({ data: { healthy: true, version: "1.18.18" } }),
+      },
+    } as unknown as OpencodeClient),
   loadOpenCodeInventory: () =>
     runtimeMock.state.inventoryError
       ? Effect.fail(

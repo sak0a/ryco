@@ -912,6 +912,10 @@ function claudeTaskMetadata(message: SDKMessage): Record<string, unknown> | unde
 function makeClaudeTaskSubagentRef(
   existing: SubagentRef | undefined,
   message: SDKMessage & { readonly task_id: string },
+  linkage?: {
+    readonly model?: string | undefined;
+    readonly effort?: string | undefined;
+  },
 ): SubagentRef {
   const taskType = claudeTaskField(message, "task_type");
   const lastToolName = claudeTaskField(message, "last_tool_name");
@@ -931,6 +935,10 @@ function makeClaudeTaskSubagentRef(
     capability: "summary",
     label,
     ...(description && { description }),
+    ...((linkage?.model ?? existing?.model) ? { model: linkage?.model ?? existing?.model } : {}),
+    ...((linkage?.effort ?? existing?.effort)
+      ? { effort: linkage?.effort ?? existing?.effort }
+      : {}),
     providerTaskId: RuntimeTaskId.make(message.task_id),
     ...(Object.keys(metadata).length > 0 && { metadata }),
   };
@@ -3284,6 +3292,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           const subagent = makeClaudeTaskSubagentRef(
             context.subagentByTaskId.get(message.task_id),
             message,
+            context.taskAgents.get(message.task_id),
           );
           context.subagentByTaskId.set(message.task_id, subagent);
           yield* emitClaudeSubagentStarted(context, subagent, message);
@@ -3349,6 +3358,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           const subagent = makeClaudeTaskSubagentRef(
             context.subagentByTaskId.get(message.task_id),
             message,
+            context.taskAgents.get(message.task_id),
           );
           context.subagentByTaskId.set(message.task_id, subagent);
           yield* emitClaudeSubagentUpdated(context, {
@@ -3453,6 +3463,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           const subagent = makeClaudeTaskSubagentRef(
             context.subagentByTaskId.get(message.task_id),
             message,
+            context.taskAgents.get(message.task_id),
           );
           context.subagentByTaskId.set(message.task_id, subagent);
           yield* emitClaudeSubagentCompleted(context, {

@@ -7,8 +7,7 @@
  *
  * Two instances with different `serverUrl`s therefore talk to independent
  * OpenCode servers; when no `serverUrl` is set, the adapter + text-generation
- * shares spin up their own scoped child processes, and those child
- * processes are released when the registry scope closes.
+ * shares reuse one scoped child process owned by the provider instance.
  *
  * @module provider/Drivers/OpenCodeDriver
  */
@@ -28,6 +27,7 @@ import {
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { OpenCodeRuntime } from "../opencodeRuntime.ts";
+import { makeOpenCodeServerOwner } from "../OpenCodeServerOwner.ts";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
@@ -122,13 +122,22 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       });
+      const serverOwner =
+        effectiveConfig.serverUrl.trim().length === 0
+          ? yield* makeOpenCodeServerOwner(effectiveConfig, processEnv)
+          : undefined;
 
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
+        ...(serverOwner ? { serverOwner } : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
-      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);
+      const textGeneration = yield* makeOpenCodeTextGeneration(
+        effectiveConfig,
+        processEnv,
+        serverOwner ? { serverOwner } : undefined,
+      );
 
       const checkProvider = checkOpenCodeProviderStatus(
         effectiveConfig,
@@ -149,6 +158,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             Effect.provideService(ServerSettingsService, serverSettings),
             Effect.flatMap((enrichedSnapshot) => publishSnapshot(enrichedSnapshot)),
           ),
+        retainInventoryOnError: true,
         refreshInterval: null,
       }).pipe(
         Effect.mapError(

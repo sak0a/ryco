@@ -45,6 +45,15 @@ export interface OrchestrationEventStoreShape {
     limit?: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
 
+  /** Replay a stable range without following events appended after the captured head. */
+  readonly readThroughSequence: (
+    sequenceExclusive: number,
+    sequenceInclusive: number,
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
+
+  /** Return the current durable event-stream head, or zero when the store is empty. */
+  readonly latestSequence: Effect.Effect<number, OrchestrationEventStoreError>;
+
   /**
    * Read a single ordered page of events after the provided sequence.
    *

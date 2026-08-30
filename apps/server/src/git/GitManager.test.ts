@@ -1053,6 +1053,59 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("skips pull request lookups for a provably unpublished branch", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("ryco-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/local-only"]);
+
+      const { manager, ghCalls } = yield* makeManager();
+      const status = yield* manager.status({ cwd: repoDir });
+
+      expect(status.refName).toBe("feature/local-only");
+      expect(status.pr).toBeNull();
+      expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(0);
+    }),
+  );
+
+  it.effect("queries pull requests for a pushed branch without configured upstream", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("ryco-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/pushed-no-upstream"]);
+      yield* runGit(repoDir, ["push", "origin", "feature/pushed-no-upstream"]);
+
+      const { manager, ghCalls } = yield* makeManager();
+      yield* manager.status({ cwd: repoDir });
+
+      expect(ghCalls.filter((call) => call.startsWith("pr list ")).length).toBeGreaterThan(0);
+    }),
+  );
+
+  it.effect("propagates pull request provider failures to remote status polling", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("ryco-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/provider-failure"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/provider-failure"]);
+
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          failWith: new GitHubCliError({ operation: "execute", detail: "provider unavailable" }),
+        },
+      });
+
+      const error = yield* manager.remoteStatus({ cwd: repoDir }).pipe(Effect.flip);
+      expect(String(error)).toContain("provider unavailable");
+    }),
+  );
+
   it.effect(
     "status ignores unrelated fork PRs when the current branch tracks the same repository",
     () =>
@@ -1382,7 +1435,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("status is resilient to gh lookup failures and returns pr null", () =>
+  it.effect("status surfaces pull request lookup failures", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("ryco-git-manager-");
       yield* initRepo(repoDir);
@@ -1400,9 +1453,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         },
       });
 
-      const status = yield* manager.status({ cwd: repoDir });
-      expect(status.refName).toBe("feature/status-no-gh");
-      expect(status.pr).toBeNull();
+      const error = yield* manager.status({ cwd: repoDir }).pipe(Effect.flip);
+      expect(String(error)).toContain("required but not available on PATH");
     }),
   );
 

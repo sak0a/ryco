@@ -165,6 +165,15 @@ layer("OrchestrationEventStore", (it) => {
       );
       assert.equal(secondPage.nextSequence, startSequence + 3);
       assert.equal(secondPage.hasMore, false);
+
+      assert.equal(yield* eventStore.latestSequence, startSequence + 3);
+      const boundedReplay = yield* Stream.runCollect(
+        eventStore.readThroughSequence(startSequence, startSequence + 2),
+      ).pipe(Effect.map((events) => Array.from(events)));
+      assert.deepEqual(
+        boundedReplay.map((event) => event.sequence),
+        [startSequence + 1, startSequence + 2],
+      );
     }),
   );
 

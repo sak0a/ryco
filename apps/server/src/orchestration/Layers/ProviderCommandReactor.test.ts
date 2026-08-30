@@ -659,11 +659,24 @@ describe("ProviderCommandReactor", () => {
     expect(harness.sendTurn).not.toHaveBeenCalled();
   });
 
-  it("generates a thread title on the first turn", async () => {
+  it("retries thread title generation after a transient failure", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
     const seededTitle = "Please investigate reconnect failures after restar...";
-    harness.generateThreadTitle.mockReturnValue(Effect.succeed({ title: "Generated title" }));
+    let attempts = 0;
+    harness.generateThreadTitle.mockReturnValue(
+      Effect.suspend(() => {
+        attempts += 1;
+        return attempts === 1
+          ? Effect.fail(
+              new TextGenerationError({
+                operation: "generateThreadTitle",
+                detail: "text generation timed out",
+              }),
+            )
+          : Effect.succeed({ title: "Generated title" });
+      }),
+    );
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -703,10 +716,11 @@ describe("ProviderCommandReactor", () => {
         readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))?.title ===
         "Generated title"
       );
-    });
+    }, 8_000);
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Generated title");
+    expect(attempts).toBe(2);
   });
 
   it("does not overwrite an existing custom thread title on the first turn", async () => {

@@ -1298,6 +1298,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.equal(response.status, 200);
+      assert.equal(response.headers["cache-control"], "private, max-age=3600");
+      assert.equal(response.headers["x-content-type-options"], "nosniff");
+      assert.include(response.headers["content-security-policy"] ?? "", "sandbox");
       assert.equal(yield* response.text, "<svg>router-project-favicon</svg>");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -1323,6 +1326,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.equal(response.status, 200);
+      assert.equal(response.headers["cache-control"], "private, max-age=3600");
+      assert.equal(response.headers["x-content-type-options"], "nosniff");
+      assert.include(response.headers["content-security-policy"] ?? "", "sandbox");
       assert.include(yield* response.text, 'data-fallback="project-favicon"');
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -2071,6 +2077,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
       });
       assert.equal(response.status, 200);
+      assert.equal(response.headers["cache-control"], "private, max-age=3600");
+      assert.equal(response.headers["x-content-type-options"], "nosniff");
+      assert.equal(response.headers["content-type"], "application/octet-stream");
+      assert.include(response.headers["content-disposition"] ?? "", "attachment");
       assert.equal(yield* response.text, "attachment-ok");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -2099,6 +2109,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
       );
       assert.equal(response.status, 200);
+      assert.equal(response.headers["cache-control"], "private, max-age=3600");
+      assert.equal(response.headers["x-content-type-options"], "nosniff");
       assert.equal(yield* response.text, "attachment-encoded-ok");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

@@ -404,6 +404,8 @@ describe("deriveThreadSubagents", () => {
             origin: "native",
             capability: "transcript",
             label: "OpenCode reviewer",
+            model: "openai/gpt-5.4",
+            effort: "high",
             providerThreadId: "child-1",
             providerSessionId: "child-1",
           },
@@ -446,6 +448,8 @@ describe("deriveThreadSubagents", () => {
       status: "finished",
       origin: "native",
       capability: "transcript",
+      model: "openai/gpt-5.4",
+      effort: "high",
       providerThreadIds: ["child-1"],
       providerSessionIds: ["child-1"],
       messages: [

@@ -134,7 +134,10 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       new Map<string, Deferred.Deferred<unknown, CodexError.CodexAppServerError>>(),
     );
     const nextRequestId = yield* Ref.make(1);
-    const remainder = yield* Ref.make("");
+    const remainder: { fragments: Array<string>; byteLength: number } = {
+      fragments: [],
+      byteLength: 0,
+    };
     const terminationHandled = yield* Ref.make(false);
 
     const logProtocol = (event: CodexAppServerProtocolLogEvent) => {
@@ -352,29 +355,49 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
     yield* options.stdio.stdin.pipe(
       Stream.decodeText(),
       Stream.runForEach((chunk) =>
-        Ref.modify(remainder, (current) => {
-          const combined = current + chunk;
-          const lines = combined.split("\n");
-          const nextRemainder = lines.pop() ?? "";
-          return [
-            {
-              lines: lines.map((line) => line.replace(/\r$/, "")),
-              remainderBytes: new TextEncoder().encode(nextRemainder).byteLength,
-            },
-            nextRemainder,
-          ] as const;
-        }).pipe(
-          Effect.flatMap(({ lines, remainderBytes }) =>
-            remainderBytes > PROTOCOL_MAX_FRAME_BYTES
-              ? Effect.fail(
-                  new CodexError.CodexAppServerProtocolOverloadedError({
-                    queue: "incoming-frame-bytes",
-                    capacity: PROTOCOL_MAX_FRAME_BYTES,
-                  }),
-                )
-              : Effect.forEach(lines, handleLine, { discard: true }),
-          ),
-        ),
+        Effect.gen(function* () {
+          const lines: Array<string> = [];
+          let start = 0;
+
+          for (
+            let newline = chunk.indexOf("\n");
+            newline !== -1;
+            newline = chunk.indexOf("\n", start)
+          ) {
+            const fragment = chunk.slice(start, newline);
+            const frameBytes = remainder.byteLength + new TextEncoder().encode(fragment).byteLength;
+            if (frameBytes > PROTOCOL_MAX_FRAME_BYTES) {
+              return yield* Effect.fail(
+                new CodexError.CodexAppServerProtocolOverloadedError({
+                  queue: "incoming-frame-bytes",
+                  capacity: PROTOCOL_MAX_FRAME_BYTES,
+                }),
+              );
+            }
+
+            remainder.fragments.push(fragment);
+            lines.push(remainder.fragments.join("").replace(/\r$/, ""));
+            remainder.fragments.length = 0;
+            remainder.byteLength = 0;
+            start = newline + 1;
+          }
+
+          if (start < chunk.length) {
+            const fragment = chunk.slice(start);
+            remainder.byteLength += new TextEncoder().encode(fragment).byteLength;
+            if (remainder.byteLength > PROTOCOL_MAX_FRAME_BYTES) {
+              return yield* Effect.fail(
+                new CodexError.CodexAppServerProtocolOverloadedError({
+                  queue: "incoming-frame-bytes",
+                  capacity: PROTOCOL_MAX_FRAME_BYTES,
+                }),
+              );
+            }
+            remainder.fragments.push(fragment);
+          }
+
+          yield* Effect.forEach(lines, handleLine, { discard: true });
+        }),
       ),
       Effect.matchEffect({
         onFailure: (error) =>
@@ -382,7 +405,12 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             Effect.succeed(normalizeProtocolError(error, "Codex App Server input stream failed")),
           ),
         onSuccess: () =>
-          Ref.get(remainder).pipe(
+          Effect.sync(() => {
+            const line = remainder.fragments.join("");
+            remainder.fragments.length = 0;
+            remainder.byteLength = 0;
+            return line;
+          }).pipe(
             Effect.flatMap((line) => (line.trim().length === 0 ? Effect.void : handleLine(line))),
             Effect.matchEffect({
               onFailure: (error) => handleTermination(() => Effect.succeed(error)),

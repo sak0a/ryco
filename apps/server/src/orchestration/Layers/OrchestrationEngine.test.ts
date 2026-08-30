@@ -99,6 +99,8 @@ describe("OrchestrationEngine", () => {
           return savedEvent;
         }),
       readFromSequence: () => Stream.empty,
+      readThroughSequence: () => Stream.empty,
+      latestSequence: Effect.succeed(7),
       readPage: (sequenceExclusive) =>
         Effect.succeed({
           events: [],
@@ -801,6 +803,14 @@ describe("OrchestrationEngine", () => {
       readFromSequence(sequenceExclusive) {
         return Stream.fromIterable(events.filter((event) => event.sequence > sequenceExclusive));
       },
+      readThroughSequence(sequenceExclusive, sequenceInclusive) {
+        return Stream.fromIterable(
+          events.filter(
+            (event) => event.sequence > sequenceExclusive && event.sequence <= sequenceInclusive,
+          ),
+        );
+      },
+      latestSequence: Effect.sync(() => events.at(-1)?.sequence ?? 0),
       readPage(sequenceExclusive, limit) {
         const pageEvents = events
           .filter((event) => event.sequence > sequenceExclusive)
@@ -1052,6 +1062,14 @@ describe("OrchestrationEngine", () => {
       readFromSequence(sequenceExclusive) {
         return Stream.fromIterable(events.filter((event) => event.sequence > sequenceExclusive));
       },
+      readThroughSequence(sequenceExclusive, sequenceInclusive) {
+        return Stream.fromIterable(
+          events.filter(
+            (event) => event.sequence > sequenceExclusive && event.sequence <= sequenceInclusive,
+          ),
+        );
+      },
+      latestSequence: Effect.sync(() => events.at(-1)?.sequence ?? 0),
       readPage(sequenceExclusive, limit) {
         const pageEvents = events
           .filter((event) => event.sequence > sequenceExclusive)
