@@ -28,7 +28,7 @@ import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 
-const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
+const PROJECT_FAVICON_CACHE_CONTROL = "private, max-age=3600";
 const PROJECT_AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 const PROJECT_AVATAR_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 const STATIC_INDEX_CACHE_CONTROL = "no-cache";
@@ -38,6 +38,19 @@ const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 export const SERVER_ENVIRONMENT_DESCRIPTOR_PATH = "/.well-known/ryco/environment";
 export const LEGACY_SERVER_ENVIRONMENT_DESCRIPTOR_PATH = "/.well-known/s3/environment";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+const DOWNLOAD_CONTENT_SECURITY_POLICY = "default-src 'none'; sandbox";
+const INLINE_ATTACHMENT_EXTENSIONS = new Set([
+  ".avif",
+  ".bmp",
+  ".gif",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".svg",
+  ".webp",
+]);
 const STATIC_CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -83,6 +96,58 @@ export function resolveStaticCacheControl(staticRelativePath: string): string {
   const basename = normalized.split("/").at(-1) ?? normalized;
   const hasBuildHash = /(?:^|[-.])[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9]+$/u.test(basename);
   return hasBuildHash ? STATIC_IMMUTABLE_CACHE_CONTROL : STATIC_INDEX_CACHE_CONTROL;
+}
+
+/** Build a download disposition with a safe ASCII fallback and UTF-8 filename. */
+export function downloadContentDisposition(fileName?: string): string {
+  if (fileName === undefined) {
+    return "attachment";
+  }
+
+  // encodeURIComponent rejects unpaired surrogates, and control characters,
+  // quotes, and backslashes are unsafe in the quoted fallback parameter.
+  // eslint-disable-next-line no-control-regex
+  const sanitized = fileName.toWellFormed().replace(/[\u0000-\u001f"\\]/g, "_");
+  const asciiFallback = sanitized.replace(/[^\u0020-\u007e]/g, "_");
+  const extendedName = encodeURIComponent(sanitized).replace(
+    /['()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${asciiFallback}"${
+    asciiFallback === sanitized ? "" : `; filename*=UTF-8''${extendedName}`
+  }`;
+}
+
+export function userAssetResponseHeaders(
+  filePath: string,
+  path: Pick<Path.Path, "basename" | "extname">,
+): Record<string, string> {
+  const extension = path.extname(filePath).toLowerCase();
+  const download = !INLINE_ATTACHMENT_EXTENSIONS.has(extension);
+
+  return {
+    "Cache-Control": "private, max-age=3600",
+    "X-Content-Type-Options": "nosniff",
+    ...(download
+      ? {
+          "Content-Disposition": downloadContentDisposition(path.basename(filePath)),
+          "Content-Security-Policy": DOWNLOAD_CONTENT_SECURITY_POLICY,
+          "Content-Type": "application/octet-stream",
+        }
+      : extension === ".svg"
+        ? { "Content-Security-Policy": SVG_CONTENT_SECURITY_POLICY }
+        : {}),
+  };
+}
+
+export function inlineImageResponseHeaders(filePath: string): Record<string, string> {
+  return {
+    "Cache-Control": PROJECT_FAVICON_CACHE_CONTROL,
+    "X-Content-Type-Options": "nosniff",
+    ...(filePath.toLowerCase().endsWith(".svg")
+      ? { "Content-Security-Policy": SVG_CONTENT_SECURITY_POLICY }
+      : {}),
+  };
 }
 
 function resolveStaticContentType(filePath: string, path: Path.Path): string {
@@ -220,6 +285,7 @@ export const attachmentsRouteLayer = HttpRouter.add(
     }
 
     const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
     const fileInfo = yield* fileSystem
       .stat(filePath)
       .pipe(Effect.catch(() => Effect.succeed(null)));
@@ -229,9 +295,7 @@ export const attachmentsRouteLayer = HttpRouter.add(
 
     return yield* HttpServerResponse.file(filePath, {
       status: 200,
-      headers: {
-        "Cache-Control": "public, max-age=31536000, immutable",
-      },
+      headers: userAssetResponseHeaders(filePath, path),
     }).pipe(
       Effect.catch(() =>
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
@@ -262,17 +326,13 @@ export const projectFaviconRouteLayer = HttpRouter.add(
       return HttpServerResponse.text(FALLBACK_PROJECT_FAVICON_SVG, {
         status: 200,
         contentType: "image/svg+xml",
-        headers: {
-          "Cache-Control": PROJECT_FAVICON_CACHE_CONTROL,
-        },
+        headers: inlineImageResponseHeaders("fallback.svg"),
       });
     }
 
     return yield* HttpServerResponse.file(faviconFilePath, {
       status: 200,
-      headers: {
-        "Cache-Control": PROJECT_FAVICON_CACHE_CONTROL,
-      },
+      headers: inlineImageResponseHeaders(faviconFilePath),
     }).pipe(
       Effect.catch(() =>
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),

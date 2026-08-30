@@ -782,6 +782,44 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     normalizeStatusCacheKey(cwd).pipe(
       Effect.flatMap((cacheKey) => Cache.invalidate(localStatusResultCache, cacheKey)),
     );
+  const probeBranchPublished = Effect.fn("probeBranchPublished")(function* (
+    cwd: string,
+    branch: string,
+    upstreamRef: string | null,
+  ) {
+    if (upstreamRef !== null) {
+      return true;
+    }
+
+    return yield* Effect.gen(function* () {
+      const remotesResult = yield* gitCore.execute({
+        operation: "GitManager.probeBranchPublished.remotes",
+        cwd,
+        args: ["remote"],
+      });
+      const remotes = remotesResult.stdout
+        .split("\n")
+        .map((remote) => remote.trim())
+        .filter((remote) => remote.length > 0);
+      if (remotes.length === 0) {
+        // A provider may still infer repository context outside local remotes.
+        return null;
+      }
+
+      const refsResult = yield* gitCore.execute({
+        operation: "GitManager.probeBranchPublished.remoteRefs",
+        cwd,
+        args: ["for-each-ref", "--format=%(refname:short)", "refs/remotes"],
+      });
+      const remoteRefs = new Set(
+        refsResult.stdout
+          .split("\n")
+          .map((ref) => ref.trim())
+          .filter((ref) => ref.length > 0),
+      );
+      return remotes.some((remote) => remoteRefs.has(`${remote}/${branch}`));
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
+  });
   const readRemoteStatus = Effect.fn("readRemoteStatus")(function* (cwd: string) {
     const details = yield* gitCore
       .statusDetails(cwd)
@@ -790,8 +828,12 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       return null;
     }
 
+    const shouldQueryPullRequests =
+      details.branch === null
+        ? false
+        : ((yield* probeBranchPublished(cwd, details.branch, details.upstreamRef)) ?? true);
     const pr =
-      details.branch !== null
+      details.branch !== null && shouldQueryPullRequests
         ? yield* findLatestPr(cwd, {
             branch: details.branch,
             upstreamRef: details.upstreamRef,
@@ -803,7 +845,6 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
               if (details.isDefaultBranch && latest.state !== "open") return null;
               return toStatusPr(latest);
             }),
-            Effect.catch(() => Effect.succeed(null)),
           )
         : null;
 

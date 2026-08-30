@@ -69,6 +69,11 @@ const ReadFromSequenceRequestSchema = Schema.Struct({
   sequenceExclusive: NonNegativeInt,
   limit: Schema.Number,
 });
+const ReadThroughSequenceRequestSchema = Schema.Struct({
+  sequenceExclusive: NonNegativeInt,
+  sequenceInclusive: NonNegativeInt,
+  limit: Schema.Number,
+});
 const DEFAULT_READ_FROM_SEQUENCE_LIMIT = 1_000;
 const READ_PAGE_SIZE = 500;
 
@@ -186,6 +191,37 @@ const makeEventStore = Effect.gen(function* () {
       `,
   });
 
+  const readEventRowsThroughSequence = SqlSchema.findAll({
+    Request: ReadThroughSequenceRequestSchema,
+    Result: OrchestrationEventPersistedRowSchema,
+    execute: (request) =>
+      sql`
+        SELECT
+          sequence,
+          event_id AS "eventId",
+          event_type AS "type",
+          aggregate_kind AS "aggregateKind",
+          stream_id AS "aggregateId",
+          occurred_at AS "occurredAt",
+          command_id AS "commandId",
+          causation_event_id AS "causationEventId",
+          correlation_id AS "correlationId",
+          payload_json AS "payload",
+          metadata_json AS "metadata"
+        FROM orchestration_events
+        WHERE sequence > ${request.sequenceExclusive}
+          AND sequence <= ${request.sequenceInclusive}
+        ORDER BY sequence ASC
+        LIMIT ${request.limit}
+      `,
+  });
+
+  const readLatestSequence = SqlSchema.findOne({
+    Request: Schema.Void,
+    Result: Schema.Struct({ sequence: Schema.NullOr(NonNegativeInt) }),
+    execute: () => sql`SELECT MAX(sequence) AS "sequence" FROM orchestration_events`,
+  });
+
   const readRecentEventRows = SqlSchema.findAll({
     Request: Schema.Struct({ since: IsoDateTime, limit: Schema.Int }),
     Result: OrchestrationEventPersistedRowSchema,
@@ -297,6 +333,71 @@ const makeEventStore = Effect.gen(function* () {
     return readPage(sequenceExclusive, normalizedLimit);
   };
 
+  const readThroughSequence: OrchestrationEventStoreShape["readThroughSequence"] = (
+    sequenceExclusive,
+    sequenceInclusive,
+  ) => {
+    const normalizedStart = Math.max(0, Math.floor(sequenceExclusive));
+    const normalizedEnd = Math.max(0, Math.floor(sequenceInclusive));
+    if (normalizedEnd <= normalizedStart) {
+      return Stream.empty;
+    }
+
+    const readPage = (
+      cursor: number,
+    ): Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError> =>
+      Stream.fromEffect(
+        readEventRowsThroughSequence({
+          sequenceExclusive: cursor,
+          sequenceInclusive: normalizedEnd,
+          limit: READ_PAGE_SIZE,
+        }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "OrchestrationEventStore.readThroughSequence:query",
+              "OrchestrationEventStore.readThroughSequence:decodeRows",
+            ),
+          ),
+          Effect.flatMap((rows) =>
+            Effect.forEach(rows, (row) =>
+              decodeEvent(row).pipe(
+                Effect.mapError(
+                  toPersistenceDecodeError(
+                    "OrchestrationEventStore.readThroughSequence:rowToEvent",
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ).pipe(
+        Stream.flatMap((events) => {
+          if (events.length === 0) {
+            return Stream.empty;
+          }
+          const nextCursor = events[events.length - 1]!.sequence;
+          return Stream.concat(
+            Stream.fromIterable(events),
+            nextCursor < normalizedEnd ? readPage(nextCursor) : Stream.empty,
+          );
+        }),
+      );
+
+    return readPage(normalizedStart);
+  };
+
+  const latestSequence: OrchestrationEventStoreShape["latestSequence"] = readLatestSequence(
+    undefined,
+  ).pipe(
+    Effect.map((row) => row.sequence ?? 0),
+    Effect.mapError(
+      toPersistenceSqlOrDecodeError(
+        "OrchestrationEventStore.latestSequence:query",
+        "OrchestrationEventStore.latestSequence:decodeRow",
+      ),
+    ),
+  );
+
   const readPage: OrchestrationEventStoreShape["readPage"] = (sequenceExclusive, limit) => {
     const normalizedLimit = Math.max(0, Math.floor(limit));
     const normalizedSequenceExclusive = Math.max(0, Math.floor(sequenceExclusive));
@@ -377,6 +478,8 @@ const makeEventStore = Effect.gen(function* () {
     readPage,
     readRecent,
     readFromSequence,
+    readThroughSequence,
+    latestSequence,
     readAll: () => readFromSequence(0, Number.MAX_SAFE_INTEGER),
     hasEventAfter,
   } satisfies OrchestrationEventStoreShape;

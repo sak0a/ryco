@@ -2084,8 +2084,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       }
 
       const replayFromSequence = Math.min(...lastAppliedByProjector.values());
+      const replayThroughSequence = yield* eventStore.latestSequence;
       yield* Stream.runForEach(
-        eventStore.readFromSequence(replayFromSequence, Number.MAX_SAFE_INTEGER),
+        eventStore.readThroughSequence(replayFromSequence, replayThroughSequence),
         (event) =>
           Effect.gen(function* () {
             const projectorsToAdvance = projectors.filter(

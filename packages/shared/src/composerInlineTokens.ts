@@ -25,7 +25,15 @@ export interface CollectComposerInlineTokensOptions {
 
 const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s)/g;
 const MENTION_TOKEN_REGEX = /(^|\s)@(?:"((?:\\.|[^"\\])*)"|([^\s@"]+))(?=\s)/g;
-const FILE_LINK_TOKEN_REGEX = /(^|\s)\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)(?=\s)/g;
+// Bound the label body so a long run of unterminated brackets cannot make the
+// regular-expression engine rescan the rest of the composer from every space.
+// Only a basename survives validation below, so 512 remains well above common
+// filesystem filename limits.
+const MAX_FILE_LINK_LABEL_LENGTH = 512;
+const FILE_LINK_TOKEN_REGEX = new RegExp(
+  `(^|\\s)\\[((?:\\\\.|[^\\]\\\\]){0,${MAX_FILE_LINK_LABEL_LENGTH}})\\]\\(([^)\\s]+)\\)(?=\\s)`,
+  "g",
+);
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/;
 // Autocomplete emits canonical file links, so ambiguous bare @scope/package text stays a package.
