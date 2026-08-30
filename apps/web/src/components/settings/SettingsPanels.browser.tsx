@@ -169,6 +169,7 @@ vi.mock("../../environments/runtime", () => {
       new URL(path, "http://localhost:3000").toString(),
     waitForSavedEnvironmentRegistryHydration: async () => undefined,
     addSavedEnvironment: vi.fn(),
+    connectPrimaryEnvironment: () => primaryConnection,
     connectDesktopWorkspaceEnvironment: vi.fn(),
     connectDesktopSshEnvironment: mockConnectDesktopSshEnvironment,
     disconnectPrimaryEnvironment: vi.fn(),
