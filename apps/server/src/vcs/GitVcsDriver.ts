@@ -202,6 +202,7 @@ export interface GitVcsDriverShape {
     input: GitSetBranchUpstreamInput,
   ) => Effect.Effect<void, GitCommandError>;
   readonly removeWorktree: (input: VcsRemoveWorktreeInput) => Effect.Effect<void, GitCommandError>;
+  readonly pruneWorktrees: (cwd: string) => Effect.Effect<void, GitCommandError>;
   readonly renameBranch: (
     input: GitRenameBranchInput,
   ) => Effect.Effect<GitRenameBranchResult, GitCommandError>;

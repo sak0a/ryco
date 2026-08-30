@@ -2217,6 +2217,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
   });
 
+  const pruneWorktrees: GitVcsDriver.GitVcsDriverShape["pruneWorktrees"] = (cwd) =>
+    executeGit("GitVcsDriver.pruneWorktrees", cwd, ["worktree", "prune", "--expire", "now"], {
+      timeoutMs: 10_000,
+      fallbackErrorMessage: "git worktree prune failed",
+    }).pipe(Effect.asVoid);
+
   const renameBranch: GitVcsDriver.GitVcsDriverShape["renameBranch"] = Effect.fn("renameBranch")(
     function* (input) {
       if (input.oldBranch === input.newBranch) {
@@ -2408,6 +2414,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     fetchRemoteTrackingBranch,
     setBranchUpstream,
     removeWorktree,
+    pruneWorktrees,
     renameBranch,
     createRef,
     deleteBranch,

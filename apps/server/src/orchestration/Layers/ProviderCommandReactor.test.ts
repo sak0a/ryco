@@ -247,6 +247,21 @@ describe("ProviderCommandReactor", () => {
             : "renamed-branch",
       }),
     );
+    const listWorktreePaths = vi.fn(() => Effect.succeed<readonly string[]>([]));
+    const listLocalBranchNames = vi.fn(() =>
+      Effect.succeed(["ryco/1234abcd", "feature/workspace", "feature/recovered"]),
+    );
+    const pruneWorktrees = vi.fn(() => Effect.void);
+    const createWorktree = vi.fn(
+      (input: Parameters<GitWorkflowServiceShape["createWorktree"]>[0]) =>
+        Effect.succeed({
+          worktree: {
+            path: input.path ?? path.join(input.cwd, input.refName.replaceAll("/", "-")),
+            refName: input.newRefName ?? input.refName,
+          },
+        }),
+    );
+    const invalidateStatus = vi.fn(() => Effect.void);
     const refreshStatus = vi.fn((_: string) =>
       Effect.succeed({
         isRepo: true,
@@ -364,6 +379,11 @@ describe("ProviderCommandReactor", () => {
       ),
       Layer.provideMerge(
         Layer.mock(GitWorkflowService)({
+          createWorktree,
+          invalidateStatus,
+          listLocalBranchNames,
+          listWorktreePaths,
+          pruneWorktrees,
           renameBranch,
         } satisfies Partial<GitWorkflowServiceShape>),
       ),
@@ -431,6 +451,11 @@ describe("ProviderCommandReactor", () => {
       respondToRequest,
       respondToUserInput,
       stopSession,
+      createWorktree,
+      invalidateStatus,
+      listLocalBranchNames,
+      listWorktreePaths,
+      pruneWorktrees,
       renameBranch,
       refreshStatus,
       generateBranchName,
@@ -479,6 +504,153 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("recreates a missing recorded worktree before starting the provider session", async () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-worktree-recovery-"));
+    const harness = await createHarness({ baseDir });
+    const worktreePath = path.join(baseDir, "worktrees", "feature-recovered");
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-record-missing-worktree"),
+        threadId: ThreadId.make("thread-1"),
+        branch: "feature/recovered",
+        worktreePath,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-missing-worktree"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-missing-worktree"),
+          role: "user",
+          text: "continue in the recorded worktree",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.listLocalBranchNames).toHaveBeenCalledWith("/tmp/provider-project");
+    expect(harness.pruneWorktrees).toHaveBeenCalledWith("/tmp/provider-project");
+    expect(harness.createWorktree).toHaveBeenCalledWith({
+      cwd: "/tmp/provider-project",
+      path: worktreePath,
+      refName: "feature/recovered",
+      dependencyHydration: "none",
+    });
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({ cwd: worktreePath });
+    expect(
+      harness.pruneWorktrees.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    ).toBeLessThan(harness.createWorktree.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
+    expect(
+      harness.createWorktree.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    ).toBeLessThan(harness.startSession.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
+  });
+
+  it("does not overwrite an existing directory that is not a registered worktree", async () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-worktree-collision-"));
+    const harness = await createHarness({ baseDir });
+    const occupiedPath = path.join(baseDir, "worktrees", "occupied");
+    fs.mkdirSync(occupiedPath, { recursive: true });
+    fs.writeFileSync(path.join(occupiedPath, "keep.txt"), "keep\n");
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-record-occupied-worktree"),
+        threadId: ThreadId.make("thread-1"),
+        branch: "feature/recovered",
+        worktreePath: occupiedPath,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-occupied-worktree"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-occupied-worktree"),
+          role: "user",
+          text: "do not overwrite this directory",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return (
+        readModel.threads[0]?.activities.some((activity) =>
+          activity.summary.includes("Provider turn start failed"),
+        ) ?? false
+      );
+    });
+    expect(harness.pruneWorktrees).not.toHaveBeenCalled();
+    expect(harness.createWorktree).not.toHaveBeenCalled();
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect(fs.readFileSync(path.join(occupiedPath, "keep.txt"), "utf8")).toBe("keep\n");
+  });
+
+  it("fails safely when the recorded worktree branch no longer exists", async () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-worktree-branch-missing-"));
+    const harness = await createHarness({ baseDir });
+    harness.listLocalBranchNames.mockReturnValue(Effect.succeed([]));
+    const worktreePath = path.join(baseDir, "worktrees", "deleted-branch");
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-record-deleted-worktree-branch"),
+        threadId: ThreadId.make("thread-1"),
+        branch: "feature/deleted",
+        worktreePath,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-deleted-worktree-branch"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-deleted-worktree-branch"),
+          role: "user",
+          text: "continue after branch deletion",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return (
+        readModel.threads[0]?.activities.some((activity) =>
+          activity.summary.includes("Provider turn start failed"),
+        ) ?? false
+      );
+    });
+    expect(harness.pruneWorktrees).not.toHaveBeenCalled();
+    expect(harness.createWorktree).not.toHaveBeenCalled();
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
   });
 
   it("generates a thread title on the first turn", async () => {
@@ -696,7 +868,7 @@ describe("ProviderCommandReactor", () => {
     );
 
     await waitFor(() => harness.generateBranchName.mock.calls.length === 1);
-    await waitFor(() => harness.refreshStatus.mock.calls.length === 1);
+    await waitFor(() => harness.refreshStatus.mock.calls.length >= 1);
     expect(harness.generateBranchName.mock.calls[0]?.[0]).toMatchObject({
       message: "Add a safer reconnect backoff.",
     });
@@ -1196,6 +1368,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-thread-worktree-change"),
         threadId: ThreadId.make("thread-1"),
+        branch: "feature/workspace",
         worktreePath: "/tmp/provider-project-worktree",
       }),
     );
