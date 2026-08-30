@@ -952,6 +952,25 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const sessions = yield* provider.listSessions();
       assert.equal(sessions.length, 1);
 
+      const unsupportedFileError = yield* provider
+        .sendTurn({
+          threadId: session.threadId,
+          input: "review this",
+          attachments: [
+            {
+              type: "file",
+              id: "thread-1-file",
+              name: "notes.txt",
+              mimeType: "text/plain",
+              sizeBytes: 3,
+            },
+          ],
+        })
+        .pipe(Effect.flip);
+      assert.equal(unsupportedFileError._tag, "ProviderValidationError");
+      assert.match(unsupportedFileError.message, /does not accept general file attachments/);
+      assert.equal(routing.codex.sendTurn.mock.calls.length, 0);
+
       const turn = yield* provider.sendTurn({
         threadId: session.threadId,
         input: "hello",

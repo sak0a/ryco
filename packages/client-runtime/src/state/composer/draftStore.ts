@@ -26,7 +26,7 @@ import {
   DEFAULT_AGENT_TOKEN_MODE,
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
-  type ChatImageAttachment,
+  type ChatAttachment,
 } from "../threads/types.ts";
 import {
   type TerminalContextDraft,
@@ -68,7 +68,7 @@ export type DraftId = typeof DraftId.Type;
  * adapter extends this with a DOM `File` (`ComposerImageAttachment`); the
  * package never references `File`/`Blob` (blob-preview lifecycle stays app-side).
  */
-export interface ComposerDraftImage extends Omit<ChatImageAttachment, "previewUrl"> {
+export interface ComposerDraftImage extends Omit<ChatAttachment, "previewUrl"> {
   previewUrl: string;
 }
 

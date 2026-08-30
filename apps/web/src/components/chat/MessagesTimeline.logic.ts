@@ -1145,13 +1145,17 @@ function areChatAttachmentsUnchanged(
 }
 
 function areChatAttachmentUnchanged(previous: ChatAttachment, next: ChatAttachment): boolean {
-  return (
-    previous === next ||
-    (previous.type === next.type &&
-      previous.id === next.id &&
-      previous.name === next.name &&
-      previous.mimeType === next.mimeType &&
-      previous.sizeBytes === next.sizeBytes &&
-      previous.previewUrl === next.previewUrl)
-  );
+  if (previous === next) return true;
+  if (
+    previous.type !== next.type ||
+    previous.id !== next.id ||
+    previous.name !== next.name ||
+    previous.mimeType !== next.mimeType ||
+    previous.sizeBytes !== next.sizeBytes
+  ) {
+    return false;
+  }
+  return previous.type !== "image" || next.type !== "image"
+    ? true
+    : previous.previewUrl === next.previewUrl;
 }

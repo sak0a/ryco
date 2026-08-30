@@ -1,9 +1,18 @@
-import type { EnvironmentId, RuntimeMode, ScopedThreadRef, ThreadId } from "@ryco/contracts";
+import type {
+  EnvironmentId,
+  ProviderDriverKind,
+  RuntimeMode,
+  ScopedThreadRef,
+  ThreadId,
+} from "@ryco/contracts";
 import {
   PROJECT_STAGE_FILE_MAX_BYTES,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@ryco/contracts";
+import { providerSupportsGeneralFileAttachments } from "@ryco/shared/providerCapabilities";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   formatComposerFileReference,
@@ -22,6 +31,7 @@ import { toastManager } from "../ui/toast";
 import type { ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
+const FILE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_FILE_BYTES / (1024 * 1024))}MB`;
 const STAGED_FILE_SIZE_LIMIT_LABEL = `${Math.round(PROJECT_STAGE_FILE_MAX_BYTES / (1024 * 1024))}MB`;
 const COMPOSER_FILE_REFERENCE_SEPARATOR = " ";
 
@@ -42,6 +52,7 @@ export interface UseComposerImageAttachmentsParams {
   draftId: DraftId | null;
   routeThreadRef: ScopedThreadRef;
   runtimeMode: RuntimeMode;
+  selectedProvider: ProviderDriverKind;
   gitCwd: string | null;
   pendingUserInputCount: number;
   composerImagesRef: React.MutableRefObject<ComposerImageAttachment[]>;
@@ -76,6 +87,7 @@ export function useComposerImageAttachments(
     draftId,
     routeThreadRef,
     runtimeMode,
+    selectedProvider,
     gitCwd,
     pendingUserInputCount,
     composerImagesRef,
@@ -117,43 +129,58 @@ export function useComposerImageAttachments(
     [composerDraftTarget, removeComposerDraftImage],
   );
 
-  const addComposerImages = useCallback(
+  const addDirectComposerAttachments = useCallback(
     (files: File[]) => {
       if (!activeThreadId || files.length === 0) return;
       if (pendingUserInputCount > 0) {
         toastManager.add({
           type: "error",
-          title: "Attach images after answering plan questions.",
+          title: "Attach files after answering plan questions.",
         });
         return;
       }
       const nextImages: ComposerImageAttachment[] = [];
-      let nextImageCount = composerImagesRef.current.length;
+      let nextAttachmentCount = composerImagesRef.current.length;
+      let nextTotalBytes = composerImagesRef.current.reduce(
+        (total, attachment) => total + attachment.sizeBytes,
+        0,
+      );
       let error: string | null = null;
       for (const file of files) {
-        if (!file.type.startsWith("image/")) {
-          error = `Unsupported file type for '${file.name}'. Please attach image files only.`;
+        const isImage = file.type.startsWith("image/");
+        const attachmentName = file.name || (isImage ? "image" : "file");
+        if (!/^[^/\\\u0000-\u001f\u007f]+$/.test(attachmentName)) {
+          error = `'${attachmentName}' has an unsafe filename. Rename it without path separators or control characters.`;
           continue;
         }
-        if (file.size > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
-          error = `'${file.name}' exceeds the ${IMAGE_SIZE_LIMIT_LABEL} attachment limit.`;
+        const fileLimit = isImage
+          ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
+          : PROVIDER_SEND_TURN_MAX_FILE_BYTES;
+        const limitLabel = isImage ? IMAGE_SIZE_LIMIT_LABEL : FILE_SIZE_LIMIT_LABEL;
+        if (file.size <= 0 || file.size > fileLimit) {
+          error = `'${attachmentName}' must be non-empty and no larger than the ${limitLabel} attachment limit.`;
           continue;
         }
-        if (nextImageCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-          error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
+        if (nextAttachmentCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+          error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
           break;
         }
-        const previewUrl = URL.createObjectURL(file);
+        if (nextTotalBytes + file.size > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
+          error = `Attachments can total at most ${FILE_SIZE_LIMIT_LABEL} per message.`;
+          continue;
+        }
+        const previewUrl = isImage ? URL.createObjectURL(file) : "";
         nextImages.push({
-          type: "image",
+          type: isImage ? "image" : "file",
           id: randomUUID(),
-          name: file.name || "image",
-          mimeType: file.type,
+          name: attachmentName,
+          mimeType: file.type || "application/octet-stream",
           sizeBytes: file.size,
           previewUrl,
           file,
         });
-        nextImageCount += 1;
+        nextAttachmentCount += 1;
+        nextTotalBytes += file.size;
       }
       if (nextImages.length === 1 && nextImages[0]) {
         addComposerImage(nextImages[0]);
@@ -278,11 +305,16 @@ export function useComposerImageAttachments(
     async (files: File[]) => {
       if (files.length === 0) return;
 
-      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-      const nonImageFiles = files.filter((file) => !file.type.startsWith("image/"));
+      const supportsGeneralFiles = providerSupportsGeneralFileAttachments(selectedProvider);
+      const directAttachments = supportsGeneralFiles
+        ? files
+        : files.filter((file) => file.type.startsWith("image/"));
+      const nonImageFiles = supportsGeneralFiles
+        ? []
+        : files.filter((file) => !file.type.startsWith("image/"));
 
-      if (imageFiles.length > 0) {
-        addComposerImages(imageFiles);
+      if (directAttachments.length > 0) {
+        addDirectComposerAttachments(directAttachments);
       }
 
       if (nonImageFiles.length === 0) {
@@ -299,7 +331,12 @@ export function useComposerImageAttachments(
       ).filter((reference): reference is string => reference !== null);
       insertComposerFileReferences(references);
     },
-    [addComposerImages, insertComposerFileReferences, resolveComposerFileReference],
+    [
+      addDirectComposerAttachments,
+      insertComposerFileReferences,
+      resolveComposerFileReference,
+      selectedProvider,
+    ],
   );
 
   const removeComposerImage = useCallback(
@@ -351,13 +388,15 @@ export function useComposerImageAttachments(
       dragDepthRef.current = 0;
       setIsDragOverComposer(false);
       const files = Array.from(event.dataTransfer.files);
-      const hasNonImageFiles = files.some((file) => !file.type.startsWith("image/"));
+      const requiresFileReferences =
+        !providerSupportsGeneralFileAttachments(selectedProvider) &&
+        files.some((file) => !file.type.startsWith("image/"));
       void addComposerAttachments(files);
-      if (!hasNonImageFiles) {
+      if (!requiresFileReferences) {
         focusComposer();
       }
     },
-    [addComposerAttachments, focusComposer],
+    [addComposerAttachments, focusComposer, selectedProvider],
   );
 
   return {

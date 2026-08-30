@@ -49,6 +49,7 @@ export const isProviderInteractionMode = Schema.is(ProviderInteractionMode);
 export type DraftThreadEnvMode = typeof DraftThreadEnvModeSchema.Type;
 
 export const PersistedComposerImageAttachment = Schema.Struct({
+  type: Schema.optionalKey(Schema.Literals(["image", "file"])),
   id: Schema.String,
   name: Schema.String,
   mimeType: Schema.String,
@@ -502,12 +503,14 @@ function normalizePersistedAttachment(value: unknown): PersistedComposerImageAtt
   }
   const candidate = value as Record<string, unknown>;
   const id = candidate.id;
+  const type = candidate.type;
   const name = candidate.name;
   const mimeType = candidate.mimeType;
   const sizeBytes = candidate.sizeBytes;
   const dataUrl = candidate.dataUrl;
   if (
     typeof id !== "string" ||
+    (type !== undefined && type !== "image" && type !== "file") ||
     typeof name !== "string" ||
     typeof mimeType !== "string" ||
     typeof sizeBytes !== "number" ||
@@ -519,6 +522,7 @@ function normalizePersistedAttachment(value: unknown): PersistedComposerImageAtt
     return null;
   }
   return {
+    ...(type ? { type } : {}),
     id,
     name,
     mimeType,

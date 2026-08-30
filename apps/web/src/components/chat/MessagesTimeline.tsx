@@ -39,6 +39,7 @@ import {
   CircleAlertIcon,
   EyeIcon,
   FileDiffIcon,
+  FileIcon,
   GitBranchIcon,
   GlobeIcon,
   HammerIcon,
@@ -1132,7 +1133,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                             key={image.id}
                             className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
                           >
-                            {image.previewUrl ? (
+                            {image.type === "image" && image.previewUrl ? (
                               <button
                                 type="button"
                                 className="h-full w-full cursor-zoom-in"
@@ -1149,6 +1150,16 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                                   className="block h-auto max-h-[220px] w-full object-cover"
                                 />
                               </button>
+                            ) : image.type === "file" ? (
+                              <div className="flex min-h-[72px] items-center gap-2 px-3 py-3 text-left text-xs text-foreground/80">
+                                <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+                                <span className="min-w-0">
+                                  <span className="block truncate font-medium">{image.name}</span>
+                                  <span className="block text-[10px] text-muted-foreground">
+                                    {image.mimeType} · {Math.ceil(image.sizeBytes / 1024)} KB
+                                  </span>
+                                </span>
+                              </div>
                             ) : (
                               <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
                                 <span>

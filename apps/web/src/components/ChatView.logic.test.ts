@@ -329,7 +329,7 @@ describe("buildChatSendTitleSeed", () => {
         firstImageName: "shot.png",
         firstTerminalContextLabel: null,
       }),
-    ).toBe("Image: shot.png");
+    ).toBe("Attachment: shot.png");
     expect(
       buildChatSendTitleSeed({
         trimmedPrompt: "   ",

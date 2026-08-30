@@ -12,6 +12,7 @@ interface ComposerSnapshot {
   readonly attachments: ReadonlyArray<{
     readonly attachment: ComposerAttachment;
     readonly name: string;
+    readonly type?: "image" | "file";
   }>;
 }
 
@@ -29,6 +30,13 @@ const uriBacked: ComposerAttachment = {
   uri: "data:image/jpeg;base64,QUJD",
 };
 
+const fileBacked: ComposerAttachment = {
+  id: "file-bytes",
+  mime: "text/plain",
+  size: 3,
+  bytes: new Uint8Array([97, 98, 99]),
+};
+
 describe("composer attachment pipeline (compose -> queue -> send)", () => {
   it("carries neutral attachments through the queue and encodes both union variants on send", () => {
     // compose: the codec-produced union is the runtime carrier (no File).
@@ -36,6 +44,7 @@ describe("composer attachment pipeline (compose -> queue -> send)", () => {
       attachments: [
         { attachment: bytesBacked, name: "diagram.png" },
         { attachment: uriBacked, name: "photo.jpg" },
+        { attachment: fileBacked, name: "notes.txt", type: "file" },
       ],
     };
 
@@ -51,11 +60,16 @@ describe("composer attachment pipeline (compose -> queue -> send)", () => {
     expect(queued?.composer.attachments.map((entry) => entry.attachment.id)).toEqual([
       "img-bytes",
       "img-uri",
+      "file-bytes",
     ]);
 
     // send: the package builds outgoing turn attachments from the union alone.
     const dispatched = queued!.composer.attachments.map((entry) =>
-      buildSendTurnDispatchAttachment({ attachment: entry.attachment, name: entry.name }),
+      buildSendTurnDispatchAttachment({
+        attachment: entry.attachment,
+        name: entry.name,
+        type: entry.type,
+      }),
     );
 
     expect(dispatched[0]).toEqual({
@@ -71,6 +85,13 @@ describe("composer attachment pipeline (compose -> queue -> send)", () => {
       mimeType: "image/jpeg",
       sizeBytes: 12,
       dataUrl: "data:image/jpeg;base64,QUJD",
+    });
+    expect(dispatched[2]).toEqual({
+      type: "file",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 3,
+      dataUrl: "data:text/plain;base64,YWJj",
     });
   });
 

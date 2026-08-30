@@ -4,7 +4,7 @@ import {
   type ComposerThreadDraftState as RuntimeComposerThreadDraftState,
 } from "@ryco/client-runtime/state/composer";
 
-import type { ChatImageAttachment } from "./types";
+import type { ChatAttachment } from "./types";
 import {
   composerDebouncedStorage,
   hydrateImagesFromPersisted,
@@ -23,7 +23,7 @@ export * from "@ryco/client-runtime/state/composer";
  * DOM `File` and blob-preview URL the UI renders and sends. `File`/`Blob` never
  * cross into the package; the persisted shape stays `{ …, dataUrl }`.
  */
-export interface ComposerImageAttachment extends Omit<ChatImageAttachment, "previewUrl"> {
+export interface ComposerImageAttachment extends Omit<ChatAttachment, "previewUrl"> {
   previewUrl: string;
   file: File;
 }

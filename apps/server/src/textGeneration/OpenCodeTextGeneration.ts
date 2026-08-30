@@ -3,6 +3,7 @@ import * as Semaphore from "effect/Semaphore";
 
 import {
   TextGenerationError,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES,
   type ChatAttachment,
   type ModelSelection,
   type OpenCodeSettings,
@@ -11,7 +12,7 @@ import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@ryco/shared/
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 
 import { ServerConfig } from "../config.ts";
-import { resolveAttachmentPath } from "../attachmentStore.ts";
+import { readPersistedAttachment } from "../attachmentStore.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
@@ -288,10 +289,44 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       });
     }
 
+    const declaredAttachmentBytes = (input.attachments ?? []).reduce(
+      (total, attachment) => total + attachment.sizeBytes,
+      0,
+    );
+    if (declaredAttachmentBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
+      return yield* new TextGenerationError({
+        operation: input.operation,
+        detail: `Attachments total ${declaredAttachmentBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES} bytes.`,
+      });
+    }
+    const attachmentUrlById = new Map<string, string>();
+    let attachmentTotalBytes = 0;
+    for (const attachment of input.attachments ?? []) {
+      const persisted = readPersistedAttachment({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      if (!persisted.ok) {
+        return yield* new TextGenerationError({
+          operation: input.operation,
+          detail: persisted.reason,
+        });
+      }
+      attachmentTotalBytes += persisted.sizeBytes;
+      if (attachmentTotalBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
+        return yield* new TextGenerationError({
+          operation: input.operation,
+          detail: `Attachments total ${attachmentTotalBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES} bytes.`,
+        });
+      }
+      attachmentUrlById.set(
+        attachment.id,
+        `data:${attachment.mimeType};base64,${persisted.bytes.toString("base64")}`,
+      );
+    }
     const fileParts = toOpenCodeFileParts({
       attachments: input.attachments,
-      resolveAttachmentPath: (attachment) =>
-        resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
+      resolveAttachmentUrl: (attachment) => attachmentUrlById.get(attachment.id) ?? null,
     });
 
     const runAgainstServer = (server: Pick<OpenCodeServerConnection, "url">) =>

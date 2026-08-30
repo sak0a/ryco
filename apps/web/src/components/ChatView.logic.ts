@@ -235,7 +235,7 @@ export function buildChatSendTitleSeed(input: {
     return normalizedPrompt;
   }
   if (input.firstImageName) {
-    return `Image: ${input.firstImageName}`;
+    return `Attachment: ${input.firstImageName}`;
   }
   if (input.firstTerminalContextLabel) {
     return input.firstTerminalContextLabel;

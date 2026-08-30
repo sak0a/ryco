@@ -2,7 +2,18 @@ import assert from "node:assert/strict";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { Context, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect";
+import {
+  Context,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { beforeEach } from "vite-plus/test";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 
@@ -15,6 +26,7 @@ import {
   ThreadId,
 } from "@ryco/contracts";
 import { createModelSelection } from "@ryco/shared/model";
+import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { agentControlHostContext } from "../../agentControl/ProviderInjection.ts";
@@ -554,6 +566,57 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       assert.equal(sessions[0]?.status, "ready");
       assert.equal(sessions[0]?.activeTurnId, undefined);
       assert.equal(sessions[0]?.lastError, "prompt failed");
+    }),
+  );
+
+  it.effect("routes a validated general file as an inline native file part", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const config = yield* ServerConfig;
+      const threadId = asThreadId("thread-general-file");
+      const attachment = {
+        type: "file" as const,
+        id: "thread-general-file-attachment",
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      };
+      yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true });
+      const attachmentPath = `${config.attachmentsDir}/${attachmentRelativePath(attachment)}`;
+      yield* fileSystem.writeFile(attachmentPath, new TextEncoder().encode("abc"));
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-general-file"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter
+        .sendTurn({
+          threadId,
+          input: "Review this",
+          attachments: [attachment],
+          modelSelection: createModelSelection(ProviderInstanceId.make("opencode"), "openai/gpt-5"),
+        })
+        .pipe(Effect.ensuring(fileSystem.remove(attachmentPath).pipe(Effect.ignore)));
+
+      assert.deepEqual(runtimeMock.state.promptCalls.at(-1), {
+        sessionID: "http://127.0.0.1:9999/session",
+        model: { providerID: "openai", modelID: "gpt-5" },
+        parts: [
+          {
+            type: "text",
+            text: `<ryco_host_context>${agentControlHostContext(false)}</ryco_host_context>\n\nReview this`,
+          },
+          {
+            type: "file",
+            mime: "text/plain",
+            filename: "notes.txt",
+            url: "data:text/plain;base64,YWJj",
+          },
+        ],
+      });
     }),
   );
 

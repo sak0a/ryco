@@ -91,4 +91,14 @@ describe("web platform adapters", () => {
     });
     await expect(webAttachmentCodec.decode(attachment)).resolves.toBeInstanceOf(File);
   });
+
+  it("preserves general file MIME data and uses a safe fallback when absent", async () => {
+    const textFile = new File(["abc"], "notes.txt", { type: "text/plain" });
+    const textAttachment = await webAttachmentCodec.encode({ id: "file-1", file: textFile });
+    expect(textAttachment.mime).toBe("text/plain");
+
+    const unknownFile = new File(["abc"], "payload.bin");
+    const unknownAttachment = await webAttachmentCodec.encode({ id: "file-2", file: unknownFile });
+    expect(unknownAttachment.mime).toBe("application/octet-stream");
+  });
 });

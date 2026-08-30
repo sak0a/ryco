@@ -1,5 +1,3 @@
-import { pathToFileURL } from "node:url";
-
 import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@ryco/contracts";
 import type {
   Agent,
@@ -207,13 +205,13 @@ export function openCodeQuestionId(
 
 export function toOpenCodeFileParts(input: {
   readonly attachments: ReadonlyArray<ChatAttachment> | undefined;
-  readonly resolveAttachmentPath: (attachment: ChatAttachment) => string | null;
+  readonly resolveAttachmentUrl: (attachment: ChatAttachment) => string | null;
 }): Array<FilePartInput> {
   const parts: Array<FilePartInput> = [];
 
   for (const attachment of input.attachments ?? []) {
-    const attachmentPath = input.resolveAttachmentPath(attachment);
-    if (!attachmentPath) {
+    const attachmentUrl = input.resolveAttachmentUrl(attachment);
+    if (!attachmentUrl) {
       continue;
     }
 
@@ -221,7 +219,7 @@ export function toOpenCodeFileParts(input: {
       type: "file",
       mime: attachment.mimeType,
       filename: attachment.name,
-      url: pathToFileURL(attachmentPath).href,
+      url: attachmentUrl,
     });
   }
 

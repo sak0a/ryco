@@ -1228,6 +1228,7 @@ export const ChatComposer = memo(
                   await webAttachmentCodec.encode(image),
                 );
                 stagedAttachmentById.set(image.id, {
+                  type: image.type,
                   id: image.id,
                   name: image.name,
                   mimeType: image.mimeType,
@@ -1674,6 +1675,7 @@ export const ChatComposer = memo(
       draftId,
       routeThreadRef,
       runtimeMode,
+      selectedProvider,
       gitCwd,
       pendingUserInputCount: pendingUserInputs.length,
       composerImagesRef,
@@ -1931,6 +1933,7 @@ export const ChatComposer = memo(
             try {
               return {
                 attachment: {
+                  type: image.type,
                   id: image.id,
                   name: image.name,
                   mimeType: image.mimeType,

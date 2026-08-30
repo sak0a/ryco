@@ -95,7 +95,7 @@ describe("buildBootstrapInput", () => {
     expect(result.truncated).toBe(true);
   });
 
-  it("captures user image attachment context in transcript blocks", () => {
+  it("captures user file attachment context in transcript blocks", () => {
     const result = buildBootstrapInput(
       [
         {
@@ -104,10 +104,10 @@ describe("buildBootstrapInput", () => {
           text: "",
           attachments: [
             {
-              type: "image",
-              id: "img-1",
-              name: "screenshot.png",
-              mimeType: "image/png",
+              type: "file",
+              id: "file-1",
+              name: "notes.txt",
+              mimeType: "text/plain",
               sizeBytes: 2_048,
             },
           ],
@@ -119,7 +119,7 @@ describe("buildBootstrapInput", () => {
       1_500,
     );
 
-    expect(result.text).toContain("Attached image");
-    expect(result.text).toContain("screenshot.png");
+    expect(result.text).toContain("Attached file");
+    expect(result.text).toContain("notes.txt");
   });
 });

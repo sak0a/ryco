@@ -5,6 +5,7 @@ import {
   ProviderItemId,
   ProviderDriverKind,
   ProviderInstanceId,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES,
   type ProviderRuntimeEvent,
   type ProviderSession,
   RuntimeSubagentId,
@@ -28,7 +29,7 @@ import type {
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { readPersistedAttachment } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
@@ -1709,13 +1710,47 @@ export function makeOpenCodeAdapter(
 
       const formatted = formatSourceControlContextsForAgent(input.sourceControlContexts ?? []);
       let text = formatted ? formatted + "\n\n" + (input.input?.trim() ?? "") : input.input?.trim();
+      const attachmentUrlById = new Map<string, string>();
+      const declaredAttachmentBytes = (input.attachments ?? []).reduce(
+        (total, attachment) => total + attachment.sizeBytes,
+        0,
+      );
+      if (declaredAttachmentBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "session.prompt",
+          detail: `Attachments total ${declaredAttachmentBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES} bytes.`,
+        });
+      }
+      let attachmentTotalBytes = 0;
+      for (const attachment of input.attachments ?? []) {
+        const persisted = readPersistedAttachment({
+          attachmentsDir: serverConfig.attachmentsDir,
+          attachment,
+        });
+        if (!persisted.ok) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "session.prompt",
+            detail: persisted.reason,
+          });
+        }
+        attachmentUrlById.set(
+          attachment.id,
+          `data:${attachment.mimeType};base64,${persisted.bytes.toString("base64")}`,
+        );
+        attachmentTotalBytes += persisted.sizeBytes;
+        if (attachmentTotalBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "session.prompt",
+            detail: `Attachments total ${attachmentTotalBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES} bytes.`,
+          });
+        }
+      }
       const fileParts = toOpenCodeFileParts({
         attachments: input.attachments,
-        resolveAttachmentPath: (attachment) =>
-          resolveAttachmentPath({
-            attachmentsDir: serverConfig.attachmentsDir,
-            attachment,
-          }),
+        resolveAttachmentUrl: (attachment) => attachmentUrlById.get(attachment.id) ?? null,
       });
       if ((!text || text.length === 0) && fileParts.length === 0) {
         return yield* new ProviderAdapterValidationError({

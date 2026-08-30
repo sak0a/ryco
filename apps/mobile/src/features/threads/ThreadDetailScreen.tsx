@@ -30,7 +30,7 @@ import {
 } from "@ryco/client-runtime/state/message-queue";
 import { buildThreadInbox } from "@ryco/client-runtime/state/threads";
 import { EnvironmentId, MessageId, ThreadId, type ModelSelection } from "@ryco/contracts";
-import { IMAGE_ONLY_BOOTSTRAP_PROMPT } from "@ryco/client-runtime/state/composer";
+import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@ryco/client-runtime/state/composer";
 
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
@@ -582,7 +582,7 @@ export function ThreadDetailScreen(props: {
             threadId,
             expectedTurnId: eligibility.expectedTurnId,
             messageId: MessageId.make(message.messageId),
-            text: message.text.trim() || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+            text: message.text.trim() || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
             attachments,
             createdAt: message.createdAt,
             requestedAt,

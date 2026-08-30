@@ -96,12 +96,12 @@ export function buildSendTurnBootstrap(input: SendTurnBootstrapInput): SendTurnB
 // Send-turn resolution and dispatch assembly
 // ---------------------------------------------------------------------------
 
-/**
- * Prompt substituted for the outgoing/bootstrap text when the user sends only
- * image attachments and no typed message.
- */
-export const IMAGE_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+/** Prompt substituted when a user sends attachments without typed text. */
+export const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
+  "[User attached one or more files without additional text. Respond using the conversation context and the attachment(s).]";
+
+/** @deprecated Use `ATTACHMENT_ONLY_BOOTSTRAP_PROMPT`. */
+export const IMAGE_ONLY_BOOTSTRAP_PROMPT = ATTACHMENT_ONLY_BOOTSTRAP_PROMPT;
 
 /**
  * Resolves the model selection recorded on a freshly created thread's
@@ -123,7 +123,7 @@ export function resolveThreadCreateModelSelection(input: {
 
 /** Neutral, already-encoded attachment carried on the outgoing turn message. */
 export interface SendTurnDispatchAttachment {
-  readonly type: "image";
+  readonly type: "image" | "file";
   readonly name: string;
   readonly mimeType: string;
   readonly sizeBytes: number;
@@ -160,9 +160,10 @@ export function encodeComposerAttachmentDataUrl(attachment: ComposerAttachment):
 export function buildSendTurnDispatchAttachment(input: {
   readonly attachment: ComposerAttachment;
   readonly name: string;
+  readonly type?: "image" | "file";
 }): SendTurnDispatchAttachment {
   return {
-    type: "image",
+    type: input.type ?? "image",
     name: input.name,
     mimeType: input.attachment.mime,
     sizeBytes: input.attachment.size,

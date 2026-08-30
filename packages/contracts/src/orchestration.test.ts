@@ -5,6 +5,7 @@ import {
   ContextHandoffActivityPayload,
   ContextHandoffExportChunk,
   ContextHandoffInspectionEntriesInput,
+  ClientOrchestrationCommand,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
@@ -17,6 +18,8 @@ import {
   OrchestrationLatestTurn,
   OrchestrationThread,
   OrchestrationThreadShell,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
@@ -50,6 +53,7 @@ const decodeContextHandoffEntriesInput = Schema.decodeUnknownEffect(
 );
 const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
 const decodeOrchestrationThreadShell = Schema.decodeUnknownEffect(OrchestrationThreadShell);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
@@ -64,6 +68,85 @@ const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpda
 const decodeThreadWindowInput = Schema.decodeUnknownEffect(OrchestrationGetThreadWindowInput);
 const decodeThreadHistoryPageInput = Schema.decodeUnknownEffect(
   OrchestrationGetThreadHistoryPageInput,
+);
+
+const clientTurnWithAttachments = (attachments: ReadonlyArray<unknown>) => ({
+  type: "thread.turn.start",
+  commandId: "attachment-command",
+  threadId: "attachment-thread",
+  message: {
+    messageId: "attachment-message",
+    role: "user",
+    text: "",
+    attachments,
+  },
+  runtimeMode: "full-access",
+  interactionMode: "default",
+  createdAt: "2026-08-30T00:00:00.000Z",
+});
+
+it.effect("accepts bounded general file uploads for capable providers", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientOrchestrationCommand(
+      clientTurnWithAttachments([
+        {
+          type: "file",
+          name: "notes.txt",
+          mimeType: "text/plain",
+          sizeBytes: 3,
+          dataUrl: "data:text/plain;base64,YWJj",
+        },
+      ]),
+    );
+
+    assert.strictEqual(parsed.type, "thread.turn.start");
+    if (parsed.type !== "thread.turn.start") {
+      throw new Error(`Unexpected command type: ${parsed.type}`);
+    }
+    assert.strictEqual(parsed.message.attachments[0]?.type, "file");
+  }),
+);
+
+it.effect("rejects oversized, unsafe, and excessive general file uploads", () =>
+  Effect.gen(function* () {
+    const baseFile = {
+      type: "file",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 3,
+      dataUrl: "data:text/plain;base64,YWJj",
+    };
+    const exits = yield* Effect.all([
+      Effect.exit(
+        decodeClientOrchestrationCommand(
+          clientTurnWithAttachments([
+            { ...baseFile, sizeBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES + 1 },
+          ]),
+        ),
+      ),
+      Effect.exit(
+        decodeClientOrchestrationCommand(
+          clientTurnWithAttachments([{ ...baseFile, name: "../secret.txt" }]),
+        ),
+      ),
+      Effect.exit(
+        decodeClientOrchestrationCommand(
+          clientTurnWithAttachments([{ ...baseFile, mimeType: "invalid" }]),
+        ),
+      ),
+      Effect.exit(
+        decodeClientOrchestrationCommand(
+          clientTurnWithAttachments(
+            Array.from({ length: PROVIDER_SEND_TURN_MAX_ATTACHMENTS + 1 }, () => baseFile),
+          ),
+        ),
+      ),
+    ]);
+
+    for (const result of exits) {
+      assert.strictEqual(result._tag, "Failure");
+    }
+  }),
 );
 
 it.effect("validates thread goal commands", () =>

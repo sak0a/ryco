@@ -14,7 +14,7 @@ import {
 } from "@ryco/contracts";
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
-  IMAGE_ONLY_BOOTSTRAP_PROMPT,
+  ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   buildSendTurnBootstrap,
   buildSendTurnDispatchAttachment,
   commitSendTurnDispatch,
@@ -269,7 +269,7 @@ export function buildOutgoingMessageText(input: {
     model: input.composer.selectedModel,
     models: input.composer.selectedProviderModels,
     effort: input.composer.selectedPromptEffort,
-    text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+    text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   });
 }
 
@@ -282,6 +282,7 @@ export async function buildOutgoingTurnAttachments(images: readonly ComposerImag
           file: image.file,
         }),
         name: image.name,
+        type: image.type,
       }),
     ),
   );
@@ -333,7 +334,7 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
   const turnAttachmentsPromise = buildOutgoingTurnAttachments(imagesSnapshot);
 
   const optimisticAttachments = imagesSnapshot.map((image) => ({
-    type: "image" as const,
+    type: image.type,
     id: image.id,
     name: image.name,
     mimeType: image.mimeType,

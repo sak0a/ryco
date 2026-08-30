@@ -92,7 +92,7 @@ export function ThreadMessage(props: { readonly message: ChatMessage }) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-2 grow-0">
             <View className="flex-row gap-2">
               {attachments.map((attachment) =>
-                attachment.previewUrl ? (
+                attachment.type === "image" && attachment.previewUrl ? (
                   <Image
                     key={attachment.id}
                     source={{ uri: attachment.previewUrl }}
@@ -100,7 +100,19 @@ export function ThreadMessage(props: { readonly message: ChatMessage }) {
                     resizeMode="cover"
                     accessibilityLabel={attachment.name}
                   />
-                ) : null,
+                ) : (
+                  <View
+                    key={attachment.id}
+                    className="min-h-20 w-44 justify-center rounded-2xl bg-subtle px-3 py-2"
+                  >
+                    <Text className="font-ryco-bold text-sm text-foreground" numberOfLines={2}>
+                      {attachment.name}
+                    </Text>
+                    <Text className="mt-1 text-xs text-foreground-muted" numberOfLines={1}>
+                      {attachment.mimeType} · {Math.ceil(attachment.sizeBytes / 1024)} KB
+                    </Text>
+                  </View>
+                ),
               )}
             </View>
           </ScrollView>
