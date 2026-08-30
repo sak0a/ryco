@@ -91,6 +91,26 @@ export function readWorkspaceMetadataSnapshot(
   return isWorkspaceMetadataSnapshot(snapshot, environmentId) ? snapshot : null;
 }
 
+/**
+ * A Desktop-local server has a direct environment id and, while enrolled, a
+ * separate Hub environment id. Main owns the Hub cache namespace, so publish
+ * the direct shell under that namespace without hydrating a second renderer
+ * copy of the same physical server.
+ */
+export function remapWorkspaceMetadataSnapshotEnvironment(
+  snapshot: WorkspaceMetadataSnapshot,
+  environmentId: EnvironmentId,
+): WorkspaceMetadataSnapshot {
+  if (snapshot.environmentId === environmentId) return snapshot;
+  return {
+    ...snapshot,
+    environmentId,
+    projects: snapshot.projects.map((project) => ({ ...project, environmentId })),
+    worktrees: snapshot.worktrees.map((worktree) => ({ ...worktree, environmentId })),
+    threads: snapshot.threads.map((thread) => ({ ...thread, environmentId })),
+  };
+}
+
 /** Rehydrate only the list-safe shell fields represented by the shared schema. */
 export function workspaceMetadataToCachedShellSnapshot(
   snapshot: WorkspaceMetadataSnapshot,

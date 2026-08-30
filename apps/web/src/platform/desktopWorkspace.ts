@@ -8,14 +8,17 @@ import {
 import { useSyncExternalStore } from "react";
 
 import {
+  connectPrimaryEnvironment,
   connectDesktopWorkspaceEnvironment,
   disconnectPrimaryEnvironment,
   disconnectSavedEnvironment,
   readEnvironmentConnection,
 } from "../environments/runtime";
+import { readPrimaryEnvironmentDescriptor } from "../environments/primary";
 import { useStore } from "../store";
 import {
   readWorkspaceMetadataSnapshot,
+  remapWorkspaceMetadataSnapshotEnvironment,
   workspaceMetadataToCachedShellSnapshot,
 } from "../workspaceMetadataProjection";
 import { reconcileDesktopWorkspaceCacheHydration } from "./desktopWorkspaceCacheHydration";
@@ -150,10 +153,18 @@ export function retainDesktopWorkspaceProviderScope(
 }
 
 function adopt(state: DesktopWorkspaceStateProjection): void {
+  const primaryEnvironmentId = readPrimaryEnvironmentDescriptor()?.environmentId ?? null;
+  const localHubAlias =
+    primaryEnvironmentId !== null &&
+    state.localEnvironmentId !== null &&
+    state.localEnvironmentId !== primaryEnvironmentId
+      ? state.localEnvironmentId
+      : null;
   hydratedEnvironmentIds = new Set(
     reconcileDesktopWorkspaceCacheHydration({
       snapshots: state.snapshots,
       previouslyHydratedEnvironmentIds: hydratedEnvironmentIds,
+      ...(localHubAlias === null ? {} : { excludedEnvironmentIds: new Set([localHubAlias]) }),
       port: {
         hydrate: (snapshot) =>
           useStore
@@ -174,6 +185,46 @@ function adopt(state: DesktopWorkspaceStateProjection): void {
 }
 
 async function applyConnectionCommand(command: DesktopWorkspaceConnectionCommand): Promise<void> {
+  const primaryEnvironmentId = readPrimaryEnvironmentDescriptor()?.environmentId ?? null;
+  const usesDirectLocalConnection =
+    primaryEnvironmentId !== null &&
+    current.localEnvironmentId === command.environmentId &&
+    primaryEnvironmentId !== command.environmentId;
+  if (usesDirectLocalConnection) {
+    if (command.action === "connect") {
+      if (command.delayMs > 0) {
+        await new Promise<void>((resolve) => globalThis.setTimeout(resolve, command.delayMs));
+      }
+      try {
+        const connection = connectPrimaryEnvironment();
+        if (!connection) throw new Error("Primary environment is unavailable.");
+        await connection.ensureBootstrapped();
+        await globalThis.window?.desktopBridge
+          ?.reportDesktopWorkspaceConnection?.({
+            environmentId: command.environmentId,
+            connected: true,
+          })
+          .catch(() => undefined);
+      } catch (error) {
+        await globalThis.window?.desktopBridge
+          ?.reportDesktopWorkspaceConnection?.({
+            environmentId: command.environmentId,
+            connected: false,
+          })
+          .catch(() => undefined);
+        throw error;
+      }
+      return;
+    }
+    await globalThis.window?.desktopBridge
+      ?.reportDesktopWorkspaceConnection?.({
+        environmentId: command.environmentId,
+        connected: false,
+      })
+      .catch(() => undefined);
+    return;
+  }
+
   let connection = readEnvironmentConnection(command.environmentId);
   if (command.action === "connect") {
     if (command.delayMs > 0) {
@@ -236,10 +287,19 @@ export function startDesktopWorkspaceBridge(): () => void {
       publishTimer = null;
       const publish = bridge.publishDesktopWorkspaceSnapshot;
       if (!publish || disposed) return;
+      const primaryEnvironmentId = readPrimaryEnvironmentDescriptor()?.environmentId ?? null;
       for (const machine of current.machines) {
         if (!machine.canReadMetadata) continue;
-        const snapshot = readWorkspaceMetadataSnapshot(machine.environmentId);
-        if (snapshot) void publish(snapshot).catch(() => undefined);
+        const sourceEnvironmentId =
+          primaryEnvironmentId !== null && machine.environmentId === current.localEnvironmentId
+            ? primaryEnvironmentId
+            : machine.environmentId;
+        const snapshot = readWorkspaceMetadataSnapshot(sourceEnvironmentId);
+        if (snapshot) {
+          void publish(
+            remapWorkspaceMetadataSnapshotEnvironment(snapshot, machine.environmentId),
+          ).catch(() => undefined);
+        }
       }
     }, 100);
   };

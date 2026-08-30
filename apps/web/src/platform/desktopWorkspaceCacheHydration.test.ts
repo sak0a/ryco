@@ -64,4 +64,25 @@ describe("Desktop workspace cache hydration", () => {
     expect(remove).toHaveBeenCalledOnce();
     expect(remove).toHaveBeenCalledWith(orphanedCache);
   });
+
+  it("does not hydrate the local Hub alias over the direct Desktop environment", () => {
+    const localHubAlias = EnvironmentId.make("local-hub-alias");
+    const remote = EnvironmentId.make("remote");
+    const hydrate = vi.fn();
+
+    const visible = reconcileDesktopWorkspaceCacheHydration({
+      snapshots: [snapshot(localHubAlias), snapshot(remote)],
+      previouslyHydratedEnvironmentIds: new Set(),
+      excludedEnvironmentIds: new Set([localHubAlias]),
+      port: {
+        hydrate,
+        isCacheHydrated: () => false,
+        remove: vi.fn(),
+      },
+    });
+
+    expect([...visible]).toEqual([remote]);
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(hydrate).toHaveBeenCalledWith(snapshot(remote));
+  });
 });
