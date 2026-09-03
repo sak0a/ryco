@@ -48,7 +48,6 @@ rather than partially applied. Fetches respect the
           "shortName": "Fable 5.1",
           "aliases": ["fable", "fable-5.1", "claude-fable-5.1"],
           "status": "current",            // "legacy" sets isLegacy
-          "badge": "new",                 // picker chip
           "profile": "fable-5-1",
           // CLI version compatibility gate:
           "adapter": { "claudeCode": { "minVersion": "2.1.257" } }

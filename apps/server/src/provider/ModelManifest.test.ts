@@ -37,7 +37,6 @@ describe("ModelManifest", () => {
     assert.notEqual(fable51, undefined);
     assert.equal(fable51?.model.name, "Claude Fable 5.1");
     assert.equal(fable51?.model.shortName, "Fable 5.1");
-    assert.equal(fable51?.model.badge, "new");
     assert.equal(fable51?.model.isCustom, false);
     assert.equal(fable51?.model.isLegacy, undefined);
     assert.deepEqual(fable51?.model.aliases, ["fable", "fable-5.1", "claude-fable-5.1"]);

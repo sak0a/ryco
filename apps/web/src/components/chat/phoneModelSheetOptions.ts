@@ -2,7 +2,6 @@ import type { ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
 
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 import type { ProviderInstanceEntry } from "../../providerInstances";
-import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
 import { getDisplayModelName, type ModelEsque } from "./providerIconUtils";
 
@@ -31,7 +30,6 @@ export interface PhoneModelSheetItem {
   readonly label: string;
   readonly providerLabel: string;
   readonly isFavorite: boolean;
-  readonly isNew: boolean;
   readonly isSelected: boolean;
 }
 
@@ -90,7 +88,6 @@ export function buildPhoneModelSheetGroups(
         ? `${model.providerDisplayName} · ${model.subProvider}`
         : model.providerDisplayName,
       isFavorite: input.favoriteKeys.has(key),
-      isNew: isModelPickerNewModel(model.driverKind, model.slug),
       isSelected: key === selectedKey,
     };
   };
