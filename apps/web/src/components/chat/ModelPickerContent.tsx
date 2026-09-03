@@ -8,7 +8,6 @@ import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRe
 import { SearchIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
-import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxList } from "../ui/combobox";
 import { ModelEsque, PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
@@ -630,7 +629,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       showProvider={!isLocked || showLockedInstanceSidebar}
                       preferShortName={!isLocked}
                       useTriggerLabel={isLocked && !showLockedInstanceSidebar}
-                      showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
                       jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                       onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
                     />

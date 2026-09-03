@@ -30,7 +30,6 @@ export const ModelListRow = memo(function ModelListRow(props: {
   showProvider: boolean;
   preferShortName?: boolean;
   useTriggerLabel?: boolean;
-  showNewBadge?: boolean;
   jumpLabel?: string | null;
   onToggleFavorite: () => void;
 }) {
@@ -87,14 +86,6 @@ export const ModelListRow = memo(function ModelListRow(props: {
                     props.preferShortName ? { preferShortName: true } : undefined,
                   )}
             </span>
-            {props.showNewBadge ? (
-              <span
-                className="shrink-0 rounded border border-amber-500/35 bg-amber-500/15 px-0.5 py-px text-[10px] font-bold uppercase leading-none tracking-wide text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/12 dark:text-amber-200"
-                aria-label="New model"
-              >
-                New
-              </span>
-            ) : null}
           </div>
           {props.jumpLabel ? (
             <Kbd className="h-4 min-w-0 shrink-0 rounded-sm px-1.5 text-[10px] pointer-coarse:hidden">

@@ -53,7 +53,6 @@ const ManifestProviderModel = Schema.Struct({
   subProvider: Schema.optional(TrimmedNonEmptyString),
   aliases: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   status: ManifestModelStatus,
-  badge: Schema.optional(Schema.Literal("new")),
   profile: Schema.optional(TrimmedNonEmptyString),
   adapter: Schema.optional(Schema.Unknown),
 });
@@ -147,7 +146,6 @@ export function resolveProviderCatalog(
         ...(entry.shortName ? { shortName: entry.shortName } : {}),
         ...(entry.subProvider ? { subProvider: entry.subProvider } : {}),
         ...(entry.aliases ? { aliases: entry.aliases } : {}),
-        ...(entry.badge ? { badge: entry.badge } : {}),
         isCustom: false,
         ...(catalog.defaults?.chat === entry.slug ? { isDefault: true } : {}),
         ...(entry.status === "legacy" ? { isLegacy: true } : {}),
