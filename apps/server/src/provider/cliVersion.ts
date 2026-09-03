@@ -76,6 +76,11 @@ function comparePrereleaseIdentifier(left: string, right: string): number {
   return left.localeCompare(right);
 }
 
+/** True when `version` parses as a CLI semver (`major.minor[.patch][-pre]`). */
+export function isParseableCliVersion(version: string): boolean {
+  return parseCliSemver(version) !== null;
+}
+
 export function compareCliVersions(left: string, right: string): number {
   const parsedLeft = parseCliSemver(left);
   const parsedRight = parseCliSemver(right);

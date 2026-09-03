@@ -28,6 +28,7 @@ import {
 } from "../Layers/ClaudeProvider.ts";
 import { probeClaudeUsageRateLimits } from "../Layers/ClaudeUsage.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
+import { ModelManifest } from "../ModelManifest.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -111,6 +112,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
+      // Optional so tests and stripped-down layer stacks fall back to the
+      // bundled model catalog instead of failing driver construction.
+      const modelManifest = yield* Effect.serviceOption(ModelManifest);
       const agentControl = yield* Effect.serviceOption(AgentControlSessionRegistry);
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
@@ -164,6 +168,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         () => Cache.get(capabilitiesProbeCache, capabilitiesCacheKey),
         processEnv,
         (_settings, version) => Cache.get(usageProbeCache, version),
+        Option.getOrUndefined(modelManifest),
       ).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),

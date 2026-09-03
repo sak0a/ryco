@@ -27,10 +27,16 @@
  *
  * @module provider/Layers/ProviderEventLoggers
  */
+import path from "node:path";
+
 import { Context, Effect, Layer } from "effect";
 
 import { ServerConfig } from "../../config.ts";
-import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import {
+  type EventNdjsonLogger,
+  makeEventNdjsonLogger,
+  sweepStaleEventLogs,
+} from "./EventNdjsonLogger.ts";
 
 export interface ProviderEventLoggersShape {
   readonly native: EventNdjsonLogger | undefined;
@@ -69,6 +75,10 @@ export const ProviderEventLoggersLive = Layer.effect(
   ProviderEventLoggers,
   Effect.gen(function* () {
     const { providerEventLogPath } = yield* ServerConfig;
+    // Age-based retention for the shared log directory, off the boot path.
+    // Rotation only bounds per-thread size; this sweep is what reclaims
+    // files from threads that have gone quiet.
+    yield* Effect.forkScoped(sweepStaleEventLogs(path.dirname(providerEventLogPath)));
     const native = yield* makeEventNdjsonLogger(providerEventLogPath, {
       stream: "native",
     });

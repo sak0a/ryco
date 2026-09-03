@@ -3,7 +3,6 @@ import {
   type ModelCapabilities,
   type ModelSelection,
   ProviderDriverKind,
-  type ServerProviderModel,
   type ServerProviderRateLimits,
   type ServerProviderSlashCommand,
 } from "@ryco/contracts";
@@ -11,7 +10,6 @@ import { Effect, Option, Path, Result } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
   createModelCapabilities,
-  getModelSelectionStringOptionValue,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
 } from "@ryco/shared/model";
@@ -22,8 +20,6 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import {
-  buildBooleanOptionDescriptor,
-  buildSelectOptionDescriptor,
   buildServerProvider,
   DEFAULT_TIMEOUT_MS,
   detailFromResult,
@@ -33,7 +29,19 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
-import { compareCliVersions } from "../cliVersion.ts";
+import {
+  type ClaudeModelCatalog,
+  formatClaudeVersionUpgradeMessage,
+  getActiveClaudeModelCatalog,
+  getClaudeCatalogModelCapabilities,
+  normalizeClaudeCatalogEffort,
+  resolveClaudeCatalogApiModelId,
+  resolveClaudeCatalogContextWindow,
+  resolveClaudeModelCatalog,
+  resolveClaudeModelsForVersion,
+  setActiveClaudeModelCatalog,
+} from "../ClaudeModelCatalog.ts";
+import type { ModelManifest } from "../ModelManifest.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
@@ -46,314 +54,19 @@ const CLAUDE_PRESENTATION = {
   showInteractionModeToggle: true,
   supportsAskMode: true,
 } as const;
-const MINIMUM_CLAUDE_OPUS_5_VERSION = "2.1.219";
-const MINIMUM_CLAUDE_OPUS_4_8_VERSION = "2.1.154";
-const MINIMUM_CLAUDE_OPUS_4_7_VERSION = "2.1.111";
-// Forward-looking gate: Claude Fable 5 is wired up but not yet selectable in
-// the Claude Code CLI. Hidden on the current CLI (~2.1.193) and set to surface
-// on the next release so it appears as soon as Fable support could land. UPDATE
-// to the exact minimum version once Anthropic confirms it, so Fable isn't
-// offered on a CLI that can't accept the model.
-const MINIMUM_CLAUDE_FABLE_5_VERSION = "2.1.194";
-
-type ClaudeEffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultracode" | "ultrathink";
-
-function buildClaudeEffortOption(value: ClaudeEffortLevel, defaultEffort: ClaudeEffortLevel) {
-  const label =
-    value === "xhigh" ? "Extra High" : value[0]!.toUpperCase() + value.slice(1).toLowerCase();
-  return value === defaultEffort ? { value, label, isDefault: true } : { value, label };
-}
-
-function buildClaudeEffortDescriptor(input: {
-  readonly levels: ReadonlyArray<ClaudeEffortLevel>;
-  readonly defaultEffort: ClaudeEffortLevel;
-}) {
-  const promptInjectedValues = input.levels.includes("ultrathink") ? ["ultrathink"] : undefined;
-  return buildSelectOptionDescriptor({
-    id: "effort",
-    label: "Reasoning",
-    options: input.levels.map((level) => buildClaudeEffortOption(level, input.defaultEffort)),
-    ...(promptInjectedValues ? { promptInjectedValues } : {}),
-  });
-}
-
-function buildClaudeContextWindowDescriptor(defaultContextWindow: "200k" | "1m" = "200k") {
-  return buildSelectOptionDescriptor({
-    id: "contextWindow",
-    label: "Context Window",
-    options: [
-      { value: "200k", label: "200k", isDefault: defaultContextWindow === "200k" },
-      { value: "1m", label: "1M", isDefault: defaultContextWindow === "1m" },
-    ],
-  });
-}
-
-function buildClaudeOpusCapabilities(input: {
-  readonly effortLevels: ReadonlyArray<ClaudeEffortLevel>;
-  readonly defaultEffort: ClaudeEffortLevel;
-  readonly supportsFastMode: boolean;
-  readonly supportsContextWindow: boolean;
-  readonly defaultContextWindow?: "200k" | "1m";
-}) {
-  return createModelCapabilities({
-    optionDescriptors: [
-      buildClaudeEffortDescriptor({
-        levels: input.effortLevels,
-        defaultEffort: input.defaultEffort,
-      }),
-      ...(input.supportsFastMode
-        ? [
-            buildBooleanOptionDescriptor({
-              id: "fastMode",
-              label: "Fast Mode",
-            }),
-          ]
-        : []),
-      ...(input.supportsContextWindow
-        ? [buildClaudeContextWindowDescriptor(input.defaultContextWindow)]
-        : []),
-    ],
-  });
-}
-
-const CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-  "ultrathink",
-] as const satisfies ReadonlyArray<ClaudeEffortLevel>;
-
-const CLAUDE_ULTRACODE_EFFORT_LEVELS = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-  "ultracode",
-  "ultrathink",
-] as const satisfies ReadonlyArray<ClaudeEffortLevel>;
-
-const CLAUDE_OPUS_LEGACY_EFFORT_LEVELS = [
-  "low",
-  "medium",
-  "high",
-  "max",
-] as const satisfies ReadonlyArray<ClaudeEffortLevel>;
-
-const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
-  {
-    slug: "claude-fable-5",
-    name: "Claude Fable 5",
-    shortName: "Fable 5",
-    isCustom: false,
-    capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_ULTRACODE_EFFORT_LEVELS,
-      defaultEffort: "high",
-      // Fast mode is an Opus-tier feature; Fable does not support it.
-      supportsFastMode: false,
-      // Fable's context window is 1M by default and at maximum, so there is no
-      // 200k/1m toggle to expose.
-      supportsContextWindow: false,
-    }),
-  },
-  {
-    slug: "claude-opus-5",
-    name: "Claude Opus 5",
-    shortName: "Opus 5",
-    isCustom: false,
-    capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_ULTRACODE_EFFORT_LEVELS,
-      defaultEffort: "high",
-      supportsFastMode: true,
-      supportsContextWindow: true,
-      defaultContextWindow: "1m",
-    }),
-  },
-  {
-    slug: "claude-opus-4-8",
-    name: "Claude Opus 4.8",
-    shortName: "Opus 4.8",
-    isCustom: false,
-    capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_ULTRACODE_EFFORT_LEVELS,
-      defaultEffort: "high",
-      supportsFastMode: true,
-      supportsContextWindow: true,
-    }),
-  },
-  {
-    slug: "claude-opus-4-7",
-    name: "Claude Opus 4.7",
-    shortName: "Opus 4.7",
-    isCustom: false,
-    capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS,
-      defaultEffort: "xhigh",
-      supportsFastMode: true,
-      supportsContextWindow: true,
-    }),
-  },
-  {
-    slug: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
-    shortName: "Opus 4.6",
-    isCustom: false,
-    capabilities: buildClaudeOpusCapabilities({
-      effortLevels: [...CLAUDE_OPUS_LEGACY_EFFORT_LEVELS, "ultrathink"],
-      defaultEffort: "high",
-      supportsFastMode: true,
-      supportsContextWindow: true,
-    }),
-  },
-  {
-    slug: "claude-opus-4-5",
-    name: "Claude Opus 4.5",
-    shortName: "Opus 4.5",
-    isCustom: false,
-    capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_OPUS_LEGACY_EFFORT_LEVELS,
-      defaultEffort: "high",
-      // Fast mode is only available on Opus 4.6 and newer; 4.5 predates it.
-      supportsFastMode: false,
-      supportsContextWindow: false,
-    }),
-  },
-  {
-    slug: "claude-sonnet-5",
-    name: "Claude Sonnet 5",
-    shortName: "Sonnet 5",
-    isCustom: false,
-    // Sonnet 5 is the first Sonnet-tier model with the full adaptive effort
-    // range (including xhigh/max) and a 1M context window. It does not support
-    // fast mode, which stays Opus-only.
-    capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS,
-      defaultEffort: "high",
-      supportsFastMode: false,
-      supportsContextWindow: true,
-    }),
-  },
-  {
-    slug: "claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6",
-    shortName: "Sonnet 4.6",
-    isCustom: false,
-    capabilities: createModelCapabilities({
-      optionDescriptors: [
-        buildSelectOptionDescriptor({
-          id: "effort",
-          label: "Reasoning",
-          options: [
-            { value: "low", label: "Low" },
-            { value: "medium", label: "Medium" },
-            { value: "high", label: "High", isDefault: true },
-            { value: "max", label: "Max" },
-            { value: "ultrathink", label: "Ultrathink" },
-          ],
-          promptInjectedValues: ["ultrathink"],
-        }),
-        buildSelectOptionDescriptor({
-          id: "contextWindow",
-          label: "Context Window",
-          options: [
-            { value: "200k", label: "200k", isDefault: true },
-            { value: "1m", label: "1M" },
-          ],
-        }),
-      ],
-    }),
-  },
-  {
-    slug: "claude-haiku-4-5",
-    name: "Claude Haiku 4.5",
-    shortName: "Haiku 4.5",
-    isCustom: false,
-    capabilities: createModelCapabilities({
-      optionDescriptors: [
-        buildBooleanOptionDescriptor({
-          id: "thinking",
-          label: "Thinking",
-        }),
-      ],
-    }),
-  },
-];
-
-function supportsMinimumClaudeVersion(
-  version: string | null | undefined,
-  minimumVersion: string,
-): boolean {
-  return version ? compareCliVersions(version, minimumVersion) >= 0 : false;
-}
-
-function supportsClaudeOpus48(version: string | null | undefined): boolean {
-  return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_OPUS_4_8_VERSION);
-}
-
-function supportsClaudeOpus5(version: string | null | undefined): boolean {
-  return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_OPUS_5_VERSION);
-}
-
-function supportsClaudeOpus47(version: string | null | undefined): boolean {
-  return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_OPUS_4_7_VERSION);
-}
-
-function supportsClaudeFable5(version: string | null | undefined): boolean {
-  return supportsMinimumClaudeVersion(version, MINIMUM_CLAUDE_FABLE_5_VERSION);
-}
-
-function getBuiltInClaudeModelsForVersion(
-  version: string | null | undefined,
-): ReadonlyArray<ServerProviderModel> {
-  return BUILT_IN_MODELS.filter((model) => {
-    if (model.slug === "claude-fable-5") {
-      return supportsClaudeFable5(version);
-    }
-    if (model.slug === "claude-opus-5") {
-      return supportsClaudeOpus5(version);
-    }
-    if (model.slug === "claude-opus-4-8") {
-      return supportsClaudeOpus48(version);
-    }
-    if (model.slug === "claude-opus-4-7") {
-      return supportsClaudeOpus47(version);
-    }
-    return true;
-  });
-}
-
-function formatClaudeUpgradeMessages(version: string | null): ReadonlyArray<string> {
-  const versionLabel = version ? `v${version}` : "the installed version";
-  const messages: Array<string> = [];
-  // Claude Fable 5 is intentionally omitted here: it is gated on a placeholder
-  // version (see MINIMUM_CLAUDE_FABLE_5_VERSION) and not yet released, so we
-  // don't nudge users to upgrade for it. Add a message once the version is real.
-  if (!supportsClaudeOpus47(version)) {
-    messages.push(
-      `Claude Code ${versionLabel} is too old for Claude Opus 4.7. Upgrade to v${MINIMUM_CLAUDE_OPUS_4_7_VERSION} or newer to access it.`,
-    );
-  }
-  if (!supportsClaudeOpus48(version)) {
-    messages.push(
-      `Claude Code ${versionLabel} is too old for Claude Opus 4.8. Upgrade to v${MINIMUM_CLAUDE_OPUS_4_8_VERSION} or newer to access it.`,
-    );
-  }
-  if (!supportsClaudeOpus5(version)) {
-    messages.push(
-      `Claude Code ${versionLabel} is too old for Claude Opus 5. Upgrade to v${MINIMUM_CLAUDE_OPUS_5_VERSION} or newer to access it.`,
-    );
-  }
-  return messages;
-}
+// ── Model catalog ───────────────────────────────────────────────────
+//
+// Model metadata (capabilities, CLI version gates, effort/context-window
+// mappings, api-model-id suffixes) lives in `model-manifest.json`, resolved
+// through `ClaudeModelCatalog`. `checkClaudeProviderStatus` reads the current
+// manifest (remote-refreshed when a `ModelManifest` service is supplied) and
+// publishes the resolved catalog as the process-wide active catalog; the
+// synchronous wrappers below read it back for adapter and text-generation
+// call sites that predate the manifest.
 
 export function getClaudeModelCapabilities(model: string | null | undefined): ModelCapabilities {
-  const slug = model?.trim();
-  return (
-    BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
-    DEFAULT_CLAUDE_MODEL_CAPABILITIES
-  );
+  const capabilities = getClaudeCatalogModelCapabilities(getActiveClaudeModelCatalog(), model);
+  return capabilities.optionDescriptors?.length ? capabilities : DEFAULT_CLAUDE_MODEL_CAPABILITIES;
 }
 
 export function resolveClaudeEffort(
@@ -371,30 +84,16 @@ export function resolveClaudeEffort(
 
 /**
  * Normalize a resolved Claude effort value into one suitable for the Claude
- * CLI's `--effort` flag.
- *
- * Mirrors the mapping used when invoking the Claude Agent SDK
- * ({@link getEffectiveClaudeAgentEffort} in ClaudeAdapter): `"ultracode"`
- * is paired with the Claude Code settings flag and normalized to `"xhigh"`,
- * while `"ultrathink"` is filtered out because it is a prompt-prefix mode.
- * Returns `undefined` when no flag should be passed.
+ * CLI's `--effort` flag. Catalog-driven: each model's `effortMap` in the
+ * manifest declares remappings (`ultracode` → `xhigh` where supported,
+ * `max` → `high` on Sonnet 4.6); `ultrathink` is always dropped because it
+ * is a prompt-prefix mode, and `ultracode` never reaches the CLI raw.
  */
 export function normalizeClaudeCliEffort(
   effort: string | null | undefined,
   model?: string | null | undefined,
 ): string | undefined {
-  if (!effort || effort === "ultrathink") {
-    return undefined;
-  }
-  if (effort === "ultracode") {
-    return model === "claude-fable-5" || model === "claude-opus-5" || model === "claude-opus-4-8"
-      ? "xhigh"
-      : undefined;
-  }
-  if (effort === "max" && model === "claude-sonnet-4-6") {
-    return "high";
-  }
-  return effort;
+  return normalizeClaudeCatalogEffort(getActiveClaudeModelCatalog(), effort, model);
 }
 
 export function isClaudeUltracodeEffort(effort: string | null | undefined): boolean {
@@ -404,24 +103,11 @@ export function isClaudeUltracodeEffort(effort: string | null | undefined): bool
 export function resolveClaudeContextWindow(
   modelSelection: ModelSelection | undefined,
 ): string | undefined {
-  const caps = getClaudeModelCapabilities(modelSelection?.model);
-  const raw = getModelSelectionStringOptionValue(modelSelection, "contextWindow");
-  const descriptors = getProviderOptionDescriptors({
-    caps,
-    ...(raw ? { selections: [{ id: "contextWindow", value: raw }] } : {}),
-  });
-  const descriptor = descriptors.find((candidate) => candidate.id === "contextWindow");
-  const value = getProviderOptionCurrentValue(descriptor);
-  return typeof value === "string" ? value : undefined;
+  return resolveClaudeCatalogContextWindow(getActiveClaudeModelCatalog(), modelSelection);
 }
 
 export function resolveClaudeApiModelId(modelSelection: ModelSelection): string {
-  switch (resolveClaudeContextWindow(modelSelection)) {
-    case "1m":
-      return `${modelSelection.model}[1m]`;
-    default:
-      return modelSelection.model;
-  }
+  return resolveClaudeCatalogApiModelId(getActiveClaudeModelCatalog(), modelSelection);
 }
 
 function toTitleCaseWords(value: string): string {
@@ -705,14 +391,24 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   resolveCapabilities?: ResolveClaudeCapabilities,
   environment: NodeJS.ProcessEnv = process.env,
   resolveRateLimits?: ResolveClaudeRateLimits,
+  modelManifest?: Pick<ModelManifest["Service"], "current" | "refreshInBackground">,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
   ChildProcessSpawner.ChildProcessSpawner | Path.Path
 > {
   const checkedAt = new Date().toISOString();
+  let catalog: ClaudeModelCatalog = getActiveClaudeModelCatalog();
+  if (modelManifest) {
+    catalog = resolveClaudeModelCatalog(yield* modelManifest.current);
+    setActiveClaudeModelCatalog(catalog);
+    // Kick a TTL-gated remote refresh so the next check picks up manifest
+    // edits published on GitHub; this check keeps using the data in hand.
+    yield* modelManifest.refreshInBackground;
+  }
+  const catalogModels = catalog.models.map((entry) => entry.model);
   const allModels = providerModelsFromSettings(
-    BUILT_IN_MODELS,
+    catalogModels,
     PROVIDER,
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
@@ -797,12 +493,12 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   }
 
   const models = providerModelsFromSettings(
-    getBuiltInClaudeModelsForVersion(parsedVersion),
+    resolveClaudeModelsForVersion(catalog, parsedVersion),
     PROVIDER,
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const upgradeMessage = formatClaudeUpgradeMessages(parsedVersion).join(" ");
+  const upgradeMessage = formatClaudeVersionUpgradeMessage(catalog, parsedVersion) ?? "";
 
   const capabilities = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
@@ -861,7 +557,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
 export const makePendingClaudeProvider = (claudeSettings: ClaudeSettings): ServerProviderDraft => {
   const checkedAt = new Date().toISOString();
   const models = providerModelsFromSettings(
-    BUILT_IN_MODELS,
+    getActiveClaudeModelCatalog().models.map((entry) => entry.model),
     PROVIDER,
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,

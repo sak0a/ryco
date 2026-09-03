@@ -31,6 +31,7 @@ import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/Provi
 import { ContextHandoffRepositoryLive } from "./persistence/Layers/ContextHandoffs.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
+import * as ModelManifest from "./provider/ModelManifest.ts";
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import { OpenCodeRuntimeLive } from "./provider/opencodeRuntime.ts";
@@ -406,6 +407,9 @@ const RuntimeCoreBaseDependenciesLive = RuntimeFeatureLayerLive.pipe(
   // Provided once at the runtime level so every consumer sees the same
   // logger instances.
   Layer.provideMerge(ProviderEventLoggersLive),
+  // Remote-refreshable provider model metadata (bundled fallback). Provided
+  // at the same level as the event loggers so driver `create()` sees it.
+  Layer.provideMerge(ModelManifest.layer),
   // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
   // `ProviderRegistryLive` pulled `OpenCodeRuntimeLive` in for itself, but
   // the rewritten registry reads snapshots off the instance registry and
