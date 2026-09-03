@@ -1862,7 +1862,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.153 is too old for Claude Opus 4.8. Upgrade to v2.1.154 or newer to access it. Claude Code v2.1.153 is too old for Claude Opus 5. Upgrade to v2.1.219 or newer to access it.",
+            // The upgrade nudge names only the model with the lowest unmet
+            // minimum: the smallest upgrade that unlocks something.
+            "Claude Code v2.1.153 is too old for Claude Opus 4.8. Upgrade to v2.1.154 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1897,7 +1899,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.110 is too old for Claude Opus 4.7. Upgrade to v2.1.111 or newer to access it. Claude Code v2.1.110 is too old for Claude Opus 4.8. Upgrade to v2.1.154 or newer to access it. Claude Code v2.1.110 is too old for Claude Opus 5. Upgrade to v2.1.219 or newer to access it.",
+            "Claude Code v2.1.110 is too old for Claude Opus 4.7. Upgrade to v2.1.111 or newer to access it.",
           );
         }).pipe(
           Effect.provide(

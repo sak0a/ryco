@@ -8,7 +8,7 @@ import { Effect, Metric } from "effect";
 
 import { metricNames } from "../../observability/Metrics.ts";
 import { hasMetricSnapshot } from "../../observability/testMetricSnapshots.ts";
-import { makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { makeEventNdjsonLogger, sweepStaleEventLogs } from "./EventNdjsonLogger.ts";
 
 function parseLogLine(line: string) {
   const match = /^\[([^\]]+)\] ([A-Z]+): (.+)$/.exec(line);
@@ -52,8 +52,8 @@ describe("EventNdjsonLogger", () => {
         );
         yield* logger.close();
 
-        const threadOnePath = path.join(tempDir, "thread-1.log");
-        const threadTwoPath = path.join(tempDir, "thread-2.log");
+        const threadOnePath = path.join(tempDir, "thread-1.native.log");
+        const threadTwoPath = path.join(tempDir, "thread-2.native.log");
         assert.equal(fs.existsSync(threadOnePath), true);
         assert.equal(fs.existsSync(threadTwoPath), true);
 
@@ -185,7 +185,7 @@ describe("EventNdjsonLogger", () => {
         }
         yield* logger.close();
 
-        const fileStem = "thread-rotate.log";
+        const fileStem = "thread-rotate.native.log";
         const matchingFiles = fs
           .readdirSync(tempDir)
           .filter((entry) => entry === fileStem || entry.startsWith(`${fileStem}.`))
@@ -244,7 +244,7 @@ describe("EventNdjsonLogger", () => {
           true,
         );
 
-        const globalPath = path.join(tempDir, "_global.log");
+        const globalPath = path.join(tempDir, "_global.native.log");
         const lines = fs.existsSync(globalPath)
           ? fs.readFileSync(globalPath, "utf8").trim().split("\n").filter(Boolean)
           : [];
@@ -252,6 +252,92 @@ describe("EventNdjsonLogger", () => {
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
+    }),
+  );
+  it.effect("keeps native and canonical streams in separate per-thread files", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-log-"));
+      const basePath = path.join(tempDir, "events.log");
+
+      try {
+        const native = yield* makeEventNdjsonLogger(basePath, { stream: "native" });
+        const canonical = yield* makeEventNdjsonLogger(basePath, { stream: "canonical" });
+        assert.notEqual(native, undefined);
+        assert.notEqual(canonical, undefined);
+        if (!native || !canonical) {
+          return;
+        }
+
+        const threadId = ThreadId.make("thread-split");
+        yield* native.write({ id: "evt-native" }, threadId);
+        yield* canonical.write({ id: "evt-canonical" }, threadId);
+        yield* native.close();
+        yield* canonical.close();
+
+        const nativeLines = fs
+          .readFileSync(path.join(tempDir, "thread-split.native.log"), "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => parseLogLine(line));
+        const canonicalLines = fs
+          .readFileSync(path.join(tempDir, "thread-split.log"), "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => parseLogLine(line));
+
+        assert.deepEqual(
+          nativeLines.map((line) => line.stream),
+          ["NTIVE"],
+        );
+        assert.deepEqual(
+          canonicalLines.map((line) => line.stream),
+          ["CANON"],
+        );
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("sweeps stale log files past the retention window", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-log-"));
+      const dayMs = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+
+      try {
+        const stale = path.join(tempDir, "old-thread.log");
+        const staleRotated = path.join(tempDir, "old-thread.log.2");
+        const fresh = path.join(tempDir, "fresh-thread.log");
+        const unrelated = path.join(tempDir, "notes.txt");
+        for (const file of [stale, staleRotated, fresh, unrelated]) {
+          fs.writeFileSync(file, "x");
+        }
+        const staleTime = new Date(now - 40 * dayMs);
+        fs.utimesSync(stale, staleTime, staleTime);
+        fs.utimesSync(staleRotated, staleTime, staleTime);
+        fs.utimesSync(unrelated, staleTime, staleTime);
+
+        const removed = yield* sweepStaleEventLogs(tempDir, { maxAgeMs: 30 * dayMs, now });
+
+        assert.equal(removed, 2);
+        assert.equal(fs.existsSync(stale), false);
+        assert.equal(fs.existsSync(staleRotated), false);
+        assert.equal(fs.existsSync(fresh), true);
+        // Non-log files are never touched, stale or not.
+        assert.equal(fs.existsSync(unrelated), true);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("sweep of a missing directory is a no-op", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-provider-log-"));
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      const removed = yield* sweepStaleEventLogs(tempDir);
+      assert.equal(removed, 0);
     }),
   );
 });

@@ -56,6 +56,14 @@ export const ServerProviderModel = Schema.Struct({
   name: TrimmedNonEmptyString,
   shortName: Schema.optional(TrimmedNonEmptyString),
   subProvider: Schema.optional(TrimmedNonEmptyString),
+  // Alternate slugs (typed shortcuts, dated API ids) that resolve to `slug`.
+  // Sourced from the model manifest for built-in models; absent on custom ones.
+  aliases: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  // Picker chip for freshly shipped models; manifest-driven so a remote
+  // manifest update can highlight a model without a client release.
+  badge: Schema.optional(Schema.Literal("new")),
+  isDefault: Schema.optional(Schema.Boolean),
+  isLegacy: Schema.optional(Schema.Boolean),
   isCustom: Schema.Boolean,
   capabilities: Schema.NullOr(ModelCapabilities),
 });

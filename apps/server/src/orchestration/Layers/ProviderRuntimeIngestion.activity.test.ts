@@ -139,7 +139,7 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
     }
   });
 
-  it("retains the full terminal tool.completed payload", () => {
+  it("persists tool.completed data with oversized strings capped to head and tail", () => {
     const data = streamingData(2_000);
     const event = {
       ...base,
@@ -157,7 +157,20 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
 
     expect(activities).toHaveLength(1);
     const payload = activities[0]?.payload as Record<string, unknown>;
-    expect(payload.data).toEqual(data);
-    expect(JSON.stringify(payload).length).toBeGreaterThan(50_000);
+    // Structure is preserved so client folds keep working, but every string
+    // is bounded: completed rows are persisted forever in the event log and
+    // the activity projection, so unbounded terminal output is elided to a
+    // head + tail around a truncation marker.
+    const cappedData = payload.data as {
+      rawOutput: { stdout: string };
+      content: Array<{ content: { text: string } }>;
+    };
+    expect(Object.keys(cappedData)).toEqual(Object.keys(data));
+    const stdout = cappedData.rawOutput.stdout;
+    expect(stdout.length).toBeLessThan(20_000);
+    expect(stdout.startsWith("first line of output")).toBe(true);
+    expect(stdout).toContain("chars truncated");
+    expect(stdout.trimEnd().endsWith("Capturing frame 1999/9028")).toBe(true);
+    expect(cappedData.content[0]!.content.text).toContain("chars truncated");
   });
 });

@@ -15,8 +15,67 @@ import { Effect, SynchronizedRef } from "effect";
 import { toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
 import { increment, providerEventLogRecordsDroppedTotal } from "../../observability/Metrics.ts";
 
+/**
+ * Age-based retention for the event log directory. Files that have not been
+ * written for this long belong to threads nobody is debugging anymore;
+ * rotation alone never deletes them, so without this sweep the directory
+ * grows without bound (observed: 11 GB across 450+ threads).
+ */
+export const DEFAULT_EVENT_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+const EVENT_LOG_FILE_PATTERN = /\.log(?:\.\d+)?$/;
+
+/**
+ * Best-effort deletion of `*.log` / `*.log.N` files in `directory` whose
+ * mtime is older than the retention window. Returns the number of files
+ * removed. Never fails: unreadable directories or races with rotation are
+ * downgraded to a warning / skipped file.
+ */
+export const sweepStaleEventLogs = Effect.fn("sweepStaleEventLogs")(function* (
+  directory: string,
+  options?: { readonly maxAgeMs?: number; readonly now?: number },
+): Effect.fn.Return<number> {
+  const maxAgeMs = options?.maxAgeMs ?? DEFAULT_EVENT_LOG_RETENTION_MS;
+  const cutoffMs = (options?.now ?? Date.now()) - maxAgeMs;
+  const removed = yield* Effect.tryPromise(async () => {
+    const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+    let count = 0;
+    for (const entry of entries) {
+      if (!entry.isFile() || !EVENT_LOG_FILE_PATTERN.test(entry.name)) {
+        continue;
+      }
+      const filePath = path.join(directory, entry.name);
+      try {
+        const stats = await fs.promises.stat(filePath);
+        if (stats.mtimeMs < cutoffMs) {
+          await fs.promises.unlink(filePath);
+          count += 1;
+        }
+      } catch {
+        // Raced with rotation or a concurrent delete; skip the file.
+      }
+    }
+    return count;
+  }).pipe(
+    Effect.catch((error) =>
+      logWarning("failed to sweep stale provider event logs", { directory, error }).pipe(
+        Effect.as(0),
+      ),
+    ),
+  );
+  if (removed > 0) {
+    yield* Effect.logInfo("swept stale provider event logs", { directory, removed }).pipe(
+      Effect.annotateLogs({ scope: LOG_SCOPE }),
+    );
+  }
+  return removed;
+});
+
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
-const DEFAULT_MAX_FILES = 10;
+// Rotation depth is per thread file, so the effective cap is
+// `maxBytes * maxFiles * threads`. Keep the depth shallow: these are
+// best-effort observability logs and deep history has no consumer.
+const DEFAULT_MAX_FILES = 3;
 const DEFAULT_BATCH_WINDOW_MS = 200;
 const DEFAULT_MAX_QUEUE_SIZE = 2_048;
 const GLOBAL_THREAD_SEGMENT = "_global";
@@ -336,8 +395,13 @@ export const makeEventNdjsonLogger = Effect.fn("makeEventNdjsonLogger")(function
         return Effect.succeed([existing, state] as const);
       }
 
+      // The native and canonical streams write distinct files. Sharing one
+      // path would put two `AsyncRotatingFileSink`s (with independent byte
+      // counters) on the same file, interleaving streams and breaking
+      // rotation accounting.
+      const streamSuffix = options.stream === "native" ? ".native" : "";
       return makeThreadWriter({
-        filePath: path.join(path.dirname(filePath), `${threadSegment}.log`),
+        filePath: path.join(path.dirname(filePath), `${threadSegment}${streamSuffix}.log`),
         maxBytes,
         maxFiles,
         batchWindowMs,

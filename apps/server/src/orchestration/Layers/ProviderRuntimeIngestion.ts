@@ -39,6 +39,7 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { increment, providerRuntimeStaleEventsTotal } from "../../observability/Metrics.ts";
 import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
+import { capActivityData } from "../activityDataCap.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
@@ -968,7 +969,9 @@ export function runtimeEventToActivities(
             ...(event.itemId ? { providerItemId: event.itemId } : {}),
             ...(event.providerRefs ? { providerRefs: event.providerRefs } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.data !== undefined
+              ? { data: capActivityData(event.payload.itemType, event.payload.data) }
+              : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.parentToolUseId
               ? { parentToolUseId: event.payload.parentToolUseId }
@@ -997,7 +1000,9 @@ export function runtimeEventToActivities(
             ...(event.itemId ? { providerItemId: event.itemId } : {}),
             ...(event.providerRefs ? { providerRefs: event.providerRefs } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.data !== undefined
+              ? { data: capActivityData(event.payload.itemType, event.payload.data) }
+              : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.parentToolUseId
               ? { parentToolUseId: event.payload.parentToolUseId }
@@ -1026,7 +1031,9 @@ export function runtimeEventToActivities(
             ...(event.itemId ? { providerItemId: event.itemId } : {}),
             ...(event.providerRefs ? { providerRefs: event.providerRefs } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.data !== undefined
+              ? { data: capActivityData(event.payload.itemType, event.payload.data) }
+              : {}),
             ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
             ...(event.payload.parentToolUseId
               ? { parentToolUseId: event.payload.parentToolUseId }

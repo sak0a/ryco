@@ -187,7 +187,11 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
   [CLAUDE_DRIVER_KIND]: {
-    fable: "claude-fable-5",
+    // `fable` follows Claude Code's own alias, which resolves to Fable 5.1
+    // as of CLI 2.1.257. Fable 5 stays reachable via its versioned aliases.
+    fable: "claude-fable-5-1",
+    "fable-5.1": "claude-fable-5-1",
+    "claude-fable-5.1": "claude-fable-5-1",
     "fable-5": "claude-fable-5",
     opus: "claude-opus-4-8",
     "opus-4.8": "claude-opus-4-8",
