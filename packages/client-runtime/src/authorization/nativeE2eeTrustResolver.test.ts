@@ -1,0 +1,301 @@
+import { ed25519, x25519 } from "@noble/curves/ed25519.js";
+import { p256 } from "@noble/curves/nist.js";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import type { NativeAccountGrantRelayTicketResponse } from "@ryco/contracts/native-e2ee";
+import {
+  encodeHubDeviceGrantClaims,
+  encodeHubDeviceGrantEnvelope,
+  encodeHubDeviceGrantSigningEnvelope,
+  type HubDeviceGrantClaimsInput,
+} from "@ryco/shared/relayE2eeHubDeviceGrant";
+import { e2eeKeyFingerprint, e2eeSha256 } from "@ryco/shared/relayE2eeKeys";
+import type { NodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeTranscripts";
+import type { NativeE2eeAccountTrustedNode, NativeE2eePlatformService } from "../platform/index.ts";
+import { encodeBase64Url } from "../relay/base64url.ts";
+import type { HostedHubApi } from "./api.ts";
+import type { NativeE2eeReadyEnrollment } from "./nativeE2eeEnrollment.ts";
+import {
+  createNativeE2eeTrustResolver,
+  type ResolveNativeE2eeTrustInput,
+} from "./nativeE2eeTrustResolver.ts";
+
+const NOW = 2_000_000_000_000;
+const HUB_ORIGIN = "https://hub.example.test";
+const ACCOUNT_ID = `acct_${"a".repeat(22)}`;
+const ENROLLMENT_ID = `enr_${"e".repeat(22)}`;
+const NODE_ID = `node_${"n".repeat(22)}`;
+const TICKET_ID = `rtk_${"t".repeat(22)}`;
+const CONTINUITY_ID = `nct_${"c".repeat(22)}`;
+const KEY_ID = `hgk_${"k".repeat(22)}`;
+const HUB_SECRET = new Uint8Array(32).fill(1);
+const HUB_PUBLIC = ed25519.getPublicKey(HUB_SECRET);
+const DEVICE_PUBLIC = p256.getPublicKey(new Uint8Array(32).fill(2), false);
+const DEVICE_AGREEMENT_PUBLIC = x25519.getPublicKey(new Uint8Array(32).fill(3));
+const NODE_PUBLIC = ed25519.getPublicKey(new Uint8Array(32).fill(4));
+const NODE_AGREEMENT_PUBLIC = x25519.getPublicKey(new Uint8Array(32).fill(5));
+const CERTIFICATE_DIGEST = new Uint8Array(32).fill(6);
+const STATEMENT_BYTES = new Uint8Array([1, 2, 3, 4]);
+const STATEMENT_DIGEST = e2eeSha256(STATEMENT_BYTES);
+
+const statement = {
+  transcript: new Uint8Array([9]),
+  signature: new Uint8Array(64).fill(1),
+  hubOrigin: HUB_ORIGIN,
+  nodeId: NODE_ID,
+  identityKeyId: "key",
+  identityPublicKey: NODE_PUBLIC,
+  identityFingerprint: e2eeKeyFingerprint("node-identity", NODE_PUBLIC),
+  e2eeVersionMin: 1,
+  e2eeVersionMax: 1,
+  suiteRegistry: [1, 2],
+  prekeyCertificate: {
+    prekeyId: `epk_${"p".repeat(22)}`,
+    agreementPublicKey: NODE_AGREEMENT_PUBLIC,
+    agreementFingerprint: e2eeKeyFingerprint("agreement", NODE_AGREEMENT_PUBLIC),
+    crossSignature: new Uint8Array(64).fill(2),
+    createdAt: NOW - 1_000,
+    expiresAt: NOW + 120_000,
+  },
+  continuityChain: [],
+  requireE2EE: true,
+  requireApprovedClientE2EE: false,
+  admittedPatterns: ["IK"],
+  policyGeneration: 7,
+  issuedAt: NOW - 1_000,
+  expiresAt: NOW + 120_000,
+  continuityId: CONTINUITY_ID,
+} as unknown as NodeE2eeCapabilityStatement;
+
+const enrollment = {
+  namespace: { hubOrigin: HUB_ORIGIN, accountId: ACCOUNT_ID },
+  enrollment: {
+    enrollmentId: ENROLLMENT_ID,
+    enrollmentRevision: 4,
+    accountAuthEpoch: 3,
+    deviceAuthEpoch: 5,
+    platform: "ios",
+    appVersion: "1.0.0",
+    reportedKeyBacking: "secure-enclave",
+    deviceLabel: "Phone",
+    identityFingerprint: encodeBase64Url(e2eeKeyFingerprint("client-identity", DEVICE_PUBLIC)),
+    agreementFingerprint: encodeBase64Url(e2eeKeyFingerprint("agreement", DEVICE_AGREEMENT_PUBLIC)),
+    clientPrekeyCertificateDigest: encodeBase64Url(CERTIFICATE_DIGEST),
+    certificateExpiresAt: NOW + 120_000,
+    status: "active",
+    createdAt: NOW - 60_000,
+    updatedAt: NOW - 1_000,
+    lastUsedAt: null,
+    revokedAt: null,
+  },
+  identity: {
+    publicKey: DEVICE_PUBLIC,
+    fingerprint: e2eeKeyFingerprint("client-identity", DEVICE_PUBLIC),
+    backing: "secure-enclave",
+  },
+  prekey: {
+    agreementPublicKey: DEVICE_AGREEMENT_PUBLIC,
+    agreementFingerprint: e2eeKeyFingerprint("agreement", DEVICE_AGREEMENT_PUBLIC),
+    transcript: new Uint8Array([1]),
+    signature: new Uint8Array(64),
+    certificate: new Uint8Array([2]),
+    certificateDigest: CERTIFICATE_DIGEST,
+    expiresAt: NOW + 120_000,
+  },
+} as unknown as NativeE2eeReadyEnrollment;
+
+function grantEnvelope() {
+  const claims = encodeHubDeviceGrantClaims({
+    issuerHubOrigin: HUB_ORIGIN,
+    keyId: KEY_ID,
+    grantId: `hgr_${"g".repeat(22)}`,
+    accountId: ACCOUNT_ID,
+    accountAuthEpoch: 3,
+    enrollmentId: ENROLLMENT_ID,
+    enrollmentRevision: 4,
+    deviceAuthEpoch: 5,
+    deviceIdentityPublicKey: DEVICE_PUBLIC,
+    deviceAgreementPublicKey: DEVICE_AGREEMENT_PUBLIC,
+    clientPrekeyCertificateDigest: CERTIFICATE_DIGEST,
+    nodeId: NODE_ID,
+    nodeIdentityPublicKey: NODE_PUBLIC,
+    nodeAgreementPublicKey: NODE_AGREEMENT_PUBLIC,
+    nodeContinuityId: CONTINUITY_ID,
+    nodePolicyGeneration: 7,
+    nodeCapabilityStatementDigest: STATEMENT_DIGEST,
+    relayTicketId: TICKET_ID,
+    maximumRole: "operator",
+    capabilities: ["ryco.rpc"],
+    issuedAt: NOW,
+    notBefore: NOW - 1_000,
+    expiresAt: NOW + 60_000,
+    nonce: new Uint8Array(32).fill(7),
+  } as unknown as HubDeviceGrantClaimsInput);
+  return encodeHubDeviceGrantEnvelope(
+    claims,
+    ed25519.sign(encodeHubDeviceGrantSigningEnvelope(claims), HUB_SECRET),
+  );
+}
+
+function ticket(): NativeAccountGrantRelayTicketResponse {
+  const grant = grantEnvelope();
+  return {
+    protocolVersion: 1,
+    ticket: "T".repeat(43),
+    ticketId: TICKET_ID,
+    expiresAt: NOW + 120_000,
+    protocolMajor: 1,
+    protocolMinor: 3,
+    suiteId: 2,
+    deviceGrant: encodeBase64Url(grant),
+    deviceGrantDigest: encodeBase64Url(e2eeSha256(grant)),
+    nodeCapabilityStatement: encodeBase64Url(STATEMENT_BYTES),
+    nodeCapabilityStatementDigest: encodeBase64Url(STATEMENT_DIGEST),
+    keysetGeneration: 2,
+    capability: "ryco.rpc",
+    effectiveRole: "operator",
+  } as NativeAccountGrantRelayTicketResponse;
+}
+
+function harness(previous: NativeE2eeAccountTrustedNode | null = null) {
+  let stored = previous;
+  const api = {
+    issueAccountGrantRelayTicket: vi.fn(async () => ticket()),
+    getE2eeGrantVerificationKeys: vi.fn(async () => ({
+      protocolVersion: 1 as const,
+      generation: 2,
+      keys: [
+        {
+          keyId: KEY_ID,
+          publicKey: encodeBase64Url(HUB_PUBLIC),
+          notBefore: NOW - 60_000,
+          notAfter: NOW + 180_000,
+        },
+      ],
+    })),
+  } as unknown as Pick<
+    HostedHubApi,
+    "issueAccountGrantRelayTicket" | "getE2eeGrantVerificationKeys"
+  >;
+  const platform = {
+    readAccountTrustedNode: vi.fn(async () => stored),
+    writeAccountTrustedNode: vi.fn(async (record) => {
+      stored = record;
+    }),
+  } as Pick<NativeE2eePlatformService, "readAccountTrustedNode" | "writeAccountTrustedNode">;
+  const resolve = createNativeE2eeTrustResolver({ api, platform, now: () => NOW + 1 });
+  const request: ResolveNativeE2eeTrustInput = {
+    hubOrigin: HUB_ORIGIN,
+    accountId: ACCOUNT_ID,
+    capability: "ryco.rpc" as ResolveNativeE2eeTrustInput["capability"],
+    node: {
+      nodeId: NODE_ID,
+      statementBytes: STATEMENT_BYTES,
+      statement,
+      accountGrantAllowed: true,
+    },
+    enrollment,
+    localTrustedIntroduction: false,
+    verifiedPin: null,
+  };
+  return { api, platform, resolve, request, stored: () => stored };
+}
+
+describe("native E2EE trust resolver", () => {
+  it("gives local trusted introduction precedence without contacting the Hub", async () => {
+    const { api, resolve, request } = harness();
+    const result = await resolve({ ...request, localTrustedIntroduction: true });
+    expect(result).toMatchObject({
+      kind: "authorized",
+      trustSource: "local-trusted-introduction",
+      suiteId: 1,
+    });
+    expect(api.issueAccountGrantRelayTicket).not.toHaveBeenCalled();
+  });
+
+  it("blocks a verified-pin conflict instead of repairing it with an account grant", async () => {
+    const { api, resolve, request } = harness();
+    const result = await resolve({
+      ...request,
+      verifiedPin: {
+        identityFingerprint: new Uint8Array(32).fill(99),
+        acceptedPolicyGeneration: 6,
+      },
+    });
+    expect(result).toEqual({ kind: "blocked", reason: "verified-pin-conflict" });
+    expect(api.issueAccountGrantRelayTicket).not.toHaveBeenCalled();
+  });
+
+  it("verifies every account-grant binding and records public continuity metadata", async () => {
+    const { api, platform, resolve, request, stored } = harness();
+    const result = await resolve(request);
+
+    expect(result).toMatchObject({
+      kind: "authorized",
+      trustSource: "account-enrolled",
+      suiteId: 2,
+      ticket: "T".repeat(43),
+      effectiveRole: "operator",
+    });
+    expect(api.issueAccountGrantRelayTicket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: NODE_ID,
+        enrollmentId: ENROLLMENT_ID,
+        enrollmentRevision: 4,
+        suiteId: 2,
+      }),
+    );
+    expect(platform.writeAccountTrustedNode).toHaveBeenCalledOnce();
+    expect(stored()).toMatchObject({
+      nodeId: NODE_ID,
+      acceptedPolicyGeneration: 7,
+      firstTrustedAt: NOW + 1,
+      lastTrustedAt: NOW + 1,
+    });
+  });
+
+  it("preserves the policy high-water mark and blocks rollback before ticket issuance", async () => {
+    const previous = {
+      hubOrigin: HUB_ORIGIN,
+      accountId: ACCOUNT_ID,
+      nodeId: NODE_ID,
+      identityPublicKey: NODE_PUBLIC,
+      identityFingerprint: statement.identityFingerprint,
+      agreementFingerprint: e2eeKeyFingerprint("agreement", NODE_AGREEMENT_PUBLIC),
+      continuityId: CONTINUITY_ID,
+      acceptedPolicyGeneration: 8,
+      firstTrustedAt: NOW - 1_000,
+      lastTrustedAt: NOW - 500,
+    } satisfies NativeE2eeAccountTrustedNode;
+    const { api, resolve, request } = harness(previous);
+
+    await expect(resolve(request)).resolves.toEqual({ kind: "blocked", reason: "policy-rollback" });
+    expect(api.issueAccountGrantRelayTicket).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mismatched statement digest and does not write trust", async () => {
+    const { api, platform, resolve, request } = harness();
+    vi.mocked(api.issueAccountGrantRelayTicket).mockResolvedValue({
+      ...ticket(),
+      nodeCapabilityStatementDigest: encodeBase64Url(new Uint8Array(32).fill(44)),
+    } as NativeAccountGrantRelayTicketResponse);
+
+    await expect(resolve(request)).resolves.toEqual({
+      kind: "blocked",
+      reason: "account-authorization-invalid",
+    });
+    expect(platform.writeAccountTrustedNode).not.toHaveBeenCalled();
+  });
+
+  it("disposes transient grant material idempotently", async () => {
+    const { resolve, request } = harness();
+    const result = await resolve(request);
+    expect(result.kind).toBe("authorized");
+    if (result.kind !== "authorized" || result.trustSource !== "account-enrolled") return;
+    expect(result.grant.envelope.some((byte) => byte !== 0)).toBe(true);
+    result.dispose();
+    result.dispose();
+    expect(result.grant.envelope.every((byte) => byte === 0)).toBe(true);
+    expect(result.nodeCapabilityStatement.every((byte) => byte === 0)).toBe(true);
+  });
+});
