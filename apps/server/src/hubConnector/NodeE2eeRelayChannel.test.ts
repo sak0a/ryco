@@ -27,6 +27,9 @@ function stubSession(calls: string[]): NodeE2eeChannelSession {
     beginClose: async () => {
       calls.push("beginClose");
     },
+    revokeAccountGrant: async () => {
+      calls.push("revokeAccountGrant");
+    },
     dispose: (options) => calls.push(`dispose:${String(options?.incompleteReassembly)}`),
     verdict: () => undefined,
   };

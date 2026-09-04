@@ -126,6 +126,7 @@ function statementClient(): {
       continuity: async () => ({ continuityId: CONTINUITY_ID, chain: [] }),
       policy: () =>
         effectiveNodeE2eePolicy({
+          mode: "compatibility",
           requireE2EE: false,
           requireApprovedClientE2EE: false,
           suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
@@ -193,6 +194,7 @@ function relayHarness(options: RelayHarnessOptions) {
       options.readAdvertisement ?? ((hubOrigin) => statements.client.advertised(hubOrigin)),
     policy: () =>
       effectiveNodeE2eePolicy({
+        mode: options.requireE2EE ? "require-e2ee" : "compatibility",
         requireE2EE: options.requireE2EE ?? false,
         requireApprovedClientE2EE: false,
         suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
@@ -537,6 +539,7 @@ describe("NodeE2eeChannelAdvertiser on the relay path", () => {
       readAdvertisement: (hubOrigin) => statementClient().client.advertised(hubOrigin),
       policy: () =>
         effectiveNodeE2eePolicy({
+          mode: "compatibility",
           requireE2EE: false,
           requireApprovedClientE2EE: false,
           suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],

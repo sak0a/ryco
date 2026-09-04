@@ -74,6 +74,7 @@ export const stubClientListing = (
 });
 
 export const stubPolicy = (overrides: Partial<E2eePolicyView> = {}): E2eePolicyView => ({
+  mode: "compatibility",
   requireE2EE: false,
   requireApprovedClientE2EE: false,
   effectiveRequireE2EE: false,

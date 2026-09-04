@@ -227,6 +227,13 @@ export interface HubConnectorE2eeStatement {
   readonly statementDigest: Uint8Array;
 }
 
+export interface HubConnectorAccountGrantMaterial {
+  readonly hubOrigin: string;
+  readonly connectorGeneration: number;
+  readonly advertisement: NodeE2eeAdvertisement;
+  readonly verifierKeys: readonly RelayHubGrantVerificationKey[];
+}
+
 export interface HubConnectorE2eeSnapshot {
   readonly hubOrigin: string | undefined;
   readonly connectorGeneration: number | undefined;
@@ -268,6 +275,7 @@ export class HubConnectorE2eeStateMachine {
   #protocol: RelayProtocolVersion | undefined;
   #currentStatementDigest: Uint8Array | undefined;
   #acknowledgedStatementDigest: Uint8Array | undefined;
+  #acknowledgedStatements = new Set<string>();
   #statements = new Map<string, HubConnectorE2eeStatement>();
   #verifierKeyset: HubConnectorE2eeVerifierKeyset | undefined;
   #revocations = new Map<string, RelayE2eeEnrollmentRevokedFrame>();
@@ -291,6 +299,7 @@ export class HubConnectorE2eeStateMachine {
     this.#acknowledgedStatementDigest?.fill(0);
     this.#currentStatementDigest = undefined;
     this.#acknowledgedStatementDigest = undefined;
+    this.#acknowledgedStatements.clear();
     this.#statements.clear();
     this.#verifierKeyset = undefined;
     this.#revocations.clear();
@@ -367,6 +376,7 @@ export class HubConnectorE2eeStateMachine {
     }
     this.#acknowledgedStatementDigest?.fill(0);
     this.#acknowledgedStatementDigest = Uint8Array.from(statementDigest);
+    this.#acknowledgedStatements.add(Buffer.from(statementDigest).toString("hex"));
     return "accepted";
   }
 
@@ -409,13 +419,13 @@ export class HubConnectorE2eeStateMachine {
     const key = frame.enrollmentId as string;
     const previous = this.#revocations.get(key);
     if (previous !== undefined) {
-      if (frame.accountAuthEpoch < previous.accountAuthEpoch) return "stale";
-      if (frame.enrollmentRevision < previous.enrollmentRevision) return "stale";
       if (
-        frame.enrollmentRevision === previous.enrollmentRevision &&
-        (frame.deviceAuthEpoch < previous.deviceAuthEpoch ||
-          (frame.accountAuthEpoch === previous.accountAuthEpoch &&
-            frame.deviceAuthEpoch === previous.deviceAuthEpoch))
+        frame.accountAuthEpoch < previous.accountAuthEpoch ||
+        frame.enrollmentRevision < previous.enrollmentRevision ||
+        frame.deviceAuthEpoch < previous.deviceAuthEpoch ||
+        (frame.accountAuthEpoch === previous.accountAuthEpoch &&
+          frame.enrollmentRevision === previous.enrollmentRevision &&
+          frame.deviceAuthEpoch === previous.deviceAuthEpoch)
       ) {
         return "stale";
       }
@@ -441,6 +451,48 @@ export class HubConnectorE2eeStateMachine {
       return undefined;
     }
     return retained.advertisement;
+  }
+
+  accountGrantMaterial(
+    connectorGeneration: number,
+    statementDigest: Uint8Array,
+  ): HubConnectorAccountGrantMaterial | undefined {
+    if (!this.#isCurrent(connectorGeneration)) return undefined;
+    const digestKey = Buffer.from(statementDigest).toString("hex");
+    if (!this.#acknowledgedStatements.has(digestKey)) return undefined;
+    const advertisement = this.statementForDigest(connectorGeneration, statementDigest);
+    const keyset = this.#verifierKeyset;
+    const at = this.#now();
+    if (
+      advertisement === undefined ||
+      keyset === undefined ||
+      !keyset.keys.some((key) => at >= key.notBefore && at < key.notAfter)
+    ) {
+      return undefined;
+    }
+    return {
+      hubOrigin: this.#hubOrigin!,
+      connectorGeneration,
+      advertisement,
+      verifierKeys: keyset.keys.map(cloneVerifierKey),
+    };
+  }
+
+  enrollmentGrantIsCurrent(input: {
+    readonly enrollmentId: string;
+    readonly enrollmentRevision: number;
+    readonly accountAuthEpoch: number;
+    readonly deviceAuthEpoch: number;
+  }): boolean {
+    const revoked = this.#revocations.get(input.enrollmentId);
+    if (revoked === undefined) return true;
+    if (input.accountAuthEpoch < revoked.accountAuthEpoch) return false;
+    if (input.deviceAuthEpoch < revoked.deviceAuthEpoch) return false;
+    if (input.enrollmentRevision < revoked.enrollmentRevision) return false;
+    // The event revokes the named revision, not merely grants below its epoch.
+    // A higher revision is a new enrollment revision; the same revision stays
+    // revoked even if a malicious/replayed envelope carries a larger epoch.
+    return input.enrollmentRevision > revoked.enrollmentRevision;
   }
 
   accountGrantReady(): boolean {
@@ -494,6 +546,7 @@ export class HubConnectorE2eeStateMachine {
     for (const [key, value] of this.#statements) {
       if (value.advertisement.expiresAt + E2EE_MAX_CLOCK_SKEW < at) {
         this.#statements.delete(key);
+        this.#acknowledgedStatements.delete(key);
       }
     }
   }

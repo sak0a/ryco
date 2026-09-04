@@ -101,8 +101,10 @@ describe("HubConnectorE2eeStateMachine", () => {
     expect(state.publish(2, second)).toBe("accepted");
     expect(state.snapshot().accountGrantReady).toBe(false);
     expect(state.statementForDigest(2, first.statementDigest)).toBe(first);
+    expect(state.accountGrantMaterial(2, first.statementDigest)?.advertisement).toBe(first);
     now = 5_000 + E2EE_MAX_CLOCK_SKEW + 1;
     expect(state.statementForDigest(2, first.statementDigest)).toBeUndefined();
+    expect(state.accountGrantMaterial(2, first.statementDigest)).toBeUndefined();
 
     state.begin(3, HUB_ORIGIN, { protocolMajor: 1, protocolMinor: 3 });
     expect(state.snapshot()).toMatchObject({
@@ -179,7 +181,30 @@ describe("HubConnectorE2eeStateMachine", () => {
         enrollmentRevision: 2,
         deviceAuthEpoch: 1,
       } as unknown as RelayE2eeEnrollmentRevokedFrame),
+    ).toBe("stale");
+    expect(
+      state.acceptRevocation(9, {
+        ...revocation,
+        enrollmentRevision: 2,
+        deviceAuthEpoch: 4,
+      } as unknown as RelayE2eeEnrollmentRevokedFrame),
     ).toBe("accepted");
+    expect(
+      state.enrollmentGrantIsCurrent({
+        enrollmentId: revocation.enrollmentId,
+        enrollmentRevision: 2,
+        accountAuthEpoch: 2,
+        deviceAuthEpoch: 5,
+      }),
+    ).toBe(false);
+    expect(
+      state.enrollmentGrantIsCurrent({
+        enrollmentId: revocation.enrollmentId,
+        enrollmentRevision: 3,
+        accountAuthEpoch: 2,
+        deviceAuthEpoch: 4,
+      }),
+    ).toBe(true);
   });
 });
 

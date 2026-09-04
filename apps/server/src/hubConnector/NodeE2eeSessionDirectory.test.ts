@@ -53,10 +53,29 @@ describe("NodeE2eeSessionDirectory account revocation", () => {
     });
 
     expect(JSON.stringify(directory.list())).not.toContain(authority.accountId);
-    expect(await directory.revokeEnrollment(revocation(2, 3))).toBe(0);
-    expect(await directory.revokeEnrollment(revocation(2, 4))).toBe(1);
+    expect(await directory.revokeEnrollment(revocation(2, 3))).toBe(1);
     expect(terminations).toBe(1);
     expect(directory.list()).toHaveLength(1);
     expect(directory.list()[0]).toMatchObject({ suite: 1 });
+  });
+
+  it("treats a newer account epoch as dominant over enrollment revision", async () => {
+    const directory = makeNodeE2eeSessionDirectory();
+    let terminated = 0;
+    directory.register({
+      tier: "native",
+      suite: 2,
+      establishedAt: 1,
+      accountGrantAuthority: {
+        ...authority,
+        enrollmentRevision: 9,
+        accountAuthEpoch: 2,
+      },
+      terminate: () => {
+        terminated += 1;
+      },
+    });
+    expect(await directory.revokeEnrollment(revocation(2, 1))).toBe(1);
+    expect(terminated).toBe(1);
   });
 });

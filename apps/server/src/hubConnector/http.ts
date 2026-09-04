@@ -2,6 +2,7 @@ import { Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { E2EE_SUITE_REGISTRY_MAX_ENTRIES } from "@ryco/shared/relayE2eeConstants";
+import { NodeE2eeAdmissionPolicy } from "@ryco/contracts/native-e2ee";
 
 import { AuthError, ServerAuth } from "../auth/Services/ServerAuth.ts";
 import { rejectCrossOriginMutation, respondToAuthError } from "../auth/http.ts";
@@ -240,6 +241,7 @@ const E2eePairingWindowBody = Schema.Struct({
  * grow the advertised statement past what §5.5 can carry.
  */
 const E2eePolicyBody = Schema.Struct({
+  mode: Schema.optional(NodeE2eeAdmissionPolicy),
   requireE2EE: Schema.optional(Schema.Boolean),
   requireApprovedClientE2EE: Schema.optional(Schema.Boolean),
   suiteRegistry: Schema.optional(

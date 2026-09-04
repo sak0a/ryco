@@ -110,10 +110,9 @@ export function makeNodeE2eeSessionDirectory(): NodeE2eeSessionDirectory {
         return (
           authority !== undefined &&
           authority.enrollmentId === frame.enrollmentId &&
-          authority.accountAuthEpoch <= frame.accountAuthEpoch &&
-          (authority.enrollmentRevision < frame.enrollmentRevision ||
-            (authority.enrollmentRevision === frame.enrollmentRevision &&
-              authority.deviceAuthEpoch <= frame.deviceAuthEpoch))
+          (authority.accountAuthEpoch < frame.accountAuthEpoch ||
+            authority.deviceAuthEpoch < frame.deviceAuthEpoch ||
+            authority.enrollmentRevision <= frame.enrollmentRevision)
         );
       });
       await Promise.all(

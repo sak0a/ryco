@@ -17,6 +17,8 @@ import { E2EE_MAX_CLOCK_SKEW } from "@ryco/shared/relayE2eeConstants";
 
 import type { HubConnectorConfig } from "../config.ts";
 import type { HubEnrollmentMetadata } from "../hubIdentity/HubEnrollmentClient.ts";
+import type { NodeE2eeAdvertisement } from "../hubIdentity/NodeE2eeCapabilityStatement.ts";
+import type { E2eeAccountGrantNodeVerificationInput } from "@ryco/shared/relayE2eeHandshake";
 import {
   classifyConnectorFailure,
   type ConnectorFailureKind,
@@ -40,6 +42,11 @@ import {
 import { resolveHubEnrollmentLabel } from "./HubEnrollmentLabel.ts";
 import { reconnectDelay } from "./ReconnectPolicy.ts";
 import { RelaySendQueue } from "./RelaySendQueue.ts";
+import {
+  makeNodeAccountGrantVerifier,
+  type NodeAccountGrantVerificationResult,
+  type NodeAccountGrantVerifier,
+} from "./NodeAccountGrantVerifier.ts";
 
 export interface HubConnectorScheduler extends RelaySessionScheduler {
   readonly now: () => number;
@@ -75,6 +82,7 @@ export class HubConnector {
   readonly #scheduler: HubConnectorScheduler;
   readonly #state: HubConnectorStateMachine;
   readonly #e2eeState: HubConnectorE2eeStateMachine;
+  readonly #accountGrantVerifier: NodeAccountGrantVerifier;
   readonly #onE2eeEnrollmentRevoked: (
     frame: RelayE2eeEnrollmentRevokedFrame,
   ) => void | Promise<void>;
@@ -125,6 +133,12 @@ export class HubConnector {
     this.#scheduler = options.scheduler ?? defaultScheduler;
     this.#state = new HubConnectorStateMachine(this.#scheduler.now);
     this.#e2eeState = new HubConnectorE2eeStateMachine(this.#scheduler.now);
+    this.#accountGrantVerifier = makeNodeAccountGrantVerifier({
+      state: this.#e2eeState,
+      connectorGeneration: () => this.#state.generation,
+      policy: () => this.#identity.e2eePolicy(),
+      authorization: this.#identity.e2eeClientAuthorization,
+    });
     this.#onE2eeEnrollmentRevoked = options.onE2eeEnrollmentRevoked ?? (() => undefined);
   }
 
@@ -134,6 +148,19 @@ export class HubConnector {
 
   e2eeSnapshot(): HubConnectorE2eeSnapshot {
     return this.#e2eeState.snapshot();
+  }
+
+  /** Exact acknowledged statement selected by a minor-3 ticket context. */
+  accountGrantAdvertisement(statementDigest: Uint8Array): NodeE2eeAdvertisement | undefined {
+    return this.#e2eeState.accountGrantMaterial(this.#state.generation, statementDigest)
+      ?.advertisement;
+  }
+
+  /** Synchronous row-N3 verification; performs no fetch and no durable mutation. */
+  verifyAccountGrant(
+    input: E2eeAccountGrantNodeVerificationInput,
+  ): NodeAccountGrantVerificationResult {
+    return this.#accountGrantVerifier.verify(input);
   }
 
   /** Republish after a committed identity, prekey, continuity, suite, or policy change. */

@@ -141,6 +141,8 @@ export interface NodeE2eeAdvertisement {
    */
   readonly e2eeVersionMin: number;
   readonly e2eeVersionMax: number;
+  /** Expiry of the exact agreement prekey carried by this statement. */
+  readonly nodeAgreementPrekeyExpiresAt: number;
   /**
    * The §8.3 per-channel snapshot of what this statement advertised.
    *
@@ -459,6 +461,7 @@ export function makeNodeE2eeCapabilityStatementClient(
       nodeIdentityPublicKey: inputs.identity.identityPublicKey,
       e2eeVersionMin: E2EE_PROTOCOL_VERSION,
       e2eeVersionMax: E2EE_PROTOCOL_VERSION,
+      nodeAgreementPrekeyExpiresAt: inputs.prekey.expiresAt,
       material: {
         nodeId: inputs.identity.nodeId,
         nodeIdentityFingerprint: e2eeKeyFingerprint(

@@ -117,6 +117,7 @@ function harness(overrides: Partial<Harness> = {}): Harness {
     key,
     signCalls: 0,
     policy: effectiveNodeE2eePolicy({
+      mode: "compatibility",
       requireE2EE: false,
       requireApprovedClientE2EE: false,
       suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
@@ -255,6 +256,7 @@ describe("NodeE2eeCapabilityStatement", () => {
   it('advertises `["IK"]` under requireApprovedClientE2EE (§7.6 element 14, §12.4)', async () => {
     const state = harness({
       policy: effectiveNodeE2eePolicy({
+        mode: "require-locally-approved-native-e2ee",
         requireE2EE: false,
         requireApprovedClientE2EE: true,
         suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
@@ -309,6 +311,7 @@ describe("NodeE2eeCapabilityStatement", () => {
     // The advertised policy values themselves, at the same generation: still a
     // different statement, because the transcript carries them.
     state.policy = effectiveNodeE2eePolicy({
+      mode: "require-e2ee",
       requireE2EE: true,
       requireApprovedClientE2EE: false,
       suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],

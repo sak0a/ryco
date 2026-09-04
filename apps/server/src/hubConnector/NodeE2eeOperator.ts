@@ -1,4 +1,5 @@
 import { parseE2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
+import type { NodeE2eeAdmissionPolicy } from "@ryco/contracts/native-e2ee";
 
 import {
   NodeClientAuthorizationError,
@@ -90,11 +91,13 @@ function suiteRegistryOf(values: readonly number[]): readonly E2eeSuiteId[] {
 }
 
 function policyProposalOf(proposal: {
+  readonly mode?: NodeE2eeAdmissionPolicy | undefined;
   readonly requireE2EE?: boolean | undefined;
   readonly requireApprovedClientE2EE?: boolean | undefined;
   readonly suiteRegistry?: readonly number[] | undefined;
 }): NodeE2eePolicyProposal {
   return {
+    ...(proposal.mode === undefined ? {} : { mode: proposal.mode }),
     ...(proposal.requireE2EE === undefined ? {} : { requireE2EE: proposal.requireE2EE }),
     ...(proposal.requireApprovedClientE2EE === undefined
       ? {}
@@ -165,6 +168,7 @@ function listingView(listing: NodeClientAuthorizationListing): E2eeClientListing
 
 function policyView(policy: EffectiveNodeE2eePolicy, generation: number): E2eePolicyView {
   return {
+    mode: policy.mode,
     // The RAW pair, from `advertised` — §7.6 elements 12 and 13 — beside the
     // effective value §12.4 derives from them. Both, because §12.4's implication
     // makes them differ and a display showing one would misreport the other.

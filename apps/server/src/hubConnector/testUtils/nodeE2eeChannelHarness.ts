@@ -4,6 +4,7 @@ import { expect } from "vite-plus/test";
 
 import {
   RELAY_INITIAL_LIMITS,
+  type RelayAccountGrantContext,
   type RelayChannelId,
   type RelayCloseReason,
   type RelayDataFrame,
@@ -51,6 +52,7 @@ import {
   initialNodeE2eePolicyRecord,
   nodeE2eeAdmissionPolicyOf,
   type EffectiveNodeE2eePolicy,
+  type NodeE2eeAdmissionPolicy,
   type NodeE2eePolicyRecordFile,
   type NodeE2eePolicyStore,
 } from "../../hubIdentity/NodeE2eePolicyStore.ts";
@@ -153,12 +155,14 @@ export const APPROVED: E2eeClientAuthorization = {
 };
 
 export const PERMISSIVE_POLICY = effectiveNodeE2eePolicy({
+  mode: "compatibility",
   requireE2EE: false,
   requireApprovedClientE2EE: false,
   suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
 });
 
 export const REQUIRE_E2EE_POLICY = effectiveNodeE2eePolicy({
+  mode: "require-e2ee",
   requireE2EE: true,
   requireApprovedClientE2EE: false,
   suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
@@ -253,10 +257,12 @@ export function statementClient(policy: () => EffectiveNodeE2eePolicy) {
  */
 export function stubPolicyStore(): NodeE2eePolicyStore {
   let record: NodeE2eePolicyRecordFile = initialNodeE2eePolicyRecord();
-  const apply = (next: NodeE2eePolicyRecordFile) => {
-    const previous = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(record));
-    const policy = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(next));
+  let advertised: NodeE2eeAdmissionPolicy = PERMISSIVE_POLICY.advertised;
+  const apply = (next: NodeE2eePolicyRecordFile, nextPolicy = advertised) => {
+    const previous = effectiveNodeE2eePolicy(advertised);
+    const policy = effectiveNodeE2eePolicy(nextPolicy);
     record = next;
+    advertised = nextPolicy;
     return {
       record: next,
       policy,
@@ -268,18 +274,34 @@ export function stubPolicyStore(): NodeE2eePolicyStore {
   return {
     read: async () => ({
       record,
-      policy: effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(record)),
+      policy: effectiveNodeE2eePolicy(advertised),
     }),
-    commit: async (proposal) =>
-      apply({
-        ...record,
-        revision: record.revision + 1,
-        generation: record.generation + 1,
-        requireE2EE: proposal.requireE2EE ?? record.requireE2EE,
-        requireApprovedClientE2EE:
-          proposal.requireApprovedClientE2EE ?? record.requireApprovedClientE2EE,
-        suiteRegistry: proposal.suiteRegistry ?? record.suiteRegistry,
-      }),
+    commit: async (proposal) => {
+      const requireE2EE = proposal.requireE2EE ?? advertised.requireE2EE;
+      const requireApprovedClientE2EE =
+        proposal.requireApprovedClientE2EE ?? advertised.requireApprovedClientE2EE;
+      const next: NodeE2eeAdmissionPolicy = {
+        mode:
+          proposal.mode ??
+          (requireApprovedClientE2EE
+            ? "require-locally-approved-native-e2ee"
+            : requireE2EE
+              ? "require-e2ee"
+              : "compatibility"),
+        requireE2EE,
+        requireApprovedClientE2EE,
+        suiteRegistry: proposal.suiteRegistry ?? advertised.suiteRegistry,
+      };
+      return apply(
+        {
+          ...record,
+          revision: record.revision + 1,
+          generation: record.generation + 1,
+          mode: next.mode,
+        },
+        next,
+      );
+    },
     recoverGeneration: async () =>
       apply({ ...record, revision: record.revision + 1, generation: record.generation + 1 }),
   };
@@ -376,6 +398,11 @@ export interface Harness {
 export async function harness(
   options: {
     readonly policy?: () => EffectiveNodeE2eePolicy;
+    readonly protocolMinor?: 2 | 3;
+    readonly accountGrantContext?:
+      | ((advertisement: NodeE2eeAdvertisement) => RelayAccountGrantContext)
+      | undefined;
+    readonly verifyAccountGrant?: NodeE2eeChannelSessionSources["verifyAccountGrant"];
     readonly authorization?: NodeE2eeChannelAuthorization;
     readonly registration?: () => NodeE2eeChannelRegistration;
     /** §5.5: what this node's statement builder answers, when a test needs U2. */
@@ -411,6 +438,7 @@ export async function harness(
     readonly registerSession?: NodeE2eeChannelSessionSources["registerSession"];
   } = {},
 ): Promise<Harness> {
+  const protocol = { protocolMajor: 1, protocolMinor: options.protocolMinor ?? 2 } as const;
   const readyLimits: RelayLimits = {
     ...RELAY_INITIAL_LIMITS,
     ...(options.maxDataChunkBytes === undefined
@@ -467,22 +495,39 @@ export async function harness(
 
   const registry = new RelayChannelRegistry({
     limits: readyLimits,
-    protocol: version,
+    protocol,
     sendQueue,
     onOutboundReady: () => sendQueue.flush(),
     factory: {
       connectionReady: ({ limits: ready }) =>
         advertiser.connectionReady({ maxDataChunkBytes: ready.maxDataChunkBytes }),
-      open: async ({ channelId, capability, effectiveRole, send, admit, close }) => {
+      open: async ({
+        channelId,
+        capability,
+        effectiveRole,
+        accountGrantContext,
+        send,
+        admit,
+        close,
+      }) => {
         const announcement = await advertiser.openChannel();
         const e2ee = makeNodeE2eeChannelSession({
           channel: {
             hubOrigin: HUB_ORIGIN,
             channelId,
-            relayProtocolMajor: version.protocolMajor,
-            relayProtocolMinor: version.protocolMinor,
+            relayProtocolMajor: protocol.protocolMajor,
+            relayProtocolMinor: protocol.protocolMinor,
             channelOpenCapability: capability,
             channelOpenEffectiveRole: effectiveRole,
+            ...(accountGrantContext === undefined
+              ? {}
+              : {
+                  accountGrantContext: {
+                    relayTicketId: accountGrantContext[1],
+                    deviceGrantDigest: Uint8Array.from(accountGrantContext[2]),
+                    nodeCapabilityStatementDigest: Uint8Array.from(accountGrantContext[3]),
+                  },
+                }),
           },
           announcement,
           plaintextCeiling: nodeE2eeChannelPlaintextCeiling(readyLimits),
@@ -492,6 +537,9 @@ export async function harness(
           policy,
           registerPolicyChannel: options.registration ?? permissiveRegistration,
           authorization: options.authorization ?? authorizationFor(APPROVED),
+          ...(options.verifyAccountGrant === undefined
+            ? {}
+            : { verifyAccountGrant: options.verifyAccountGrant }),
           withPrekeySecret: async (prekeyId, use) => {
             expect(prekeyId).toBe(PREKEY_ID);
             const result = await use(NODE_AGREEMENT_SECRET);
@@ -570,7 +618,7 @@ export async function harness(
     openRaw: async () => {
       await registry.handle({
         type: "channel.open",
-        ...version,
+        ...protocol,
         channelId: CHANNEL_ID,
         capability: CAPABILITY,
         effectiveRole: ROLE,
@@ -578,22 +626,25 @@ export async function harness(
       sendQueue.flush();
     },
     open: async () => {
+      const result = await statements.advertised(HUB_ORIGIN);
+      if (result.kind !== "available") throw new Error(result.reason);
       await registry.handle({
         type: "channel.open",
-        ...version,
+        ...protocol,
         channelId: CHANNEL_ID,
         capability: CAPABILITY,
         effectiveRole: ROLE,
+        ...(options.accountGrantContext === undefined
+          ? {}
+          : { accountGrantContext: options.accountGrantContext(result.advertisement) }),
       });
       sendQueue.flush();
-      const result = await statements.advertised(HUB_ORIGIN);
-      if (result.kind !== "available") throw new Error(result.reason);
       return result.advertisement;
     },
     deliver: async (payload) => {
       await registry.handle({
         type: "data",
-        ...version,
+        ...protocol,
         channelId: CHANNEL_ID,
         sequence: inboundSequence as RelayDataFrame["sequence"],
         payload,
@@ -606,7 +657,7 @@ export async function harness(
       sendQueue.flush();
     },
     closeFromPeer: async () => {
-      await registry.handle({ type: "channel.close", ...version, channelId: CHANNEL_ID });
+      await registry.handle({ type: "channel.close", ...protocol, channelId: CHANNEL_ID });
       await Promise.resolve();
       sendQueue.flush();
     },

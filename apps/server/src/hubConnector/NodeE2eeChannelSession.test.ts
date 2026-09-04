@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import type { RelayAccountGrantContext } from "@ryco/contracts/relay";
 
 import {
   E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES,
@@ -14,7 +15,17 @@ import {
   encodeE2eeErrorRecordBody,
 } from "@ryco/shared/relayE2eeClose";
 import { E2eeClientHandshake } from "@ryco/shared/relayE2eeHandshake";
-import { deriveE2eeAgreementPublicKey } from "@ryco/shared/relayE2eeKeys";
+import {
+  decodeHubDeviceGrant,
+  encodeHubDeviceGrantClaims,
+  encodeHubDeviceGrantEnvelope,
+  type HubDeviceGrantClaimsInput,
+} from "@ryco/shared/relayE2eeHubDeviceGrant";
+import { deriveE2eeAgreementPublicKey, e2eeSha256 } from "@ryco/shared/relayE2eeKeys";
+import {
+  encodeClientE2eePrekeyCertificateCarrier,
+  encodeClientE2eePrekeyTranscript,
+} from "@ryco/shared/relayE2eeTranscripts";
 import { deriveE2eeWebSas } from "@ryco/shared/relayE2eeVerificationDisplay";
 import { E2eeRecordSession } from "@ryco/shared/relayE2eeSession";
 import {
@@ -24,6 +35,7 @@ import {
   E2EE_INNER_TYPE_RPC,
   E2EE_NEGOTIATION_TYPE_CLIENT_HELLO,
   E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
   classifyPostStripPayload,
   decodeE2eeNegotiationRecord,
@@ -33,6 +45,10 @@ import {
 import { prepareRelayMessage } from "@ryco/shared/relayMessageChunks";
 
 import type { NodeE2eeAdvertisementResult } from "../hubIdentity/NodeE2eeCapabilityStatement.ts";
+import {
+  effectiveNodeE2eePolicy,
+  nodeE2eeAdmissionPolicyForMode,
+} from "../hubIdentity/NodeE2eePolicyStore.ts";
 import {
   makeNodeE2eePolicyClient,
   type NodeE2eePolicyWithdrawalCounts,
@@ -57,6 +73,11 @@ import { NODE_E2EE_RECEIVE_FATAL_ROWS } from "./NodeE2eeChannelSession.ts";
 import {
   CAPABILITY,
   CHANNEL_ID,
+  CLIENT_AGREEMENT_PUBLIC,
+  CLIENT_AGREEMENT_SECRET,
+  CLIENT_IDENTITY_PUBLIC,
+  CONTINUITY_ID,
+  HUB_ORIGIN,
   NOW,
   REQUIRE_E2EE_POLICY,
   ROLE,
@@ -71,6 +92,7 @@ import {
   nativeCredentials,
   positionOf,
   settle,
+  signClientPrekey,
   stripPrelude,
   stubPolicyStore,
   utf8,
@@ -105,6 +127,168 @@ describe("NodeE2eeChannelSession", () => {
     const authenticated = clientReceive(client, emitted[0]!);
     expect(authenticated.innerType).toBe(E2EE_INNER_TYPE_RPC);
     expect(new TextDecoder().decode(authenticated.body)).toBe('{"_tag":"Pong"}');
+  });
+
+  it("establishes suite 0x02 from a Hub grant without a pairing record", async () => {
+    const accountId = `acct_${"a".repeat(22)}`;
+    const ticketId = `rtk_${"t".repeat(22)}`;
+    const enrollmentId = `enr_${"e".repeat(22)}`;
+    const transcript = encodeClientE2eePrekeyTranscript({
+      hubOrigin: HUB_ORIGIN,
+      accountId,
+      identityPublicKey: CLIENT_IDENTITY_PUBLIC,
+      agreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+      createdAt: NOW - 1_000,
+      expiresAt: NOW + 120_000,
+    });
+    const prekeySignature = signClientPrekey(transcript);
+    const certificateDigest = e2eeSha256(
+      encodeClientE2eePrekeyCertificateCarrier(transcript, prekeySignature),
+    );
+    let credentials:
+      | ConstructorParameters<typeof E2eeClientHandshake>[0]["credentials"]
+      | undefined;
+    let grantVerifications = 0;
+    let pairingEvaluations = 0;
+    let localRegistrations = 0;
+    let registeredTrustSource: string | undefined;
+    const baseAuthorization = authorizationFor(undefined);
+    const node = await harness({
+      protocolMinor: 3,
+      policy: () => effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyForMode("compatibility")),
+      authorization: {
+        ...baseAuthorization,
+        registerInFlightHandshake: (input) => {
+          localRegistrations += 1;
+          return baseAuthorization.registerInFlightHandshake(input);
+        },
+        evaluatePairingAdmission: (input) => {
+          pairingEvaluations += 1;
+          return baseAuthorization.evaluatePairingAdmission(input);
+        },
+      },
+      verifyAccountGrant: () => {
+        grantVerifications += 1;
+        return { accepted: true, localAuthority: undefined };
+      },
+      registerSession: (session) => {
+        registeredTrustSource = session.accountGrantAuthority?.trustSource;
+        return () => undefined;
+      },
+      accountGrantContext: (advertisement) => {
+        const claimsBytes = encodeHubDeviceGrantClaims({
+          issuerHubOrigin: HUB_ORIGIN,
+          keyId: `hgk_${"k".repeat(22)}`,
+          grantId: `hgr_${"g".repeat(22)}`,
+          accountId,
+          accountAuthEpoch: 1,
+          enrollmentId,
+          enrollmentRevision: 1,
+          deviceAuthEpoch: 1,
+          deviceIdentityPublicKey: CLIENT_IDENTITY_PUBLIC,
+          deviceAgreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+          clientPrekeyCertificateDigest: certificateDigest,
+          nodeId: advertisement.material.nodeId,
+          nodeIdentityPublicKey: advertisement.nodeIdentityPublicKey,
+          nodeAgreementPublicKey: advertisement.material.agreementPublicKey,
+          nodeContinuityId: CONTINUITY_ID,
+          nodePolicyGeneration: advertisement.material.policyGeneration ?? 0,
+          nodeCapabilityStatementDigest: advertisement.statementDigest,
+          relayTicketId: ticketId,
+          maximumRole: ROLE,
+          capabilities: [CAPABILITY],
+          issuedAt: NOW,
+          notBefore: NOW - 1_000,
+          expiresAt: NOW + 60_000,
+          nonce: new Uint8Array(32).fill(9),
+        } as unknown as HubDeviceGrantClaimsInput);
+        const decoded = decodeHubDeviceGrant(
+          encodeHubDeviceGrantEnvelope(claimsBytes, new Uint8Array(64).fill(4)),
+        );
+        if (decoded.kind !== "ok") throw new Error(decoded.reason);
+        credentials = {
+          tier: "native",
+          trustSource: "account-enrolled",
+          accountId,
+          identityPublicKey: CLIENT_IDENTITY_PUBLIC,
+          agreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+          agreementSecretKey: CLIENT_AGREEMENT_SECRET,
+          prekeyTranscript: transcript,
+          prekeySignature,
+          deviceGrant: decoded,
+        };
+        return [
+          E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+          ticketId,
+          decoded.grantDigest,
+          advertisement.statementDigest,
+        ] as unknown as RelayAccountGrantContext;
+      },
+    });
+    const advertisement = await node.open();
+    if (credentials === undefined || credentials.trustSource !== "account-enrolled") {
+      throw new Error("account credentials were not prepared");
+    }
+    const channel = {
+      hubOrigin: HUB_ORIGIN,
+      channelId: CHANNEL_ID,
+      relayProtocolMajor: 1,
+      relayProtocolMinor: 3,
+      channelOpenCapability: CAPABILITY,
+      channelOpenEffectiveRole: ROLE,
+      accountGrantContext: {
+        relayTicketId: ticketId,
+        deviceGrantDigest: credentials.deviceGrant.grantDigest,
+        nodeCapabilityStatementDigest: advertisement.statementDigest,
+      },
+    };
+    const client = new E2eeClientHandshake({
+      channel,
+      advertised: advertisement.material,
+      selectedSuite: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+      offeredSuites: [
+        E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+        E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+      ],
+      credentials,
+      intendedCapability: CAPABILITY,
+      intendedRole: ROLE,
+    });
+    const hello = client.createHello(NOW);
+    if (hello.kind !== "hello") throw new Error(`hello: ${JSON.stringify(hello)}`);
+    const before = node.dataPayloads().length;
+    await node.deliver(hello.record);
+    const accept = node.dataPayloads().slice(before);
+    expect(accept).toHaveLength(1);
+    expect(client.receiveServerAccept(stripPrelude(accept[0]!), NOW).kind).toBe("established");
+    expect(node.session().mode()).toBe("e2ee");
+    expect(grantVerifications).toBe(1);
+    expect(pairingEvaluations).toBe(0);
+    expect(localRegistrations).toBe(0);
+    expect(registeredTrustSource).toBe("account-enrolled");
+  });
+
+  it("withdraws an account-grant lease immediately with an authenticated policy error", async () => {
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    const before = node.dataPayloads().length;
+
+    await node.session().revokeAccountGrant();
+    await settle();
+    node.flush();
+
+    const emitted = node.dataPayloads().slice(before);
+    expect(emitted).toHaveLength(1);
+    const error = client.record.unprotect(stripPrelude(emitted[0]!));
+    if (error.kind !== "authenticated") throw new Error(`unprotect: ${JSON.stringify(error)}`);
+    expect(error.innerType).toBe(E2EE_INNER_TYPE_ERROR);
+    const body = decodeE2eeErrorRecordBody(error.body);
+    if (body.kind !== "ok") throw new Error("expected a conforming error body");
+    expect(body.value.errorCode).toBe(E2EE_ERROR_CODE_POLICY);
+    expect(node.session().mode()).toBe("closed");
+    expect(node.rows()).toEqual(["Q9"]);
+    expect(node.closeReasons()).toEqual(["channel_rejected"]);
   });
 
   it("completes a full NX handshake with no client identity", async () => {

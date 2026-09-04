@@ -13,6 +13,8 @@ import {
   effectiveNodeE2eePolicy,
   makeNodeE2eePolicyStore,
   NODE_E2EE_FAIL_CLOSED_POLICY,
+  nodeE2eeAdmissionPolicyForMode,
+  resolveNodeE2eePolicyProposal,
 } from "./NodeE2eePolicyStore.ts";
 
 const SUITE = E2EE_SUITE_25519_CHACHAPOLY_SHA256;
@@ -31,9 +33,68 @@ const policy = (
   requireE2EE: boolean,
   requireApprovedClientE2EE: boolean,
   suites: readonly E2eeSuiteId[] = [SUITE],
-) => effectiveNodeE2eePolicy({ requireE2EE, requireApprovedClientE2EE, suiteRegistry: suites });
+) =>
+  effectiveNodeE2eePolicy({
+    mode: requireApprovedClientE2EE
+      ? "require-locally-approved-native-e2ee"
+      : requireE2EE
+        ? "require-e2ee"
+        : "compatibility",
+    requireE2EE,
+    requireApprovedClientE2EE,
+    suiteRegistry: suites,
+  });
 
 describe("effective node E2EE policy (§12.4)", () => {
+  it("projects the four public modes to one exact, non-combinatorial policy", () => {
+    expect(nodeE2eeAdmissionPolicyForMode("compatibility")).toEqual({
+      mode: "compatibility",
+      requireE2EE: false,
+      requireApprovedClientE2EE: false,
+      suiteRegistry: [2, 1],
+    });
+    expect(nodeE2eeAdmissionPolicyForMode("require-e2ee")).toEqual({
+      mode: "require-e2ee",
+      requireE2EE: true,
+      requireApprovedClientE2EE: false,
+      suiteRegistry: [2, 1],
+    });
+    expect(
+      effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyForMode("require-native-e2ee")),
+    ).toMatchObject({
+      requireE2EE: true,
+      admittedPatterns: ["IK"],
+      suiteRegistry: [2, 1],
+      accountGrantsAllowed: true,
+    });
+    expect(nodeE2eeAdmissionPolicyForMode("require-locally-approved-native-e2ee")).toEqual({
+      mode: "require-locally-approved-native-e2ee",
+      requireE2EE: true,
+      requireApprovedClientE2EE: true,
+      suiteRegistry: [1],
+    });
+  });
+
+  it("accepts deprecated inputs only when they resolve to an exact public mode", () => {
+    const current = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyForMode("compatibility"));
+    expect(resolveNodeE2eePolicyProposal(current, { requireE2EE: true }).mode).toBe("require-e2ee");
+    expect(resolveNodeE2eePolicyProposal(current, { suiteRegistry: [SUITE] }).mode).toBe(
+      "require-locally-approved-native-e2ee",
+    );
+    expect(() =>
+      resolveNodeE2eePolicyProposal(current, {
+        mode: "require-native-e2ee",
+        suiteRegistry: [SUITE],
+      }),
+    ).toThrowError(expect.objectContaining({ code: "policy_state_operation_failed" }));
+    expect(() =>
+      resolveNodeE2eePolicyProposal(current, {
+        mode: "require-native-e2ee",
+        requireApprovedClientE2EE: true,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "policy_state_operation_failed" }));
+  });
+
   it("computes effective requireE2EE as the OR, and leaves the advertised pair raw", () => {
     const implied = policy(false, true);
     // §12.4's implication: the admission rule says true while the value the
@@ -250,7 +311,7 @@ describe("the durable policy record", () => {
     expect(recovered.policy.requireApprovedClientE2EE).toBe(true);
     expect(recovered.withdrawal).toBe(true);
     const after = await reopened.store.read();
-    expect(after.record.requireApprovedClientE2EE).toBe(true);
+    expect(after.record.mode).toBe("require-locally-approved-native-e2ee");
   });
 
   it("recovery keeps the committed policy when the record is not rolled back", async () => {
@@ -328,7 +389,7 @@ describe("the durable policy record", () => {
     // unrecognized key would be a downgrade that silently widens an operator's
     // admission policy.
     expect(after["futureField"]).toEqual({ kept: true });
-    expect(after["requireApprovedClientE2EE"]).toBe(true);
+    expect(after["mode"]).toBe("require-locally-approved-native-e2ee");
   });
 
   it("rejects a stored record it cannot validate", async () => {
@@ -336,11 +397,83 @@ describe("the durable policy record", () => {
     await context.store.commit({ requireE2EE: true });
     const written = JSON.parse(await readFile(context.path, "utf8")) as Record<string, unknown>;
     for (const broken of [
-      { ...written, requireE2EE: "true" },
+      { ...written, mode: "unknown" },
       { ...written, generation: -1 },
-      { ...written, suiteRegistry: [] },
-      { ...written, suiteRegistry: [SUITE, SUITE] },
-      { ...written, suiteRegistry: [999] },
+      { ...written, revision: -1 },
+      { ...written, version: 3 },
+      { ...written, requireE2EE: true },
+      { ...written, suiteRegistry: [SUITE] },
+    ]) {
+      await writeFile(context.path, `${JSON.stringify(broken)}\n`, { mode: 0o600 });
+      const reopened = await open(context.root);
+      await expect(reopened.store.read()).rejects.toMatchObject({ code: "policy_state_corrupt" });
+    }
+  });
+
+  it("migrates every v1 boolean state to the exact v2 mode projection", async () => {
+    for (const [requireE2EE, requireApprovedClientE2EE, mode] of [
+      [false, false, "compatibility"],
+      [true, false, "require-e2ee"],
+      [false, true, "require-locally-approved-native-e2ee"],
+      [true, true, "require-locally-approved-native-e2ee"],
+    ] as const) {
+      const context = await open();
+      await writeFile(
+        context.path,
+        `${JSON.stringify({
+          version: 1,
+          revision: 7,
+          generation: 4,
+          requireE2EE,
+          requireApprovedClientE2EE,
+          suiteRegistry: [SUITE],
+          futureField: { kept: true },
+        })}\n`,
+        { mode: 0o600 },
+      );
+
+      const migrated = await context.store.read();
+      expect(migrated.record).toMatchObject({ version: 2, revision: 8, generation: 5, mode });
+      expect(migrated.policy.advertised).toEqual(
+        mode === "require-locally-approved-native-e2ee"
+          ? {
+              mode,
+              requireE2EE: true,
+              requireApprovedClientE2EE: true,
+              suiteRegistry: [SUITE],
+            }
+          : {
+              mode,
+              requireE2EE,
+              requireApprovedClientE2EE: false,
+              suiteRegistry: [2, SUITE],
+            },
+      );
+      const stored = JSON.parse(await readFile(context.path, "utf8")) as Record<string, unknown>;
+      expect(stored["futureField"]).toEqual({ kept: true });
+      expect(stored["requireE2EE"]).toBeUndefined();
+      expect(stored["requireApprovedClientE2EE"]).toBeUndefined();
+      expect(stored["suiteRegistry"]).toBeUndefined();
+      expect((await context.anchor.read())?.policyGenerationHighWater).toBe(5);
+    }
+  });
+
+  it("rejects malformed v1 state instead of guessing a migration", async () => {
+    const context = await open();
+    const base = {
+      version: 1,
+      revision: 0,
+      generation: 0,
+      requireE2EE: false,
+      requireApprovedClientE2EE: false,
+      suiteRegistry: [SUITE],
+    };
+    for (const broken of [
+      { ...base, requireE2EE: "false" },
+      { ...base, suiteRegistry: [] },
+      { ...base, suiteRegistry: [SUITE, SUITE] },
+      { ...base, suiteRegistry: [999] },
+      { ...base, mode: "compatibility" },
     ]) {
       await writeFile(context.path, `${JSON.stringify(broken)}\n`, { mode: 0o600 });
       const reopened = await open(context.root);

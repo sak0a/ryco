@@ -2,7 +2,11 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { E2EE_SUITE_25519_CHACHAPOLY_SHA256, type E2eeSuiteId } from "@ryco/shared/relayE2eeWire";
+import {
+  E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+  type E2eeSuiteId,
+} from "@ryco/shared/relayE2eeWire";
 import { describe, expect, it } from "vite-plus/test";
 
 import { makeNodeContinuityAnchor } from "./NodeContinuityAnchor.ts";
@@ -17,6 +21,7 @@ import {
   initialNodeE2eePolicyRecord,
   makeNodeE2eePolicyStore,
   nodeE2eeAdmissionPolicyOf,
+  type NodeE2eeAdmissionPolicy,
   type NodeE2eePolicyRecordFile,
   type NodeE2eePolicyStore,
 } from "./NodeE2eePolicyStore.ts";
@@ -42,10 +47,17 @@ async function open(directory?: string) {
 /** An in-memory store with the same commit semantics and no durability. */
 function stubStore(): NodeE2eePolicyStore {
   let record: NodeE2eePolicyRecordFile = initialNodeE2eePolicyRecord();
-  const apply = (next: NodeE2eePolicyRecordFile) => {
-    const previous = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(record));
-    const policy = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(next));
+  let advertised: NodeE2eeAdmissionPolicy = {
+    mode: "compatibility",
+    requireE2EE: false,
+    requireApprovedClientE2EE: false,
+    suiteRegistry: [SUITE],
+  };
+  const apply = (next: NodeE2eePolicyRecordFile, nextPolicy = advertised) => {
+    const previous = effectiveNodeE2eePolicy(advertised);
+    const policy = effectiveNodeE2eePolicy(nextPolicy);
     record = next;
+    advertised = nextPolicy;
     return {
       record: next,
       policy,
@@ -57,18 +69,34 @@ function stubStore(): NodeE2eePolicyStore {
   return {
     read: async () => ({
       record,
-      policy: effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(record)),
+      policy: effectiveNodeE2eePolicy(advertised),
     }),
-    commit: async (proposal) =>
-      apply({
-        ...record,
-        revision: record.revision + 1,
-        generation: record.generation + 1,
-        requireE2EE: proposal.requireE2EE ?? record.requireE2EE,
-        requireApprovedClientE2EE:
-          proposal.requireApprovedClientE2EE ?? record.requireApprovedClientE2EE,
-        suiteRegistry: proposal.suiteRegistry ?? record.suiteRegistry,
-      }),
+    commit: async (proposal) => {
+      const requireE2EE = proposal.requireE2EE ?? advertised.requireE2EE;
+      const requireApprovedClientE2EE =
+        proposal.requireApprovedClientE2EE ?? advertised.requireApprovedClientE2EE;
+      const next: NodeE2eeAdmissionPolicy = {
+        mode:
+          proposal.mode ??
+          (requireApprovedClientE2EE
+            ? "require-locally-approved-native-e2ee"
+            : requireE2EE
+              ? "require-e2ee"
+              : "compatibility"),
+        requireE2EE,
+        requireApprovedClientE2EE,
+        suiteRegistry: proposal.suiteRegistry ?? advertised.suiteRegistry,
+      };
+      return apply(
+        {
+          ...record,
+          revision: record.revision + 1,
+          generation: record.generation + 1,
+          mode: next.mode,
+        },
+        next,
+      );
+    },
     recoverGeneration: async () =>
       apply({ ...record, revision: record.revision + 1, generation: record.generation + 1 }),
   };
@@ -198,6 +226,39 @@ describe("node E2EE policy client", () => {
     // has been admitted to nothing yet.
     expect(ik.events).toEqual([]);
     negotiating.release();
+  });
+
+  it("moves through native-only and local-only modes without dropping allowed native sessions", async () => {
+    const context = await open();
+    await context.client.start();
+    const legacy = legacyChannel(context.client, "legacy");
+    const web = e2eeChannel(context.client, "web", "NX");
+    const local = e2eeChannel(context.client, "local", "IK");
+    const account = e2eeChannel(
+      context.client,
+      "account",
+      "IK",
+      E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+    );
+
+    const nativeOnly = await context.client.applyChange({ mode: "require-native-e2ee" });
+    expect(nativeOnly.counts).toEqual({
+      legacy: 1,
+      nxE2ee: 1,
+      suiteWithdrawn: 0,
+      abortedHandshakes: 0,
+    });
+    expect(legacy.events).toEqual(["legacy:close"]);
+    expect(web.events).toEqual(["web:close"]);
+    expect(local.events).toEqual([]);
+    expect(account.events).toEqual([]);
+
+    const localOnly = await context.client.applyChange({
+      mode: "require-locally-approved-native-e2ee",
+    });
+    expect(localOnly.counts.suiteWithdrawn).toBe(1);
+    expect(account.events).toEqual(["account:close"]);
+    expect(local.events).toEqual([]);
   });
 
   it("closes a withdrawn suite on either tier and counts them together", async () => {

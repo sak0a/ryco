@@ -1,5 +1,6 @@
 import { Context, Effect, Exit, Layer, Scope } from "effect";
 import { WsHostedRpcGroup } from "@ryco/contracts";
+import type { NodeE2eeAdmissionPolicy } from "@ryco/contracts/native-e2ee";
 
 import { ServerConfig } from "../config.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
@@ -24,7 +25,10 @@ import type { NodeLocalIntroductionService } from "../hubIdentity/NodeLocalIntro
 import type { NodeNativeClaimService } from "../hubIdentity/NodeNativeClaimService.ts";
 import { NODE_E2EE_FAIL_CLOSED_POLICY } from "../hubIdentity/NodeE2eePolicyStore.ts";
 import { makeHubRelayTransport } from "./HubRelayTransport.ts";
-import { makeNodeE2eeChannelAdvertiser } from "./NodeE2eeChannelAdvertiser.ts";
+import {
+  makeNodeE2eeChannelAdvertiser,
+  nodeE2eeAdvertisementAnnouncement,
+} from "./NodeE2eeChannelAdvertiser.ts";
 import {
   makeNodeE2eeChannelSession,
   makeNodeE2eeHandshakeRateLimiter,
@@ -61,6 +65,7 @@ import type { RelayChannelSessionFactory } from "./RelayChannelRegistry.ts";
  * `suiteWithdrawn` count that no command it offers can ever produce.
  */
 export interface E2eePolicyProposalInput {
+  readonly mode?: NodeE2eeAdmissionPolicy | undefined;
   readonly requireE2EE?: boolean | undefined;
   readonly requireApprovedClientE2EE?: boolean | undefined;
   readonly suiteRegistry?: readonly number[] | undefined;
@@ -472,6 +477,7 @@ export const HubConnectorLive = Layer.effect(
      * constructed registry.
      */
     let plaintextCeiling: number | undefined;
+    let connector: HubConnector;
 
     const channelFactory: RelayChannelSessionFactory = {
       connectionReady: ({ limits }) => {
@@ -494,7 +500,16 @@ export const HubConnectorLive = Layer.effect(
         // and may sign, and the hook may do neither (§5.4,
         // `RelayRpcChannelSession.onAccepted`). By the time `onAccepted` runs,
         // the carrier is bytes in hand and the announcement is one `send`.
-        const announcement = await advertiser.openChannel();
+        const announcement =
+          accountGrantContext === undefined
+            ? await advertiser.openChannel()
+            : (() => {
+                const advertisement = connector.accountGrantAdvertisement(accountGrantContext[3]);
+                if (advertisement === undefined) {
+                  throw new Error("Account-grant statement is not available for this channel.");
+                }
+                return nodeE2eeAdvertisementAnnouncement(advertisement);
+              })();
         const connectionIdentity = connection();
         let e2ee: NodeE2eeChannelSession;
         e2ee = makeNodeE2eeChannelSession({
@@ -529,6 +544,7 @@ export const HubConnectorLive = Layer.effect(
           policy: () => identity.e2eePolicy(),
           registerPolicyChannel: () => identity.registerE2eeChannel(),
           authorization: identity.e2eeClientAuthorization,
+          verifyAccountGrant: (input) => connector.verifyAccountGrant(input),
           withPrekeySecret: (prekeyId, use) =>
             identity.withE2eePrekeySecret(
               connectionIdentity?.hubOrigin ?? config.hubConnector?.origin ?? "",
@@ -540,7 +556,7 @@ export const HubConnectorLive = Layer.effect(
             sessionDirectory.register({
               ...session,
               terminate: () => {
-                void e2ee.beginClose();
+                void e2ee.revokeAccountGrant();
               },
             }),
           recordPeerLegacyFallback: () => {
@@ -617,7 +633,7 @@ export const HubConnectorLive = Layer.effect(
       },
     };
 
-    const connector = new HubConnector({
+    connector = new HubConnector({
       config: config.hubConnector ?? {
         enabled: false,
         origin: undefined,

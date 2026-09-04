@@ -8,12 +8,12 @@ import {
   effectiveNodeE2eePolicy,
   NODE_E2EE_FAIL_CLOSED_POLICY,
   NodeE2eePolicyStoreError,
+  resolveNodeE2eePolicyProposal,
   sameNodeE2eeAdmissionPolicy,
   type E2eeChannelPhase,
   type E2eeChannelPolicyState,
   type E2eeWithdrawnChannelClass,
   type EffectiveNodeE2eePolicy,
-  type NodeE2eeAdmissionPolicy,
   type NodeE2eePolicyProposal,
   type NodeE2eePolicyStore,
 } from "./NodeE2eePolicyStore.ts";
@@ -476,12 +476,7 @@ export function makeNodeE2eePolicyClient(options: {
   };
 
   const preview: NodeE2eePolicyClient["preview"] = (proposal) => {
-    const advertised: NodeE2eeAdmissionPolicy = {
-      requireE2EE: proposal.requireE2EE ?? current.advertised.requireE2EE,
-      requireApprovedClientE2EE:
-        proposal.requireApprovedClientE2EE ?? current.advertised.requireApprovedClientE2EE,
-      suiteRegistry: proposal.suiteRegistry ?? current.advertised.suiteRegistry,
-    };
+    const advertised = resolveNodeE2eePolicyProposal(current, proposal);
     const policy = effectiveNodeE2eePolicy(advertised);
     let counts = NO_COUNTS;
     for (const registration of registrations) {

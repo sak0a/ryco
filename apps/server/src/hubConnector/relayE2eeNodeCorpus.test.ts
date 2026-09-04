@@ -880,6 +880,11 @@ interface FixturePerChannel {
 
 function admissionOf(policy: FixturePolicy): NodeE2eeAdmissionPolicy {
   return {
+    mode: policy.requireApprovedClientE2EE
+      ? "require-locally-approved-native-e2ee"
+      : policy.requireE2EE
+        ? "require-e2ee"
+        : "compatibility",
     requireE2EE: policy.requireE2EE,
     requireApprovedClientE2EE: policy.requireApprovedClientE2EE,
     suiteRegistry: policy.suiteRegistry as readonly E2eeSuiteId[],
@@ -911,9 +916,19 @@ function policyAfterCommand(
   command: NodeE2eePolicyProposal,
 ): EffectiveNodeE2eePolicy {
   const base = admissionOf(before);
+  const requireE2EE = command.requireE2EE ?? base.requireE2EE;
+  const requireApprovedClientE2EE =
+    command.requireApprovedClientE2EE ?? base.requireApprovedClientE2EE;
   return effectiveNodeE2eePolicy({
-    requireE2EE: command.requireE2EE ?? base.requireE2EE,
-    requireApprovedClientE2EE: command.requireApprovedClientE2EE ?? base.requireApprovedClientE2EE,
+    mode:
+      command.mode ??
+      (requireApprovedClientE2EE
+        ? "require-locally-approved-native-e2ee"
+        : requireE2EE
+          ? "require-e2ee"
+          : "compatibility"),
+    requireE2EE,
+    requireApprovedClientE2EE,
     suiteRegistry: command.suiteRegistry ?? base.suiteRegistry,
   });
 }
