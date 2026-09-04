@@ -115,6 +115,21 @@ export interface HostedRelayAttemptBinding {
   readonly isAuthenticated: () => boolean;
   readonly isCurrent: (generation: number) => boolean;
   readonly prepareSocketContext?: () => Promise<unknown>;
+  /**
+   * Native-only atomic ticket/context finalizer. It may attach a transient grant
+   * to the returned context; the factory retains it for exactly one socket.
+   */
+  readonly issueRelayAttempt?: (input: {
+    readonly nodeId: string;
+    readonly generation: number;
+    readonly preparedSocketContext: unknown;
+  }) => Promise<{
+    readonly ticket: string;
+    readonly expiresAt: number;
+    readonly preparedSocketContext: unknown;
+  }>;
+  /** Erase/release a prepared context the factory could not hand to a socket. */
+  readonly disposeSocketContext?: (context: unknown) => void;
   readonly relayUrl?: () => string;
   readonly createRelaySocket?: (input: {
     readonly url: string;
@@ -218,23 +233,38 @@ export class HostedRelayAttemptFactory {
     }
     this.#activeGeneration = generation;
     this.#binding.transportStatus(generation, "requesting-ticket");
-    this.#pendingTicket = null;
+    this.#discardPendingTicket();
+    let preparedSocketContext: unknown;
     try {
-      const preparedSocketContext = await this.#binding.prepareSocketContext?.();
-      if (!this.#binding.isCurrent(generation)) throw new Error("Hosted node selection changed.");
-      const issued = await getHostedHubApi().issueRelayTicket(nodeId);
+      preparedSocketContext = await this.#binding.prepareSocketContext?.();
       if (!this.#binding.isCurrent(generation)) {
+        throw new Error("Hosted node selection changed.");
+      }
+      const issued = this.#binding.issueRelayAttempt
+        ? await this.#binding.issueRelayAttempt({
+            nodeId,
+            generation,
+            preparedSocketContext,
+          })
+        : {
+            ...(await getHostedHubApi().issueRelayTicket(nodeId)),
+            preparedSocketContext,
+          };
+      preparedSocketContext = undefined;
+      if (!this.#binding.isCurrent(generation)) {
+        this.#disposeSocketContext(issued.preparedSocketContext);
         throw new Error("Hosted node selection changed.");
       }
       this.#pendingTicket = {
         ticket: issued.ticket,
         expiresAt: issued.expiresAt,
         generation,
-        preparedSocketContext,
+        preparedSocketContext: issued.preparedSocketContext,
         used: false,
       };
       return this.#binding.relayUrl?.() ?? getHostedRuntimeConfiguration().relayUrl();
     } catch (error) {
+      this.#disposeSocketContext(preparedSocketContext);
       if (error instanceof HostedHubApiError && error.status === 401) {
         void hostedHubController.expireSession();
       } else if (error instanceof HostedHubApiError) {
@@ -254,6 +284,7 @@ export class HostedRelayAttemptFactory {
       pending.used ||
       pending.expiresAt <= getHostedRuntimeConfiguration().timers.now()
     ) {
+      this.#disposeSocketContext(pending?.preparedSocketContext);
       throw new Error("A fresh relay ticket is required for every connection attempt.");
     }
     pending.used = true;
@@ -309,6 +340,7 @@ export class HostedRelayAttemptFactory {
       if (isCurrentAttempt()) this.#activeSocket = socket;
       return socket;
     } catch (error) {
+      this.#disposeSocketContext(pending.preparedSocketContext);
       if (isCurrentAttempt()) {
         this.#activeAttemptId = null;
         this.#activeSocket = null;
@@ -361,7 +393,7 @@ export class HostedRelayAttemptFactory {
   }
 
   reset(): void {
-    this.#pendingTicket = null;
+    this.#discardPendingTicket();
     this.#pendingRequests.clear();
     this.#lastRetryAfterMs = undefined;
     this.#activeGeneration = null;
@@ -370,6 +402,21 @@ export class HostedRelayAttemptFactory {
     this.#requiresClientRecreation = false;
     this.#nextAttemptId = 0;
     this.#reconnect.reset();
+  }
+
+  #disposeSocketContext(context: unknown): void {
+    if (context === undefined) return;
+    try {
+      this.#binding.disposeSocketContext?.(context);
+    } catch {
+      // Disposal is best effort; the attempt is already unreachable here.
+    }
+  }
+
+  #discardPendingTicket(): void {
+    const pending = this.#pendingTicket;
+    this.#pendingTicket = null;
+    if (pending !== null) this.#disposeSocketContext(pending.preparedSocketContext);
   }
 }
 

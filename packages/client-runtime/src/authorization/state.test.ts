@@ -70,6 +70,7 @@ const hostedHubApi = {
   redeemInvitation: vi.fn(),
   listNodes: vi.fn(),
   listPasskeys: vi.fn(),
+  listE2eeDevices: vi.fn(),
   getAccountSecurity: vi.fn(),
   getExternalIdentityConfiguration: vi.fn(),
   connectExternalIdentity: vi.fn(),
@@ -78,6 +79,8 @@ const hostedHubApi = {
   disconnectExternalIdentity: vi.fn(),
   addPasskey: vi.fn(),
   revokePasskey: vi.fn(),
+  renameE2eeDevice: vi.fn(),
+  revokeE2eeDevice: vi.fn(),
   regenerateRecoveryCodes: vi.fn(),
   setPassword: vi.fn(),
   removePassword: vi.fn(),
@@ -1337,6 +1340,26 @@ describe("hosted account management state", () => {
     revocationReasonCode: null,
   } as const;
 
+  const e2eeDevice = {
+    enrollmentId: `enr_${"e".repeat(22)}`,
+    enrollmentRevision: 1,
+    accountAuthEpoch: 3,
+    deviceAuthEpoch: 2,
+    platform: "ios",
+    appVersion: "0.1.20",
+    reportedKeyBacking: "secure-enclave",
+    deviceLabel: "Ada's iPhone",
+    identityFingerprint: "A".repeat(43),
+    agreementFingerprint: "B".repeat(43),
+    clientPrekeyCertificateDigest: "C".repeat(43),
+    certificateExpiresAt: 1_788_537_600_000,
+    status: "active",
+    createdAt: 1_788_451_200_000,
+    updatedAt: 1_788_451_200_000,
+    lastUsedAt: null,
+    revokedAt: null,
+  } as const;
+
   /** Bring the controller to an authenticated, ready-directory state. */
   async function authenticate(): Promise<void> {
     vi.spyOn(hostedHubApi, "restoreSession").mockResolvedValue(sessionResponse);
@@ -1380,6 +1403,42 @@ describe("hosted account management state", () => {
       passkeys: [passkey],
       passkeysStatus: "ready",
       errorMessage: null,
+    });
+  });
+
+  it("loads the native E2EE device directory and deduplicates concurrent reads", async () => {
+    await authenticate();
+    const listE2eeDevices = vi
+      .spyOn(hostedHubApi, "listE2eeDevices")
+      .mockResolvedValue([e2eeDevice]);
+
+    await Promise.all([
+      hostedHubController.refreshE2eeDevices(),
+      hostedHubController.refreshE2eeDevices(),
+    ]);
+
+    expect(listE2eeDevices).toHaveBeenCalledOnce();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      e2eeDevices: [e2eeDevice],
+      e2eeDevicesStatus: "ready",
+      errorMessage: null,
+    });
+  });
+
+  it("drops a native E2EE directory response from a replaced session", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "listE2eeDevices").mockImplementation(async () => {
+      hostedHubStore.setState({
+        session: { ...sessionResponse.session, id: "sess_bbbbbbbbbbbbbbbbbbbbbb" },
+      });
+      return [e2eeDevice];
+    });
+
+    await hostedHubController.refreshE2eeDevices();
+
+    expect(hostedAccountStore.getState()).toMatchObject({
+      e2eeDevices: [],
+      e2eeDevicesStatus: "idle",
     });
   });
 
@@ -2002,6 +2061,60 @@ describe("hosted account management state", () => {
       passkeysStatus: "ready",
       actionStatus: "idle",
       errorMessage: null,
+    });
+  });
+
+  it("renames and revokes native E2EE devices with forced confirming reads", async () => {
+    await authenticate();
+    const renamed = {
+      ...e2eeDevice,
+      enrollmentRevision: 2,
+      deviceLabel: "Travel phone",
+      updatedAt: e2eeDevice.updatedAt + 1,
+    } as const;
+    const revoked = {
+      ...renamed,
+      enrollmentRevision: 3,
+      deviceAuthEpoch: 3,
+      status: "revoked",
+      updatedAt: renamed.updatedAt + 1,
+      revokedAt: renamed.updatedAt + 1,
+    } as const;
+    const renameE2eeDevice = vi.spyOn(hostedHubApi, "renameE2eeDevice").mockResolvedValue(renamed);
+    const revokeE2eeDevice = vi.spyOn(hostedHubApi, "revokeE2eeDevice").mockResolvedValue(revoked);
+    const listE2eeDevices = vi
+      .spyOn(hostedHubApi, "listE2eeDevices")
+      .mockResolvedValueOnce([renamed])
+      .mockResolvedValueOnce([revoked]);
+
+    await expect(
+      hostedHubController.renameE2eeDevice(e2eeDevice.enrollmentId, {
+        expectedEnrollmentRevision: 1,
+        deviceLabel: "Travel phone",
+      }),
+    ).resolves.toEqual({ status: "committed" });
+    await expect(
+      hostedHubController.revokeE2eeDevice(e2eeDevice.enrollmentId, {
+        expectedEnrollmentRevision: 2,
+        reasonCode: "owner_revoked",
+      }),
+    ).resolves.toEqual({ status: "committed" });
+
+    expect(renameE2eeDevice).toHaveBeenCalledWith(
+      e2eeDevice.enrollmentId,
+      { expectedEnrollmentRevision: 1, deviceLabel: "Travel phone" },
+      expect.anything(),
+    );
+    expect(revokeE2eeDevice).toHaveBeenCalledWith(
+      e2eeDevice.enrollmentId,
+      { expectedEnrollmentRevision: 2, reasonCode: "owner_revoked" },
+      expect.anything(),
+    );
+    expect(listE2eeDevices).toHaveBeenCalledTimes(2);
+    expect(hostedAccountStore.getState()).toMatchObject({
+      e2eeDevices: [revoked],
+      e2eeDevicesStatus: "ready",
+      actionStatus: "idle",
     });
   });
 

@@ -1,5 +1,6 @@
 import type { EnvironmentId, RelayCloseReason, RelayEffectiveRole } from "@ryco/contracts";
 import type * as HostedIdentity from "@ryco/contracts/hosted-identity";
+import type * as NativeE2ee from "@ryco/contracts/native-e2ee";
 
 export type HostedAccountStatus =
   | "signed-out"
@@ -366,6 +367,10 @@ export interface HostedRelayTicket {
   readonly protocolMajor: 1;
   readonly protocolMinor: 2;
 }
+
+export type HostedAccountE2eeDevice = NativeE2ee.AccountE2eeDeviceSummary;
+export type HostedE2eeGrantVerificationKeyset = NativeE2ee.HubGrantVerificationKeysetResponse;
+export type HostedAccountGrantRelayTicket = NativeE2ee.NativeAccountGrantRelayTicketResponse;
 
 export type HostedRelayFailureKind =
   | "network"

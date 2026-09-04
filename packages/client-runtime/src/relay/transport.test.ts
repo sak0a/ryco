@@ -17,7 +17,11 @@ import {
 import { hostedHubController, hostedHubStore } from "../authorization/state";
 import type { HostedHubNode, HostedRelayFailure } from "../authorization/types";
 import { encodeBase64Url } from "./base64url";
-import { HostedRelayAttemptFactory, ticketFailure } from "./transport";
+import {
+  HostedRelayAttemptFactory,
+  ticketFailure,
+  type HostedRelayAttemptBinding,
+} from "./transport";
 
 const RELAY_URL = "wss://hub.example.test/v1/relay/client";
 
@@ -136,6 +140,65 @@ afterEach(() => {
 });
 
 describe("HostedRelayAttemptFactory", () => {
+  it("holds native grant context for one socket and disposes abandoned attempts", async () => {
+    let current = true;
+    let sequence = 0;
+    const disposed: unknown[] = [];
+    const created: unknown[] = [];
+    const binding: HostedRelayAttemptBinding = {
+      nodeId: () => selectedNode.id,
+      generation: () => 4,
+      isAuthenticated: () => true,
+      isCurrent: () => current,
+      prepareSocketContext: async () => ({ publicMaterial: ++sequence }),
+      issueRelayAttempt: async ({ preparedSocketContext }) => ({
+        ticket: encodeBase64Url(new Uint8Array(32).fill(sequence)),
+        expiresAt: Date.now() + 60_000,
+        preparedSocketContext: {
+          preparedSocketContext,
+          transientGrant: `grant-canary-${sequence}`,
+        },
+      }),
+      disposeSocketContext: (context) => disposed.push(context),
+      relayUrl: () => RELAY_URL,
+      createRelaySocket: (input) => {
+        created.push(input.preparedSocketContext);
+        return new MockRelaySocket(input.callbacks as RelaySocketCallbacks);
+      },
+      authorizeRequest: () => true,
+      shouldReconnect: () => true,
+      transportStatus: () => undefined,
+      sessionStatus: () => undefined,
+      role: () => undefined,
+      failure: () => undefined,
+      markDeliveryUnknown: () => undefined,
+      connectionClosed: () => undefined,
+    };
+    const factory = new HostedRelayAttemptFactory(binding);
+
+    await factory.nextUrl();
+    await factory.nextUrl();
+    expect(disposed).toEqual([
+      {
+        preparedSocketContext: { publicMaterial: 1 },
+        transientGrant: "grant-canary-1",
+      },
+    ]);
+    factory.createSocket(RELAY_URL);
+    expect(created).toEqual([
+      {
+        preparedSocketContext: { publicMaterial: 2 },
+        transientGrant: "grant-canary-2",
+      },
+    ]);
+    expect(disposed).toHaveLength(1);
+
+    current = false;
+    await expect(factory.nextUrl()).rejects.toThrow("Hosted node selection changed.");
+    expect(disposed).toHaveLength(2);
+    expect(disposed[1]).toEqual({ publicMaterial: 3 });
+  });
+
   it.each([
     ["node_offline", "offline", true],
     ["server_draining", "draining", true],
