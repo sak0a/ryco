@@ -124,12 +124,7 @@ export interface RelayE2eeInitiatorAttempt {
   readonly pairingOnly: boolean;
   /** §8.2: this client's own fixed local suite-preference order. */
   readonly localSuitePreference: readonly number[];
-  readonly credentials:
-    | E2eeClientHandshakeCredentials
-    | Omit<
-        Extract<E2eeClientHandshakeCredentials, { readonly tier: "native" }>,
-        "agreementSecretKey"
-      >;
+  readonly credentials: E2eeClientHandshakeCredentials | E2eeNativePublicHandshakeCredentials;
   /**
    * Native-only, one-operation access to the static agreement scalar.
    *
@@ -184,6 +179,15 @@ export interface RelayE2eeInitiatorAttempt {
    */
   readonly onWebVerificationCode?: ((code: string) => void) | undefined;
 }
+
+type WithoutAgreementSecret<T> = T extends { readonly agreementSecretKey: Uint8Array }
+  ? Omit<T, "agreementSecretKey">
+  : never;
+
+/** Preserve the local/account discriminant while the durable scalar is borrowed. */
+type E2eeNativePublicHandshakeCredentials = WithoutAgreementSecret<
+  Extract<E2eeClientHandshakeCredentials, { readonly tier: "native" }>
+>;
 
 export interface RelayE2eeNativeHandshakeStartInput {
   readonly statement: Uint8Array;
@@ -834,10 +838,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     statement: NodeE2eeCapabilityStatement,
     anchor: NodeE2eeCapabilityAnchor,
     selectedSuite: E2eeSuiteId,
-    credentials: Omit<
-      Extract<E2eeClientHandshakeCredentials, { readonly tier: "native" }>,
-      "agreementSecretKey"
-    >,
+    credentials: E2eeNativePublicHandshakeCredentials,
     localPreKeyDeadline: number,
   ): Promise<RelayE2eeInboundDisposition> {
     const borrow = attempt.withNativeAgreementSecretKey;

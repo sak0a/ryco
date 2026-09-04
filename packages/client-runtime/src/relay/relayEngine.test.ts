@@ -38,6 +38,7 @@ import {
 
 const CHANNEL_ID = "ch_cccccccccccccccccccccc" as RelayChannelId;
 const VERSION = { protocolMajor: 1, protocolMinor: 2 } as const;
+const VERSION_3 = { protocolMajor: 1, protocolMinor: 3 } as const;
 const OPEN = 1;
 
 /**
@@ -54,6 +55,7 @@ class MockRelaySocket implements RelaySocket {
   readonly sentRefs: Uint8Array[] = [];
   /** A socket that died under the engine: the write is attempted and throws. */
   throwOnSend = false;
+  onSend: (() => void) | undefined;
   #open: Array<() => void> = [];
   #message: Array<(bytes: Uint8Array) => void> = [];
   #close: Array<() => void> = [];
@@ -63,6 +65,7 @@ class MockRelaySocket implements RelaySocket {
     this.sentRefs.push(bytes);
     this.sent.push(Uint8Array.from(bytes));
     if (this.throwOnSend) throw new Error("socket is gone");
+    this.onSend?.();
   }
   close(): void {
     this.readyState = 3;
@@ -110,7 +113,7 @@ class MockRelaySocket implements RelaySocket {
  * sequence is the no-op proof for both surfaces.
  */
 const LEGACY_FRAME_SEQUENCE = [
-  "a5647065657266636c69656e74647479706564617574686b72656c61795469636b6574582007070707070707070707070707070707070707070707070707070707070707076d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+  "a5647065657266636c69656e74647479706564617574686b72656c61795469636b6574582007070707070707070707070707070707070707070707070707070707070707076d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7203",
   "a4647479706564706f6e67656e6f6e63654804040404040404046d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
   "a664747970656464617461677061796c6f61645320090d0a20090d0a7b226669727374223a317d6873657175656e636500696368616e6e656c4964781963685f636363636363636363636363636363636363636363636d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
   "a664747970656464617461677061796c6f61645420090d0a20090d0a7b227365636f6e64223a327d6873657175656e636501696368616e6e656c4964781963685f636363636363636363636363636363636363636363636d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
@@ -313,6 +316,27 @@ describe("HostedRelayEngine", () => {
     expect(received).toEqual([[9, 8, 7, 0, 255]]);
   });
 
+  it("offers minor 3 and emits later frames at the relay-selected minor 3", () => {
+    const { engine, socket } = create();
+    socket.open();
+    const auth = decodeRelayFrame(socket.sent[0]!);
+    expect(auth.ok && auth.value.type === "auth" ? auth.value.protocolMinor : undefined).toBe(3);
+    socket.frame({ type: "ready", ...VERSION_3, limits: RELAY_INITIAL_LIMITS });
+    socket.frame({
+      type: "channel.open",
+      ...VERSION_3,
+      channelId: CHANNEL_ID,
+      capability: "ryco.rpc",
+      effectiveRole: "operator",
+    });
+    socket.frame({ type: "channel.accept", ...VERSION_3, channelId: CHANNEL_ID });
+
+    engine.send(new TextEncoder().encode('{"minor":3}'));
+
+    const data = sentFrames(socket).findLast((frame) => frame.type === "data");
+    expect(data?.protocolMinor).toBe(3);
+  });
+
   it("advertises chunk support on fitting outbound RPC messages", () => {
     const { engine, socket } = create();
     authenticate(socket);
@@ -392,6 +416,22 @@ describe("HostedRelayEngine", () => {
     // …and the engine's own buffer holding the ticket is zeroed immediately after.
     expect(authRef.length).toBeGreaterThan(0);
     expect([...authRef].every((byte) => byte === 0)).toBe(true);
+  });
+
+  it("spends auth before a synchronous ready response and ignores duplicate open", () => {
+    vi.useFakeTimers();
+    const handlers = callbacks();
+    const { socket } = create(handlers, realTimers());
+    socket.onSend = () => {
+      socket.onSend = undefined;
+      socket.frame({ type: "ready", ...VERSION, limits: RELAY_INITIAL_LIMITS });
+    };
+    socket.open();
+    socket.open();
+    expect(socket.sent).toHaveLength(1);
+    expect(handlers.onTransportStatus).toHaveBeenLastCalledWith("opening-channel");
+    vi.advanceTimersByTime(5_000);
+    expect(handlers.onFailure).not.toHaveBeenCalled();
   });
 
   it("responds to canonical heartbeat pings", () => {
