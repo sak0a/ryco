@@ -267,6 +267,7 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
             statement: statementBytes,
             connectedHubOrigin: request.hubOrigin,
             tier: "native",
+            trustSource: "account-enrolled",
             localSuitePreference: [E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256],
             now,
             accountId: request.accountId,

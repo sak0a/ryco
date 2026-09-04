@@ -400,7 +400,9 @@ export async function harness(
     readonly policy?: () => EffectiveNodeE2eePolicy;
     readonly protocolMinor?: 2 | 3;
     readonly accountGrantContext?:
-      | ((advertisement: NodeE2eeAdvertisement) => RelayAccountGrantContext)
+      | ((
+          advertisement: NodeE2eeAdvertisement,
+        ) => RelayAccountGrantContext | Promise<RelayAccountGrantContext>)
       | undefined;
     readonly verifyAccountGrant?: NodeE2eeChannelSessionSources["verifyAccountGrant"];
     readonly authorization?: NodeE2eeChannelAuthorization;
@@ -636,7 +638,7 @@ export async function harness(
         effectiveRole: ROLE,
         ...(options.accountGrantContext === undefined
           ? {}
-          : { accountGrantContext: options.accountGrantContext(result.advertisement) }),
+          : { accountGrantContext: await options.accountGrantContext(result.advertisement) }),
       });
       sendQueue.flush();
       return result.advertisement;

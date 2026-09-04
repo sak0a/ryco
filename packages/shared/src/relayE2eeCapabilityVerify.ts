@@ -1,3 +1,5 @@
+import type { NativeE2eeTrustSource } from "@ryco/contracts/native-e2ee";
+
 import {
   E2EE_ACCOUNT_ID_MAX_BYTES,
   E2EE_CAPABILITY_STATEMENT_VALIDITY,
@@ -102,6 +104,8 @@ export interface NodeE2eeCapabilityVerificationInput {
   readonly connectedHubOrigin: string;
   /** §8.1: the tier this client runs, which fixes the Noise pattern step 9 checks. */
   readonly tier: E2eeTier;
+  /** The credential class whose suite compatibility §8.2 must evaluate. */
+  readonly trustSource?: NativeE2eeTrustSource | undefined;
   /** §8.2: the client's own fixed local suite preference order. */
   readonly localSuitePreference: readonly number[];
   /** The verifier's clock, epoch milliseconds (§5.7, §6.4). */
@@ -420,6 +424,7 @@ export function verifyNodeE2eeCapabilityStatement(
   // evidence, all carrying the one disposition: no hello may be built from it.
   const selection = selectE2eeSuite({
     tier: input.tier,
+    ...(input.trustSource === undefined ? {} : { trustSource: input.trustSource }),
     localSuitePreference: input.localSuitePreference,
     advertisedSuiteRegistry: statement.suiteRegistry,
     advertisedVersionMin: statement.e2eeVersionMin,

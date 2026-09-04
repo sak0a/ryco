@@ -401,6 +401,7 @@ export class DesktopNativeE2eeHandshakeService {
       statement: input.statement,
       connectedHubOrigin: this.#origin,
       tier: "native",
+      ...(account === null ? {} : { trustSource: "account-enrolled" as const }),
       localSuitePreference: account === null ? LOCAL_SUITE_PREFERENCE : ACCOUNT_SUITE_PREFERENCE,
       now: this.#now(),
       accountId: prepared.accountId,

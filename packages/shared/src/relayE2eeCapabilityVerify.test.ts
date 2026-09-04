@@ -38,6 +38,7 @@ import {
   decodeE2eeCapabilityCarrier,
   encodeE2eeCapabilityCarrier,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
 } from "./relayE2eeWire.ts";
 
 const bytes = (value: string): Uint8Array => Uint8Array.from(Buffer.from(value, "hex"));
@@ -1158,6 +1159,34 @@ describe("§5.2 statement verification", () => {
         kind: "unusable",
         reason: "empty_suite_intersection",
       });
+    });
+
+    it("forwards account-enrolled trust when selecting suite 0x02", () => {
+      const accountStatement = statementOf(
+        transcriptOf({
+          suiteRegistry: [
+            E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+            E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+          ],
+        }),
+      );
+      expect(
+        verdict(
+          verify({
+            statement: accountStatement,
+            trustSource: "account-enrolled",
+            localSuitePreference: [E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256],
+          }),
+        ),
+      ).toEqual({ kind: "verified", anchor: "none", selectedSuite: 2 });
+      expect(
+        verdict(
+          verify({
+            statement: accountStatement,
+            localSuitePreference: [E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256],
+          }),
+        ),
+      ).toEqual({ kind: "unusable", reason: "empty_suite_intersection" });
     });
 
     it("selects from the CLIENT's preference order against the node's registry, not the reverse", () => {

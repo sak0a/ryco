@@ -184,6 +184,7 @@
       },
       "devDependencies": {
         "@effect/vitest": "catalog:",
+        "@ryco/client-runtime": "workspace:*",
         "@ryco/contracts": "workspace:*",
         "@ryco/shared": "workspace:*",
         "@ryco/tailscale": "workspace:*",
