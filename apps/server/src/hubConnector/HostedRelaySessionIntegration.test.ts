@@ -206,6 +206,7 @@ describe("hosted relay session integration", () => {
     const sendQueue = new RelaySendQueue(relaySocket, RELAY_INITIAL_LIMITS);
     const registry = new RelayChannelRegistry({
       limits: RELAY_INITIAL_LIMITS,
+      protocol: VERSION,
       sendQueue,
       onOutboundReady: () => sendQueue.flush(),
       factory: {

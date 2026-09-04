@@ -17,6 +17,7 @@ import {
 } from "@ryco/shared/relayE2eeClose";
 import {
   E2eeNodeHandshake,
+  type E2eeAccountGrantAuthoritySnapshot,
   type E2eeClientAuthorizationKey,
   type E2eeHandshakeChannel,
   type E2eeModeTransition,
@@ -266,6 +267,7 @@ export interface NodeE2eeChannelSessionSources {
         readonly suite: E2eeSuiteId;
         readonly establishedAt: number;
         readonly verificationCode: string | undefined;
+        readonly accountGrantAuthority: E2eeAccountGrantAuthoritySnapshot | undefined;
       }) => () => void)
     | undefined;
   readonly onDiagnostic?: (diagnostic: NodeE2eeChannelDiagnostic) => void;
@@ -1003,6 +1005,7 @@ export function makeNodeE2eeChannelSession(
               suite: accept.suite,
               establishedAt: at,
               verificationCode,
+              accountGrantAuthority: accept.accountGrantAuthority,
             });
           }
           return { kind: "entered" };

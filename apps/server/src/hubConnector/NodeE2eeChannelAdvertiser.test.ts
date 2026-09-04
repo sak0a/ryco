@@ -206,6 +206,7 @@ function relayHarness(options: RelayHarnessOptions) {
   const sendHandles = new Map<string, RelayChannelSendHandle>();
   const registry = new RelayChannelRegistry({
     limits,
+    protocol: version,
     sendQueue,
     factory: {
       connectionReady: ({ limits: ready }) =>

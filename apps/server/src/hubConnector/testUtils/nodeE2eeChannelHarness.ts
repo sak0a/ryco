@@ -467,6 +467,7 @@ export async function harness(
 
   const registry = new RelayChannelRegistry({
     limits: readyLimits,
+    protocol: version,
     sendQueue,
     onOutboundReady: () => sendQueue.flush(),
     factory: {

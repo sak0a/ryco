@@ -1,5 +1,6 @@
 import {
   RELAY_AUTHENTICATION_DEADLINE_MS,
+  RELAY_AUTHORIZED_CHANNEL_MINOR,
   RELAY_PROTOCOL_MAJOR,
   RELAY_PROTOCOL_MINOR,
   type RelayErrorFrame,
@@ -80,6 +81,8 @@ function binaryMessage(data: unknown): Uint8Array | undefined {
   return undefined;
 }
 
+const copyRelayBytes = <T extends Uint8Array>(bytes: T): T => Uint8Array.from(bytes) as T;
+
 function detachRelayFrameBytes(frame: RelayFrame): RelayFrame {
   switch (frame.type) {
     case "auth":
@@ -92,6 +95,34 @@ function detachRelayFrameBytes(frame: RelayFrame): RelayFrame {
         : { ...frame, relayTicket: Uint8Array.from(frame.relayTicket) };
     case "data":
       return { ...frame, payload: Uint8Array.from(frame.payload) };
+    case "channel.open":
+      return frame.accountGrantContext === undefined
+        ? frame
+        : {
+            ...frame,
+            accountGrantContext: [
+              frame.accountGrantContext[0],
+              frame.accountGrantContext[1],
+              copyRelayBytes(frame.accountGrantContext[2]),
+              copyRelayBytes(frame.accountGrantContext[3]),
+            ],
+          };
+    case "node.e2ee.statement":
+      return {
+        ...frame,
+        statement: Uint8Array.from(frame.statement),
+        statementDigest: copyRelayBytes(frame.statementDigest),
+      };
+    case "node.e2ee.statement.ack":
+      return { ...frame, statementDigest: copyRelayBytes(frame.statementDigest) };
+    case "e2ee.verifier-keys":
+      return {
+        ...frame,
+        keys: frame.keys.map((key) => ({
+          ...key,
+          publicKey: Uint8Array.from(key.publicKey),
+        })),
+      };
     case "ping":
     case "pong":
       return { ...frame, nonce: Uint8Array.from(frame.nonce) };
@@ -109,6 +140,7 @@ export class RelayConnectionSession {
   readonly #onTerminal: (error: RelayConnectionError) => void;
   #socket: HubRelaySocket | undefined;
   #ready: RelayReadyFrame | undefined;
+  #offeredProtocolMinor: number | undefined;
   #timer: unknown;
   #pendingAuthBytes: Uint8Array | undefined;
   #settled = false;
@@ -159,6 +191,16 @@ export class RelayConnectionSession {
         error instanceof HubRelayAuthenticationError ? error.failure : "authentication_failed",
       );
     }
+    if (
+      auth.protocolMajor !== RELAY_PROTOCOL_MAJOR ||
+      auth.protocolMinor < RELAY_AUTHORIZED_CHANNEL_MINOR ||
+      auth.protocolMinor > RELAY_PROTOCOL_MINOR
+    ) {
+      auth.nonce.fill(0);
+      auth.signature.fill(0);
+      throw new RelayConnectionError("version_incompatible");
+    }
+    this.#offeredProtocolMinor = auth.protocolMinor;
     if (this.#closed) {
       auth.nonce.fill(0);
       auth.signature.fill(0);
@@ -220,8 +262,8 @@ export class RelayConnectionSession {
             ? {}
             : {
                 expectedVersion: {
-                  protocolMajor: RELAY_PROTOCOL_MAJOR,
-                  protocolMinor: RELAY_PROTOCOL_MINOR,
+                  protocolMajor: this.#ready.protocolMajor,
+                  protocolMinor: this.#ready.protocolMinor,
                 },
               },
         );
@@ -240,7 +282,8 @@ export class RelayConnectionSession {
           if (
             frame.type !== "ready" ||
             frame.protocolMajor !== RELAY_PROTOCOL_MAJOR ||
-            frame.protocolMinor !== RELAY_PROTOCOL_MINOR
+            frame.protocolMinor < RELAY_AUTHORIZED_CHANNEL_MINOR ||
+            frame.protocolMinor > (this.#offeredProtocolMinor ?? -1)
           ) {
             fail(
               new RelayConnectionError(

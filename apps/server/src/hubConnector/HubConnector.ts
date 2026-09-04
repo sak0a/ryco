@@ -4,14 +4,24 @@ import type {
   HubEnrollmentStartResult,
   HubIdentitySummary,
 } from "@ryco/contracts";
-import type { RelayErrorFrame, RelayFrame } from "@ryco/contracts/relay";
+import {
+  RELAY_ACCOUNT_GRANT_MINOR,
+  type RelayConnectorGeneration,
+  type RelayE2eeDigest,
+  type RelayE2eeEnrollmentRevokedFrame,
+  type RelayErrorFrame,
+  type RelayFrame,
+} from "@ryco/contracts/relay";
 import { formatNodePublicKeyFingerprint } from "@ryco/shared/nodeIdentity";
+import { E2EE_MAX_CLOCK_SKEW } from "@ryco/shared/relayE2eeConstants";
 
 import type { HubConnectorConfig } from "../config.ts";
 import type { HubEnrollmentMetadata } from "../hubIdentity/HubEnrollmentClient.ts";
 import {
   classifyConnectorFailure,
   type ConnectorFailureKind,
+  type HubConnectorE2eeSnapshot,
+  HubConnectorE2eeStateMachine,
   HubConnectorStateMachine,
 } from "./HubConnectorState.ts";
 import { HubIdentityRuntimeError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
@@ -64,6 +74,10 @@ export class HubConnector {
   readonly #enrollmentMetadata: HubEnrollmentMetadata;
   readonly #scheduler: HubConnectorScheduler;
   readonly #state: HubConnectorStateMachine;
+  readonly #e2eeState: HubConnectorE2eeStateMachine;
+  readonly #onE2eeEnrollmentRevoked: (
+    frame: RelayE2eeEnrollmentRevokedFrame,
+  ) => void | Promise<void>;
   #attempt = 0;
   #protocolViolations = 0;
   #started = false;
@@ -88,7 +102,9 @@ export class HubConnector {
   #stableTimer: unknown;
   #heartbeatTimer: unknown;
   #drainTimer: unknown;
+  #e2eeStatementTimer: unknown;
   #frameChain: Promise<void> = Promise.resolve();
+  #e2eeRefreshChain: Promise<void> = Promise.resolve();
 
   constructor(options: {
     readonly config: HubConnectorConfig;
@@ -97,6 +113,9 @@ export class HubConnector {
     readonly channels: RelayChannelSessionFactory;
     readonly enrollmentMetadata: HubEnrollmentMetadata;
     readonly scheduler?: HubConnectorScheduler;
+    readonly onE2eeEnrollmentRevoked?: (
+      frame: RelayE2eeEnrollmentRevokedFrame,
+    ) => void | Promise<void>;
   }) {
     this.#config = options.config;
     this.#identity = options.identity;
@@ -105,10 +124,29 @@ export class HubConnector {
     this.#enrollmentMetadata = options.enrollmentMetadata;
     this.#scheduler = options.scheduler ?? defaultScheduler;
     this.#state = new HubConnectorStateMachine(this.#scheduler.now);
+    this.#e2eeState = new HubConnectorE2eeStateMachine(this.#scheduler.now);
+    this.#onE2eeEnrollmentRevoked = options.onE2eeEnrollmentRevoked ?? (() => undefined);
   }
 
   status(): HubConnectorStatus {
     return this.#state.snapshot();
+  }
+
+  e2eeSnapshot(): HubConnectorE2eeSnapshot {
+    return this.#e2eeState.snapshot();
+  }
+
+  /** Republish after a committed identity, prekey, continuity, suite, or policy change. */
+  refreshE2eeState(): Promise<void> {
+    const generation = this.#state.generation;
+    // The advertised inputs have already changed by the time an operator calls
+    // this method. Withdraw the old acknowledgement synchronously, before the
+    // first await, so a concurrently delivered channel cannot spend it while
+    // the replacement statement is still being built.
+    this.#e2eeState.clearStatement(generation);
+    const refresh = this.#e2eeRefreshChain.then(() => this.#publishE2eeState(generation));
+    this.#e2eeRefreshChain = refresh.catch(() => undefined);
+    return refresh;
   }
 
   async start(): Promise<void> {
@@ -365,6 +403,7 @@ export class HubConnector {
    */
   async #teardownConnection(): Promise<void> {
     this.#state.invalidateGeneration();
+    this.#e2eeState.clear();
     this.#clearAllTimers();
     const registry = this.#registry;
     this.#registry = undefined;
@@ -465,9 +504,17 @@ export class HubConnector {
       }
       const socket = session.socket;
       if (socket === undefined) throw new RelayConnectionError("internal_error");
+      this.#e2eeState.begin(generation, origin, {
+        protocolMajor: ready.protocolMajor,
+        protocolMinor: ready.protocolMinor,
+      });
       const sendQueue = new RelaySendQueue(socket, ready.limits);
       const registry = new RelayChannelRegistry({
         limits: ready.limits,
+        protocol: {
+          protocolMajor: ready.protocolMajor,
+          protocolMinor: ready.protocolMinor,
+        },
         sendQueue,
         factory: this.#channels,
         onFatal: () => {
@@ -501,7 +548,16 @@ export class HubConnector {
         session.close();
         return;
       }
-      this.#state.online(registry.size, sendQueue.ownedBytes);
+      await this.#publishE2eeState(generation);
+      if (!this.#state.isCurrent(generation) || this.#stopping) {
+        session.close();
+        return;
+      }
+      this.#state.online(
+        { protocolMajor: ready.protocolMajor, protocolMinor: ready.protocolMinor },
+        registry.size,
+        sendQueue.ownedBytes,
+      );
       this.#scheduleStableReset(generation);
       this.#scheduleHeartbeatTimeout(generation, ready.limits.deadConnectionTimeoutMs);
     } catch (error: unknown) {
@@ -592,6 +648,62 @@ export class HubConnector {
     await this.#connect();
   }
 
+  async #publishE2eeState(generation: number): Promise<void> {
+    if (!this.#state.isCurrent(generation) || this.#stopping) return;
+    const origin = this.#config.origin;
+    const ready = this.#session?.ready;
+    if (
+      origin === undefined ||
+      ready === undefined ||
+      ready.protocolMinor < RELAY_ACCOUNT_GRANT_MINOR
+    ) {
+      return;
+    }
+    let result;
+    try {
+      result = await this.#identity.readE2eeAdvertisement(origin);
+    } catch (error: unknown) {
+      this.#e2eeState.clearStatement(generation);
+      throw error;
+    }
+    if (!this.#state.isCurrent(generation) || this.#stopping) return;
+    if (result.kind === "unavailable") {
+      this.#clearTimer("e2eeStatement");
+      this.#e2eeState.clearStatement(generation);
+      return;
+    }
+    if (this.#e2eeState.publish(generation, result.advertisement) !== "accepted") {
+      throw new RelayConnectionError("internal_error");
+    }
+    const queue = this.#sendQueue;
+    if (
+      queue === undefined ||
+      !queue.enqueueControl({
+        type: "node.e2ee.statement",
+        protocolMajor: ready.protocolMajor,
+        protocolMinor: ready.protocolMinor,
+        connectorGeneration: generation as RelayConnectorGeneration,
+        statement: Uint8Array.from(result.advertisement.statement),
+        statementDigest: Uint8Array.from(result.advertisement.statementDigest) as RelayE2eeDigest,
+        expiresAt: result.advertisement.expiresAt,
+      })
+    ) {
+      throw new RelayConnectionError("internal_error");
+    }
+    this.#flushAndScheduleDrain(generation);
+    this.#scheduleE2eeStatementRefresh(generation, result.advertisement.expiresAt);
+  }
+
+  #scheduleE2eeStatementRefresh(generation: number, expiresAt: number): void {
+    this.#clearTimer("e2eeStatement");
+    const delay = Math.max(1, expiresAt - E2EE_MAX_CLOCK_SKEW - this.#scheduler.now());
+    this.#e2eeStatementTimer = this.#scheduler.setTimeout(() => {
+      this.#e2eeStatementTimer = undefined;
+      if (!this.#state.isCurrent(generation) || this.#stopping) return;
+      void this.refreshE2eeState().catch(() => this.#handleFailure(generation, "internal_error"));
+    }, delay);
+  }
+
   async #handleFrame(generation: number, frame: RelayFrame): Promise<void> {
     if (!this.#state.isCurrent(generation) || this.#stopping) return;
     if (frame.type === "ping") {
@@ -617,6 +729,19 @@ export class HubConnector {
         frame.retryAfterMs,
       );
       return;
+    } else if (frame.type === "node.e2ee.statement.ack") {
+      const result = this.#e2eeState.acknowledge(frame.connectorGeneration, frame.statementDigest);
+      if (result === "invalid") throw new RelayChannelProtocolError();
+      if (result === "stale") return;
+    } else if (frame.type === "e2ee.verifier-keys") {
+      const result = this.#e2eeState.replaceVerifierKeys(generation, frame);
+      if (result === "invalid") throw new RelayChannelProtocolError();
+      if (result === "stale") return;
+    } else if (frame.type === "e2ee.enrollment-revoked") {
+      const result = this.#e2eeState.acceptRevocation(generation, frame);
+      if (result === "invalid") throw new RelayChannelProtocolError();
+      if (result === "stale") return;
+      await this.#onE2eeEnrollmentRevoked(frame);
     } else if (
       frame.type === "channel.open" ||
       frame.type === "data" ||
@@ -641,9 +766,11 @@ export class HubConnector {
   ): Promise<void> {
     if (!this.#state.isCurrent(generation) || this.#stopping) return;
     this.#state.invalidateGeneration();
+    this.#e2eeState.clear();
     this.#clearTimer("stable");
     this.#clearTimer("heartbeat");
     this.#clearTimer("drain");
+    this.#clearTimer("e2eeStatement");
     const registry = this.#registry;
     this.#registry = undefined;
     await registry?.closeAll();
@@ -735,7 +862,9 @@ export class HubConnector {
     }, 10);
   }
 
-  #clearTimer(kind: "retry" | "enrollment" | "stable" | "heartbeat" | "drain"): void {
+  #clearTimer(
+    kind: "retry" | "enrollment" | "stable" | "heartbeat" | "drain" | "e2eeStatement",
+  ): void {
     const current =
       kind === "retry"
         ? this.#retryTimer
@@ -745,13 +874,16 @@ export class HubConnector {
             ? this.#stableTimer
             : kind === "heartbeat"
               ? this.#heartbeatTimer
-              : this.#drainTimer;
+              : kind === "drain"
+                ? this.#drainTimer
+                : this.#e2eeStatementTimer;
     if (current !== undefined) this.#scheduler.clearTimeout(current);
     if (kind === "retry") this.#retryTimer = undefined;
     else if (kind === "enrollment") this.#enrollmentTimer = undefined;
     else if (kind === "stable") this.#stableTimer = undefined;
     else if (kind === "heartbeat") this.#heartbeatTimer = undefined;
-    else this.#drainTimer = undefined;
+    else if (kind === "drain") this.#drainTimer = undefined;
+    else this.#e2eeStatementTimer = undefined;
   }
 
   #clearAllTimers(): void {
@@ -760,5 +892,6 @@ export class HubConnector {
     this.#clearTimer("stable");
     this.#clearTimer("heartbeat");
     this.#clearTimer("drain");
+    this.#clearTimer("e2eeStatement");
   }
 }

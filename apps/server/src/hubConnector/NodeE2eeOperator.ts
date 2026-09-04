@@ -314,12 +314,15 @@ export function makeNodeE2eeOperator(options: {
         readonly advertisementMinChunkBytes: number;
       }
     | undefined;
+  /** Republish the signed statement after any mutation of advertised material. */
+  readonly onAdvertisementChanged?: () => Promise<void>;
   readonly now?: () => number;
 }): HubConnectorE2eeOperator {
   const now = options.now ?? Date.now;
   const identity = options.identity;
   const admin = () => identity.e2eeAuthorizationAdmin;
   const liveUndersizedConnection = options.undersizedConnection ?? (() => undefined);
+  const advertisementChanged = options.onAdvertisementChanged ?? (() => Promise.resolve());
 
   /**
    * Read the listing AFTER the mutation that changed it.
@@ -419,6 +422,7 @@ export function makeNodeE2eeOperator(options: {
     // is the one step (a) spent.
     applyPolicy: async (proposal) => {
       const result = await identity.applyE2eePolicy(policyProposalOf(proposal));
+      await advertisementChanged();
       return policyChangeView(result, identity.e2eeGeneration());
     },
     // §5.7's recovery. Awaited and the generation read after, exactly as a
@@ -427,24 +431,31 @@ export function makeNodeE2eeOperator(options: {
     // the commit settled would report the value it was recovering from.
     recoverPolicyGeneration: async () => {
       const result = await identity.recoverE2eeGeneration();
+      await advertisementChanged();
       return policyChangeView(result, identity.e2eeGeneration());
     },
     readPrekey: async () =>
       prekeyView(await identity.readStoredE2eePrekey(options.hubOrigin()), now()),
-    rotatePrekey: async () =>
-      prekeyView(await identity.rotateE2eePrekey(options.hubOrigin()), now()),
+    rotatePrekey: async () => {
+      const rotated = await identity.rotateE2eePrekey(options.hubOrigin());
+      await advertisementChanged();
+      return prekeyView(rotated, now());
+    },
     readContinuity: async () =>
       continuityView(await identity.readE2eeContinuity(options.hubOrigin())),
-    adoptContinuityId: async (continuityId) => ({
-      outcome: "adopted",
-      continuityId: await identity.adoptE2eeContinuityId(continuityId),
-    }),
-    remintContinuityId: async () => ({
-      outcome: "reminted",
-      continuityId: await identity.remintE2eeContinuityId(),
-    }),
+    adoptContinuityId: async (continuityId) => {
+      const adopted = await identity.adoptE2eeContinuityId(continuityId);
+      await advertisementChanged();
+      return { outcome: "adopted", continuityId: adopted };
+    },
+    remintContinuityId: async () => {
+      const reminted = await identity.remintE2eeContinuityId();
+      await advertisementChanged();
+      return { outcome: "reminted", continuityId: reminted };
+    },
     breakContinuityChain: async () => {
       await identity.breakE2eeContinuity();
+      await advertisementChanged();
       return { outcome: "chain_broken" };
     },
     readFallback: () => fallbackView(identity.readE2eeFallbackState(), liveUndersizedConnection()),

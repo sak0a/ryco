@@ -67,6 +67,11 @@ export function invalidRelayE2eeInput(): never {
   throw new RelayE2eeValidationError();
 }
 
+/** Cross-runtime SHA-256 used for exact E2EE wire-artifact digests. */
+export function e2eeSha256(bytes: Uint8Array): Uint8Array {
+  return sha256(bytes);
+}
+
 // ─── §7.1 fingerprint domains and algorithm labels ───────────────────────────
 
 /** Node identity keys (§3.5, §7.1). The existing definition, reused unchanged. */

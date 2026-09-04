@@ -1,4 +1,5 @@
 import type {
+  RelayAccountGrantContext,
   RelayCapability,
   RelayChannelId,
   RelayChannelOpenFrame,
@@ -8,12 +9,9 @@ import type {
   RelayEffectiveRole,
   RelayFrame,
   RelayLimits,
+  RelayProtocolVersion,
 } from "@ryco/contracts/relay";
-import {
-  RELAY_MAX_RPC_MESSAGE_BYTES,
-  RELAY_PROTOCOL_MAJOR,
-  RELAY_PROTOCOL_MINOR,
-} from "@ryco/contracts/relay";
+import { RELAY_MAX_RPC_MESSAGE_BYTES } from "@ryco/contracts/relay";
 import { RELAY_CHUNK_HEADER_BYTES } from "@ryco/contracts/relay";
 import {
   prepareRelayMessage,
@@ -22,20 +20,6 @@ import {
 
 import { defaultRelayScheduler, type RelaySessionScheduler } from "./RelayConnectionSession.ts";
 import { RelaySendQueue } from "./RelaySendQueue.ts";
-
-/**
- * The relay protocol version every frame this registry emits carries, and the
- * version it reports to a session.
- *
- * Taken from the relay contract rather than restated here: `RelayConnectionSession`
- * accepts a `ready` frame only when it names exactly these two values, so this
- * *is* the negotiated version of every channel on the connection, and a contract
- * bump moves both together instead of leaving a stale literal behind.
- */
-const version = {
-  protocolMajor: RELAY_PROTOCOL_MAJOR,
-  protocolMinor: RELAY_PROTOCOL_MINOR,
-} as const;
 
 /**
  * What a channel does with a message the send path would not take.
@@ -268,7 +252,11 @@ export interface RelayChannelSessionFactory {
    * returns nothing, and a registry that has been constructed is usable whether
    * or not the factory did anything with them.
    */
-  readonly connectionReady?: (input: { readonly limits: RelayLimits }) => void;
+  readonly connectionReady?: (input: {
+    readonly limits: RelayLimits;
+    readonly protocolMajor: number;
+    readonly protocolMinor: number;
+  }) => void;
   readonly open: (input: {
     readonly channelId: RelayChannelId;
     /** The capability the peer named on `channel.open`. */
@@ -277,6 +265,8 @@ export interface RelayChannelSessionFactory {
     /** The relay protocol version this channel speaks. */
     readonly protocolMajor: number;
     readonly protocolMinor: number;
+    /** Present only for an account-authorized native channel on relay minor 3+. */
+    readonly accountGrantContext?: RelayAccountGrantContext;
     /**
      * Who this connection is, read at each use.
      *
@@ -344,6 +334,7 @@ export class RelayChannelQueueError extends Error {
 
 export class RelayChannelRegistry {
   readonly #limits: RelayLimits;
+  readonly #version: RelayProtocolVersion;
   readonly #sendQueue: RelaySendQueue;
   readonly #factory: RelayChannelSessionFactory;
   readonly #onFatal: () => void;
@@ -356,6 +347,8 @@ export class RelayChannelRegistry {
 
   constructor(options: {
     readonly limits: RelayLimits;
+    /** The exact version selected by the relay `ready` frame. */
+    readonly protocol: RelayProtocolVersion;
     readonly sendQueue: RelaySendQueue;
     readonly factory: RelayChannelSessionFactory;
     readonly onFatal?: () => void;
@@ -378,6 +371,7 @@ export class RelayChannelRegistry {
     readonly scheduler?: RelaySessionScheduler;
   }) {
     this.#limits = options.limits;
+    this.#version = { ...options.protocol };
     this.#sendQueue = options.sendQueue;
     this.#factory = options.factory;
     this.#onFatal = options.onFatal ?? (() => undefined);
@@ -389,7 +383,7 @@ export class RelayChannelRegistry {
     // hook exists to give, and it is only a guarantee if nothing can reach the
     // registry first. A throw here is the factory's own defect and belongs to
     // the caller constructing this registry, not to a channel.
-    this.#factory.connectionReady?.({ limits: this.#limits });
+    this.#factory.connectionReady?.({ limits: this.#limits, ...this.#version });
   }
 
   get size(): number {
@@ -443,7 +437,7 @@ export class RelayChannelRegistry {
         entry.graceFrames = 0;
         this.#enqueueControl({
           type: "flow.resume",
-          ...version,
+          ...this.#version,
           channelId: entry.channelId,
         });
       }
@@ -532,7 +526,7 @@ export class RelayChannelRegistry {
       if (options.notifyPeer ?? reason !== undefined) {
         this.#enqueueControl({
           type: "channel.close",
-          ...version,
+          ...this.#version,
           channelId,
           ...(reason === undefined ? {} : { reason }),
         });
@@ -675,7 +669,7 @@ export class RelayChannelRegistry {
     if (rejected) {
       this.#enqueueControl({
         type: "channel.reject",
-        ...version,
+        ...this.#version,
         channelId: frame.channelId,
         reason: this.#stopping ? "server_draining" : "channel_rejected",
       });
@@ -719,7 +713,7 @@ export class RelayChannelRegistry {
         const accepted = this.#sendQueue.enqueueDataBatch(
           prepared.payloads.map((payload, index) => ({
             type: "data",
-            ...version,
+            ...this.#version,
             channelId: frame.channelId,
             sequence: (outputSequence + index) as RelayDataFrame["sequence"],
             payload: Uint8Array.from(payload),
@@ -761,7 +755,10 @@ export class RelayChannelRegistry {
         channelId: frame.channelId,
         capability: frame.capability,
         effectiveRole: role,
-        ...version,
+        ...this.#version,
+        ...(frame.accountGrantContext === undefined
+          ? {}
+          : { accountGrantContext: frame.accountGrantContext }),
         connection: this.#connection,
         send,
         admit,
@@ -789,7 +786,7 @@ export class RelayChannelRegistry {
       this.#channels.set(key, entry);
       this.#enqueueControl({
         type: "channel.accept",
-        ...version,
+        ...this.#version,
         channelId: frame.channelId,
       });
     } catch (error: unknown) {
@@ -800,7 +797,7 @@ export class RelayChannelRegistry {
       }
       this.#enqueueControl({
         type: "channel.reject",
-        ...version,
+        ...this.#version,
         channelId: frame.channelId,
         reason: this.#stopping ? "server_draining" : "channel_rejected",
       });
@@ -882,7 +879,7 @@ export class RelayChannelRegistry {
       entry.graceFrames = 0;
       this.#enqueueControl({
         type: "flow.pause",
-        ...version,
+        ...this.#version,
         channelId: frame.channelId,
       });
     }

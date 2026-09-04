@@ -110,8 +110,8 @@ describe("relay schemas", () => {
     expect(new Set(decoded.map((frame) => frame.type))).toEqual(new Set(RELAY_FRAME_TYPES));
   });
 
-  it("reserves relay minor 3 without enabling it for existing connections", () => {
-    expect(RELAY_PROTOCOL_MINOR).toBe(2);
+  it("advertises relay minor 3 while retaining the older schema versions", () => {
+    expect(RELAY_PROTOCOL_MINOR).toBe(3);
   });
 
   it("keeps the stable close-reason set exact", () => {

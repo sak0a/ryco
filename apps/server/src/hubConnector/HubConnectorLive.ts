@@ -28,6 +28,7 @@ import { makeNodeE2eeChannelAdvertiser } from "./NodeE2eeChannelAdvertiser.ts";
 import {
   makeNodeE2eeChannelSession,
   makeNodeE2eeHandshakeRateLimiter,
+  type NodeE2eeChannelSession,
 } from "./NodeE2eeChannelSession.ts";
 import { makeNodeE2eeOperator } from "./NodeE2eeOperator.ts";
 import {
@@ -483,6 +484,7 @@ export const HubConnectorLive = Layer.effect(
         effectiveRole,
         protocolMajor,
         protocolMinor,
+        accountGrantContext,
         connection,
         send,
         admit,
@@ -494,7 +496,8 @@ export const HubConnectorLive = Layer.effect(
         // the carrier is bytes in hand and the announcement is one `send`.
         const announcement = await advertiser.openChannel();
         const connectionIdentity = connection();
-        const e2ee = makeNodeE2eeChannelSession({
+        let e2ee: NodeE2eeChannelSession;
+        e2ee = makeNodeE2eeChannelSession({
           // §8.3: the node's own channel state, never a value a peer supplies.
           // The Hub origin is the one this connector is configured for and the
           // one the advertised statement was built for; a channel that opened
@@ -508,6 +511,15 @@ export const HubConnectorLive = Layer.effect(
             relayProtocolMinor: protocolMinor,
             channelOpenCapability: capability,
             channelOpenEffectiveRole: effectiveRole,
+            ...(accountGrantContext === undefined
+              ? {}
+              : {
+                  accountGrantContext: {
+                    relayTicketId: accountGrantContext[1],
+                    deviceGrantDigest: Uint8Array.from(accountGrantContext[2]),
+                    nodeCapabilityStatementDigest: Uint8Array.from(accountGrantContext[3]),
+                  },
+                }),
           },
           announcement,
           plaintextCeiling: plaintextCeiling ?? 0,
@@ -524,7 +536,13 @@ export const HubConnectorLive = Layer.effect(
               use,
             ),
           rateLimiter: handshakeRateLimiter,
-          registerSession: (session) => sessionDirectory.register(session),
+          registerSession: (session) =>
+            sessionDirectory.register({
+              ...session,
+              terminate: () => {
+                void e2ee.beginClose();
+              },
+            }),
           recordPeerLegacyFallback: () => {
             void identity
               .recordE2eeFallback({
@@ -620,6 +638,9 @@ export const HubConnectorLive = Layer.effect(
         platformArch: descriptor.platform.arch,
         clientVersion: descriptor.serverVersion,
       },
+      onE2eeEnrollmentRevoked: async (frame) => {
+        await sessionDirectory.revokeEnrollment(frame);
+      },
     });
     yield* Effect.acquireRelease(
       Effect.sync(() => {
@@ -658,6 +679,7 @@ export const HubConnectorLive = Layer.effect(
         // reconfigured between two operator commands must not answer the second
         // one about the first one's origin.
         hubOrigin: () => config.hubConnector?.origin ?? "",
+        onAdvertisementChanged: () => connector.refreshE2eeState(),
       }),
     } satisfies HubConnectorServiceShape;
   }),

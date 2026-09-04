@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
 export const RELAY_PROTOCOL_MAJOR = 1 as const;
-export const RELAY_PROTOCOL_MINOR = 2 as const;
+export const RELAY_PROTOCOL_MINOR = 3 as const;
 export const RELAY_PROTOCOL_MINIMUM_MINOR = 0 as const;
 export const RELAY_AUTHORIZED_CHANNEL_MINOR = 2 as const;
 export const RELAY_ACCOUNT_GRANT_MINOR = 3 as const;
