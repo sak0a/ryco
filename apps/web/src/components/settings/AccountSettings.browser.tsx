@@ -40,6 +40,7 @@ import {
   PASSKEY_SESSION_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
   type HostedAccountCommitted,
+  type HostedAccountE2eeDevice,
   type HostedAccountRefused,
   type HostedAddPasskeyCommitted,
   type HostedHubPasskey,
@@ -91,6 +92,31 @@ const SESSION = {
   revokedAt: null,
   revocationReasonCode: null,
 };
+
+const E2EE_GRANT_CANARY = "e2ee-grant-canary-must-never-render-or-persist";
+
+function e2eeDevice(overrides: Partial<HostedAccountE2eeDevice> = {}): HostedAccountE2eeDevice {
+  return {
+    enrollmentId: `enr_${"e".repeat(22)}` as never,
+    enrollmentRevision: 3 as never,
+    accountAuthEpoch: 1 as never,
+    deviceAuthEpoch: 1 as never,
+    platform: "darwin",
+    appVersion: "1.2.3",
+    reportedKeyBacking: "secure-enclave",
+    deviceLabel: "Studio Mac",
+    identityFingerprint: "i".repeat(43) as never,
+    agreementFingerprint: "a".repeat(43) as never,
+    clientPrekeyCertificateDigest: "c".repeat(43) as never,
+    certificateExpiresAt: 1_800_000_000_000,
+    status: "active",
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_500_000,
+    lastUsedAt: 1_700_000_400_000,
+    revokedAt: null,
+    ...overrides,
+  };
+}
 
 function passkey(overrides: Partial<HostedHubPasskey> = {}): HostedHubPasskey {
   return {
@@ -346,6 +372,7 @@ describe("AccountSettingsPanel", () => {
     // The mount read is a read; it must never be the thing that reaches the Hub
     // in a test about mutations.
     vi.spyOn(hostedHubController, "refreshPasskeys").mockResolvedValue();
+    vi.spyOn(hostedHubController, "refreshE2eeDevices").mockResolvedValue();
     vi.spyOn(hostedHubController, "refreshAccountSecurity").mockResolvedValue();
     vi.spyOn(hostedHubController, "refreshExternalIdentityConfiguration").mockResolvedValue();
     vi.spyOn(hostedHubApi, "getPendingExternalIdentity").mockResolvedValue({ status: "none" });
@@ -367,6 +394,64 @@ describe("AccountSettingsPanel", () => {
   });
 
   /* --------------------------------------------------- the tools themselves */
+
+  it("shows public native device facts without exposing transient grant material", async () => {
+    const device = {
+      ...e2eeDevice(),
+      // A hostile or accidentally widened runtime record must still not turn
+      // grant bytes into presentation data: the component selects a closed
+      // public fact list instead of serializing the object it receives.
+      deviceGrant: E2EE_GRANT_CANARY,
+    } as HostedAccountE2eeDevice;
+    hostedAccountStore.setState({
+      e2eeDevices: [device],
+      e2eeDevicesStatus: "ready",
+    });
+    const logged: Array<unknown> = [];
+    vi.spyOn(console, "log").mockImplementation((...values) => logged.push(values));
+    vi.spyOn(console, "info").mockImplementation((...values) => logged.push(values));
+    vi.spyOn(console, "warn").mockImplementation((...values) => logged.push(values));
+    vi.spyOn(console, "error").mockImplementation((...values) => logged.push(values));
+
+    await mount();
+
+    await expect.element(page.getByText("Encrypted devices")).toBeVisible();
+    await expect.element(page.getByText("Studio Mac")).toBeVisible();
+    await expect.element(page.getByText(device.identityFingerprint)).toBeVisible();
+    await expect.element(page.getByText(device.agreementFingerprint)).toBeVisible();
+    await expect.element(page.getByText(/does not protect against a malicious Hub/)).toBeVisible();
+    expect(document.body.innerHTML).not.toContain(E2EE_GRANT_CANARY);
+    expect(window.location.href).not.toContain(E2EE_GRANT_CANARY);
+    expect(await persistedStorageSnapshot()).not.toContain(E2EE_GRANT_CANARY);
+    expect(describeValue(logged)).not.toContain(E2EE_GRANT_CANARY);
+  });
+
+  it("renames and revokes an enrollment only through explicit bounded actions", async () => {
+    const device = e2eeDevice();
+    hostedAccountStore.setState({ e2eeDevices: [device], e2eeDevicesStatus: "ready" });
+    const rename = vi.spyOn(hostedHubController, "renameE2eeDevice").mockResolvedValue(committed());
+    const revoke = vi.spyOn(hostedHubController, "revokeE2eeDevice").mockResolvedValue(committed());
+
+    await mount();
+    await page.getByRole("button", { name: "Rename" }).click();
+    const name = page.getByLabelText("Device name");
+    await name.clear();
+    await name.fill("Travel Mac");
+    await page.getByRole("button", { name: "Save name" }).click();
+    expect(rename).toHaveBeenCalledWith(device.enrollmentId, {
+      expectedEnrollmentRevision: device.enrollmentRevision,
+      deviceLabel: "Travel Mac",
+    });
+
+    await page.getByRole("button", { name: "Revoke", exact: true }).click();
+    expect(revoke).not.toHaveBeenCalled();
+    await expect.element(page.getByText("Revoke this encrypted device?")).toBeVisible();
+    await page.getByRole("button", { name: "Revoke device" }).click();
+    expect(revoke).toHaveBeenCalledWith(device.enrollmentId, {
+      expectedEnrollmentRevision: device.enrollmentRevision,
+      reasonCode: "owner_requested",
+    });
+  });
 
   it("shows a bounded GitHub connection row and confirms disconnect", async () => {
     const externalIdentity = {

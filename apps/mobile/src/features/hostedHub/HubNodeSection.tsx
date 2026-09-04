@@ -238,7 +238,7 @@ export function deriveHubNodeSectionModel(input: {
             : trust === "unverified"
               ? "Not verified"
               : trust === "account-trusted"
-                ? "Account trusted"
+                ? "Encrypted · Account trusted"
                 : null;
       return {
         nodeId: node.id,

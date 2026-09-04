@@ -105,6 +105,7 @@ import {
   externalIdentityPendingErrorMessage,
   githubProviderPolicy,
 } from "../hostedHub/ExternalIdentityWeb.logic";
+import { AccountE2eeDevices } from "./AccountE2eeDevices";
 
 const timestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -516,6 +517,8 @@ export function AccountSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      <AccountE2eeDevices />
 
       {githubIdentity || githubPolicy?.link ? (
         <ExternalIdentitySection

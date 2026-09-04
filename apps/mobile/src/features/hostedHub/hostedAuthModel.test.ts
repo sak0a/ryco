@@ -482,11 +482,13 @@ describe("hosted status tone", () => {
     // docs/relay-e2ee-protocol.md §12.2: a channel that fell back is labeled
     // legacy in every user-facing surface and displays no E2EE claim. A green
     // pill reading `Legacy` is that label wearing the verified session's colour.
-    const legacy = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.Legacy);
+    const legacy = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS["Legacy connection"]);
     expect(legacy.label).toBe("Legacy");
     expect(legacy.textClassName).not.toBe("text-success");
-    const encrypted = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.Encrypted);
-    expect(encrypted.label).toBe("Encrypted");
+    const encrypted = hostedStatusTone(
+      HOSTED_CONNECTION_STATUS_INDICATORS["Encrypted · Verified locally"],
+    );
+    expect(encrypted.label).toBe("Verified");
     expect(encrypted.textClassName).toBe("text-success");
     // §13.1's release gate: an unverified E2EE channel is not a usable session.
     expect(
@@ -500,14 +502,16 @@ describe("hosted status tone", () => {
     // mapper is the repository's only tone decision, so a web chip that differs
     // from the verified one by a noun and by nothing else is §2.2's "stronger
     // claim for a weaker configuration" rendered.
-    const web = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS["Browser encrypted"]);
-    const verified = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.Encrypted);
+    const web = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS["Encrypted web"]);
+    const verified = hostedStatusTone(
+      HOSTED_CONNECTION_STATUS_INDICATORS["Encrypted · Verified locally"],
+    );
     expect(web.textClassName).not.toBe("text-success");
     expect(web.pillClassName).not.toBe(verified.pillClassName);
     expect(web).not.toEqual({ ...verified, label: web.label });
     // …and it is not the fallback's colour either: a web NX channel IS
     // encrypted, and §12.2's amber is the label for one that is not.
-    const legacy = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.Legacy);
+    const legacy = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS["Legacy connection"]);
     expect(web.pillClassName).not.toBe(legacy.pillClassName);
     expect(web.textClassName).not.toBe(legacy.textClassName);
     // Nor the tone of a state that is not a usable connection at all: the web
@@ -515,7 +519,7 @@ describe("hosted status tone", () => {
     expect(web.textClassName).not.toBe(
       hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.connecting).textClassName,
     );
-    expect(web.label).toBe(HOSTED_CONNECTION_STATUS_INDICATORS["Browser encrypted"].shortLabel);
+    expect(web.label).toBe(HOSTED_CONNECTION_STATUS_INDICATORS["Encrypted web"].shortLabel);
   });
 
   it("cannot contradict its own label, for any status in the vocabulary", () => {

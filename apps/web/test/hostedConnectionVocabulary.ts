@@ -45,12 +45,13 @@ import {
  *
  * A member added to the shared union is a compile error here until someone
  * decides which tier it belongs to — which is the whole reason
- * `HOSTED_E2EE_CHANNEL_STATUSES` exists rather than a literal array. The two
- * removed members mean a durable pin, which web holds none of (§6.3, §13.1).
+ * `HOSTED_E2EE_CHANNEL_STATUSES` exists rather than a literal array. Native
+ * verification, account enrollment, and pairing are excluded: web has neither
+ * native key custody nor a durable pin (§6.3, §13.1, §18).
  */
 export const WEB_HOSTED_E2EE_CHANNEL_STATUSES = HOSTED_E2EE_CHANNEL_STATUSES.filter(
   (status): status is WebHostedE2eeChannelStatus =>
-    status !== "verified" && status !== "unverified",
+    status !== "verified" && status !== "account-trusted" && status !== "unverified",
 );
 
 /** Every combination of the five bounded inputs. Pure — nothing is rendered. */

@@ -45,6 +45,7 @@ export type HostedConnectionGlyph =
   | "disconnected"
   | "legacy"
   | "browser-encrypted"
+  | "account-trusted"
   | "native-verified";
 
 export interface HostedConnectionStatusPresentation {
@@ -88,6 +89,9 @@ const HOSTED_CLAIM_PRESENTATIONS = {
   // then verified, rather than grouping the browser row with the one §2.2
   // forbids it from claiming.
   web: { glyph: "browser-encrypted", iconClassName: "text-sky-500" },
+  // Signed native E2EE authorized by the account Hub. Kept visually distinct
+  // from both the Web ceiling and an independently verified local pin.
+  account: { glyph: "account-trusted", iconClassName: "text-indigo-500" },
   // Native only, and unreachable from this tier by construction.
   e2ee: { glyph: "native-verified", iconClassName: "text-emerald-500" },
 } as const satisfies Record<

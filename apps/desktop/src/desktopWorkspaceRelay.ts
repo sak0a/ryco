@@ -287,7 +287,7 @@ export class DesktopWorkspaceRelayManager {
       }
       const [resolvedPreparation, ticket, headers, resolvedHandshake] = await Promise.all([
         this.#authority.prepareE2ee(target, prepared.pairingOnly),
-        target.nativeTrust === "account-trusted"
+        target.nativeTrust === "account-trusted" && !prepared.pairingOnly
           ? Promise.resolve(null)
           : this.#authority.issueTicket(target),
         this.#authority.authorizeUpgrade(target),
@@ -308,7 +308,8 @@ export class DesktopWorkspaceRelayManager {
       const relayTicket = preparation.relayTicket ?? ticket;
       if (
         relayTicket === null ||
-        (target.nativeTrust === "account-trusted") !== (preparation.relayTicket !== undefined)
+        (target.nativeTrust === "account-trusted" && !prepared.pairingOnly) !==
+          (preparation.relayTicket !== undefined)
       ) {
         throw new Error("Desktop workspace target trust state changed.");
       }

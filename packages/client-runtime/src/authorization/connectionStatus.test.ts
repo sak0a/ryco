@@ -171,7 +171,7 @@ describe("the collapsed connection indicator", () => {
     expect(HOSTED_CONNECTION_STATUS_INDICATORS["terminal failure"].shortLabel).toBe("Failed");
     expect(HOSTED_CONNECTION_STATUS_INDICATORS.online.shortLabel).toBe("Not ready");
 
-    // …and none of them may regress to that mechanism. `Browser encrypted` is
+    // …and none of them may regress to that mechanism. `Encrypted web` is
     // here for the same reason and not as a fourth example: §2.2's web row is
     // the one row whose message is its caveat, and its leading token is the
     // tier noun — a chip reading `Browser` sits in the same neutral register as
@@ -180,7 +180,7 @@ describe("the collapsed connection indicator", () => {
       "Authorization removed",
       "Delivery unknown",
       "terminal failure",
-      "Browser encrypted",
+      "Encrypted web",
     ] satisfies ReadonlyArray<HostedConnectionStatusText>) {
       expect(
         HOSTED_CONNECTION_STATUS_INDICATORS[text].shortLabel,
@@ -240,17 +240,17 @@ describe("the §4.4 channel state folded into the indicator", () => {
     const ready = { browserStatus: "current", sessionStatus: "ready" } as const;
     const online = { selectionStatus: "online", transportStatus: "online" } as const;
     expect(deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "verified" })).toBe(
-      "Encrypted",
+      "Encrypted · Verified locally",
     );
     expect(deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "legacy" })).toBe(
-      "Legacy",
+      "Legacy connection",
     );
     expect(
       deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "unverified" }),
     ).toBe("Not verified");
     expect(
       deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "web-unsigned" }),
-    ).toBe("Browser encrypted");
+    ).toBe("Encrypted web");
     expect(
       deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "negotiating" }),
     ).toBe("Securing");
@@ -309,12 +309,14 @@ describe("the §4.4 channel state folded into the indicator", () => {
   });
 
   it("gives the E2EE-bearing status a label that says so, and no other status one", () => {
-    expect(HOSTED_CONNECTION_STATUS_INDICATORS.Encrypted.guarantee).toBe("e2ee");
-    expect(HOSTED_CONNECTION_STATUS_INDICATORS.Legacy.guarantee).toBe("legacy");
+    expect(HOSTED_CONNECTION_STATUS_INDICATORS["Encrypted · Verified locally"].guarantee).toBe(
+      "e2ee",
+    );
+    expect(HOSTED_CONNECTION_STATUS_INDICATORS["Legacy connection"].guarantee).toBe("legacy");
     const claiming = HOSTED_CONNECTION_STATUS_TEXTS.filter(
       (text) => HOSTED_CONNECTION_STATUS_INDICATORS[text].guarantee === "e2ee",
     );
-    expect(claiming).toEqual(["Encrypted"]);
+    expect(claiming).toEqual(["Encrypted · Verified locally"]);
   });
 });
 
@@ -339,7 +341,7 @@ describe("the web NX row (§2.2, §2.3, §13.1)", () => {
 
   it("is spelled differently from the verified row and from the release-gated one", () => {
     const text = deriveHostedConnectionStatusText(webReady);
-    expect(text).toBe("Browser encrypted");
+    expect(text).toBe("Encrypted web");
     expect(text).not.toBe(
       deriveHostedConnectionStatusText({ ...webReady, e2eeStatus: "verified" }),
     );
@@ -351,15 +353,19 @@ describe("the web NX row (§2.2, §2.3, §13.1)", () => {
     // it must not be the neutral tier noun either — at collapsed size that word
     // is the whole security signal, so on the one row that requires a caveat it
     // has to carry one.
-    const { shortLabel } = HOSTED_CONNECTION_STATUS_INDICATORS["Browser encrypted"];
-    expect(shortLabel).toBe("Unsigned web");
-    expect(shortLabel).not.toBe("Browser encrypted".split(" ")[0]);
-    expect(HOSTED_CONNECTION_STATUS_INDICATORS.Encrypted.shortLabel.startsWith(shortLabel)).toBe(
-      false,
-    );
-    expect(shortLabel.startsWith(HOSTED_CONNECTION_STATUS_INDICATORS.Encrypted.shortLabel)).toBe(
-      false,
-    );
+    const { shortLabel } = HOSTED_CONNECTION_STATUS_INDICATORS["Encrypted web"];
+    expect(shortLabel).toBe("Web E2EE");
+    expect(shortLabel).not.toBe("Encrypted web".split(" ")[0]);
+    expect(
+      HOSTED_CONNECTION_STATUS_INDICATORS["Encrypted · Verified locally"].shortLabel.startsWith(
+        shortLabel,
+      ),
+    ).toBe(false);
+    expect(
+      shortLabel.startsWith(
+        HOSTED_CONNECTION_STATUS_INDICATORS["Encrypted · Verified locally"].shortLabel,
+      ),
+    ).toBe(false);
   });
 
   it("claims the web row and never the E2EE one", () => {
@@ -375,12 +381,12 @@ describe("the web NX row (§2.2, §2.3, §13.1)", () => {
       claiming.add(text);
       expect(value.e2eeStatus).toBe("verified");
     }
-    expect([...claiming]).toEqual(["Encrypted"]);
+    expect([...claiming]).toEqual(["Encrypted · Verified locally"]);
     expect(
       HOSTED_CONNECTION_STATUS_TEXTS.filter(
         (text) => HOSTED_CONNECTION_STATUS_INDICATORS[text].guarantee === "web",
       ),
-    ).toEqual(["Browser encrypted"]);
+    ).toEqual(["Encrypted web"]);
   });
 
   it("is a USABLE session, which is why it could not reuse `Not verified`", () => {
@@ -411,7 +417,7 @@ describe("the web NX row (§2.2, §2.3, §13.1)", () => {
     // the shared side of the change.
     for (const value of everyHostedConnectionStatusInput()) {
       if (value.e2eeStatus === "web-unsigned") continue;
-      expect(deriveHostedConnectionStatusText(value)).not.toBe("Browser encrypted");
+      expect(deriveHostedConnectionStatusText(value)).not.toBe("Encrypted web");
       expect(deriveHostedConnectionStatusIndicator(value).guarantee).not.toBe("web");
       if (value.e2eeStatus !== "unavailable") continue;
       const { e2eeStatus: _dropped, ...withoutE2ee } = value;

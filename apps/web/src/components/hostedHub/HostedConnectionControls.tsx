@@ -1,5 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
+  BadgeCheckIcon,
   ChevronDownIcon,
   LayoutGridIcon,
   LogOutIcon,
@@ -55,6 +56,7 @@ const HOSTED_CONNECTION_GLYPHS: Record<HostedConnectionGlyph, LucideIcon> = {
   disconnected: WifiOffIcon,
   legacy: ShieldOffIcon,
   "browser-encrypted": ShieldIcon,
+  "account-trusted": BadgeCheckIcon,
   "native-verified": ShieldCheckIcon,
 };
 

@@ -794,8 +794,8 @@ export const CHANNEL_LABELS: Record<E2eeChannelClaim, string> = {
   "pairing-only": "Not verified",
   // §12.2: "MUST label the channel legacy in every user-facing surface and
   // diagnostic". One word, and both legacy claims carry it.
-  legacy: "Legacy",
-  "legacy-no-custody": "Legacy",
+  legacy: "Legacy connection",
+  "legacy-no-custody": "Legacy connection",
   none: "No connection",
 };
 

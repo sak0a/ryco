@@ -786,7 +786,9 @@ async function ensureDesktopWorkspaceRelayManager(): Promise<DesktopWorkspaceRel
         );
         const eligible = pairingOnly
           ? machine?.presence.online === true &&
-            (machine.nativeTrust === "unverified" || machine.nativeTrust === "unknown") &&
+            (machine.nativeTrust === "unverified" ||
+              machine.nativeTrust === "unknown" ||
+              machine.nativeTrust === "account-trusted") &&
             machine.revokedAt === null &&
             !machine.removed
           : machine?.canConnect === true &&
@@ -810,7 +812,9 @@ async function ensureDesktopWorkspaceRelayManager(): Promise<DesktopWorkspaceRel
           nodeId: target.nodeId,
           allowPairing: pairingOnly,
           expectedTrust: pairingOnly
-            ? "unverified"
+            ? target.nativeTrust === "account-trusted"
+              ? "account-trusted"
+              : "unverified"
             : target.nativeTrust === "account-trusted"
               ? "account-trusted"
               : "verified",

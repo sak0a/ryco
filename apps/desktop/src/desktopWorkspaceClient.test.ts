@@ -362,7 +362,7 @@ describe("DesktopWorkspaceClient", () => {
     ).resolves.toEqual({ handle: "verification-handle-1" });
   });
 
-  it("starts verification only for an online unverified machine", async () => {
+  it("starts verification for online unverified or account-trusted machines", async () => {
     const nodes = [node(1), node(2), node(3, { online: false })];
     const begin = vi.fn(async () => ({ handle: "verification-handle-1" }));
     const { client } = fixture({
@@ -394,6 +394,29 @@ describe("DesktopWorkspaceClient", () => {
         environmentId: nodes[1]!.environmentId,
       }),
     ).resolves.toEqual({ handle: "verification-handle-1" });
-    expect(begin).toHaveBeenCalledOnce();
+    const accountReady = fixture({
+      nodes,
+      trustedNodeIds: new Set([nodes[0]!.id]),
+      identityStatus: {
+        status: "ready",
+        accountId: "account-a",
+        nodeId: nodes[0]!.id,
+        localNodeHandle: "local-handle",
+        accountE2eeReady: true,
+      },
+      verification: {
+        begin,
+        cancel: vi.fn(async () => undefined),
+        verifyApproval: vi.fn(async () => undefined),
+      },
+    });
+    await accountReady.client.resume();
+    await expect(
+      accountReady.client.beginVerification({
+        nodeId: nodes[1]!.id,
+        environmentId: nodes[1]!.environmentId,
+      }),
+    ).resolves.toEqual({ handle: "verification-handle-1" });
+    expect(begin).toHaveBeenCalledTimes(2);
   });
 });

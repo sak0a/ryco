@@ -118,6 +118,48 @@ describe("Desktop workspace relay manager", () => {
     });
   });
 
+  it("uses a pairing ticket when independently verifying an account-trusted target", async () => {
+    const authority = unavailableAuthority();
+    const environmentId = EnvironmentId.make("environment-1");
+    vi.mocked(authority.resolveTarget).mockResolvedValue({
+      accountId: `acct_${"a".repeat(22)}`,
+      nodeId: `node_${"n".repeat(22)}`,
+      environmentId,
+      relayUrl: "wss://hub.example.test/v1/relay/client",
+      nativeTrust: "account-trusted",
+    });
+    vi.mocked(authority.prepareE2ee).mockResolvedValue({
+      kind: "native",
+      pairingOnly: true,
+      attemptHandle: "a".repeat(43),
+      suiteId: 1,
+      credentials: { tier: "native" },
+    } as never);
+    vi.mocked(authority.issueTicket).mockResolvedValue({
+      ticket: "pairing-ticket",
+      expiresAt: Date.now() + 60_000,
+    });
+    vi.mocked(authority.authorizeUpgrade).mockResolvedValue({});
+    vi.mocked(authority.handshake).mockResolvedValue({} as never);
+    const socketFactory = vi.fn(() => ({ send: vi.fn(), close: vi.fn() }));
+    const manager = new DesktopWorkspaceRelayManager({
+      authority,
+      emit: vi.fn(),
+      socketFactory,
+    });
+
+    await manager.activate(manager.prepareVerification(environmentId));
+
+    expect(authority.prepareE2ee).toHaveBeenCalledWith(
+      expect.objectContaining({ nativeTrust: "account-trusted" }),
+      true,
+    );
+    expect(authority.issueTicket).toHaveBeenCalledOnce();
+    expect(socketFactory).toHaveBeenCalledWith(
+      expect.objectContaining({ ticket: "pairing-ticket" }),
+    );
+  });
+
   it("invalidates every native workspace when an account enrollment is revoked", async () => {
     const onAccountAuthorizationRevoked = vi.fn();
     const authority = {

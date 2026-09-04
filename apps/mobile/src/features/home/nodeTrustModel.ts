@@ -18,7 +18,7 @@
  * pins the string against drift in either direction.
  */
 export const NODE_TRUST_UNVERIFIED_LABEL = "Not verified";
-export const NODE_TRUST_ACCOUNT_LABEL = "Account trusted";
+export const NODE_TRUST_ACCOUNT_LABEL = "Encrypted · Account trusted";
 
 export type NodeTrust = "verified" | "account-trusted" | "unverified";
 

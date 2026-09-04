@@ -549,7 +549,7 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
   it("labels a fallback channel legacy and makes no E2EE claim for it", () => {
     const view = securityView(session({ channel: "legacy" }));
     expect(view.claim).toBe("legacy");
-    expect(view.channelLabel).toBe("Legacy");
+    expect(view.channelLabel).toBe("Legacy connection");
     expect(view.channelMessage).toContain("legacy");
     expect(view.channelMessage.toLowerCase()).toContain("not encrypting");
   });
@@ -646,7 +646,7 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
     const view = securityView(session({ channel: "legacy", keyCustodyUnavailable: true }));
     expect(view.claim).toBe("legacy-no-custody");
     // §12.2's word is still there…
-    expect(view.channelLabel).toBe("Legacy");
+    expect(view.channelLabel).toBe("Legacy connection");
     expect(view.channelMessage.toLowerCase()).toContain("not encrypting");
     // …and the remedy that cannot work is not.
     expect(view.channelMessage).toBe(E2EE_NO_KEY_CUSTODY_MESSAGE);

@@ -354,7 +354,9 @@ export class DesktopWorkspaceClient {
     if (!exact) throw new Error("Desktop workspace machine does not match.");
     if (
       !exact.presence.online ||
-      (exact.nativeTrust !== "unverified" && exact.nativeTrust !== "unknown")
+      (exact.nativeTrust !== "unverified" &&
+        exact.nativeTrust !== "unknown" &&
+        exact.nativeTrust !== "account-trusted")
     ) {
       throw new Error("Desktop workspace machine is not eligible for verification.");
     }

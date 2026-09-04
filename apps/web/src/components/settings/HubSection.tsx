@@ -779,7 +779,9 @@ export function HubSection({
                   <div className="flex flex-wrap justify-end gap-1.5">
                     {machine.nodeId &&
                     machine.online &&
-                    (machine.nativeTrust === "unverified" || machine.nativeTrust === "unknown") ? (
+                    (machine.nativeTrust === "unverified" ||
+                      machine.nativeTrust === "unknown" ||
+                      machine.nativeTrust === "account-trusted") ? (
                       <Button
                         size="xs"
                         variant="outline"
@@ -790,9 +792,14 @@ export function HubSection({
                           });
                         }}
                       >
-                        Verify
+                        {machine.nativeTrust === "account-trusted"
+                          ? "Verify independently"
+                          : "Verify"}
                       </Button>
-                    ) : machine.nativeTrust === "verified" && machine.online ? (
+                    ) : null}
+                    {(machine.nativeTrust === "verified" ||
+                      machine.nativeTrust === "account-trusted") &&
+                    machine.online ? (
                       machine.connectionState === "connected" ? (
                         <>
                           <Button
@@ -825,13 +832,17 @@ export function HubSection({
               >
                 {machine.nativeTrust === "verified"
                   ? machine.online
-                    ? `Verified · ${machine.connectionState === "connected" ? "Connected" : "Online"}`
-                    : "Verified · Offline"
-                  : machine.nativeTrust === "identity-conflict"
-                    ? "Identity changed · Locked"
-                    : machine.online
-                      ? "Needs verification"
-                      : "Needs verification · Offline"}
+                    ? `Encrypted · Verified locally · ${machine.connectionState === "connected" ? "Connected" : "Online"}`
+                    : "Encrypted · Verified locally · Offline"
+                  : machine.nativeTrust === "account-trusted"
+                    ? machine.online
+                      ? `Encrypted · Account trusted · ${machine.connectionState === "connected" ? "Connected" : "Online"}`
+                      : "Encrypted · Account trusted · Offline"
+                    : machine.nativeTrust === "identity-conflict"
+                      ? "Identity changed · Locked"
+                      : machine.online
+                        ? "Needs verification"
+                        : "Needs verification · Offline"}
               </DataListItem>
             ))}
           </DataList>

@@ -39,7 +39,13 @@ export interface InboxSidebarEnvironment {
   readonly stale: boolean;
   readonly staleDetail?: string;
   readonly role: "viewer" | "operator" | "owner" | "client" | null;
-  readonly trust: "not-required" | "unknown" | "unverified" | "verified" | "identity-conflict";
+  readonly trust:
+    | "not-required"
+    | "unknown"
+    | "unverified"
+    | "account-trusted"
+    | "verified"
+    | "identity-conflict";
   readonly deliveryUnknown: boolean;
   readonly threadSettlementSupported: boolean;
   readonly mutationReady: boolean;
@@ -64,7 +70,7 @@ export interface InboxSidebarRow {
   readonly branchLabel: string | null;
   readonly changeRequestLabel: string | null;
   readonly changeRequestStateLabel: string | null;
-  readonly trustLabel: "Not verified" | "Identity conflict" | null;
+  readonly trustLabel: "Not verified" | "Encrypted · Account trusted" | "Identity conflict" | null;
   readonly roleLabel: "Viewer" | null;
   readonly settled: boolean;
   readonly settlementActionEnabled: boolean;
@@ -359,9 +365,11 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
       trustLabel:
         environment?.trust === "unverified"
           ? "Not verified"
-          : environment?.trust === "identity-conflict"
-            ? "Identity conflict"
-            : null,
+          : environment?.trust === "account-trusted"
+            ? "Encrypted · Account trusted"
+            : environment?.trust === "identity-conflict"
+              ? "Identity conflict"
+              : null,
       roleLabel: environment?.role === "viewer" ? "Viewer" : null,
       settled,
       settlementActionEnabled:

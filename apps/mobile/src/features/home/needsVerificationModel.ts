@@ -23,7 +23,7 @@ function trustLabel(trust: WorkspaceNativeTrustState): string {
     case "unverified":
       return "Not verified";
     case "account-trusted":
-      return "Account trusted";
+      return "Encrypted · Account trusted";
     case "verified":
     case "not-required":
       return "Verified";

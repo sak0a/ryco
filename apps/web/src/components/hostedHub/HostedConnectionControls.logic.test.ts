@@ -78,7 +78,7 @@ describe("§2.2 the presentation is a pure function of the claim", () => {
   it("is decided by the claim alone wherever a claim exists", () => {
     // Connectedness may not move a claimed state's presentation: a `legacy`
     // channel is a usable session, and the whole defect was reading it as one.
-    for (const guarantee of ["legacy", "web", "e2ee"] as const) {
+    for (const guarantee of ["legacy", "web", "account", "e2ee"] as const) {
       expect(hostedConnectionStatusPresentation(indicator(guarantee, true)), guarantee).toEqual(
         hostedConnectionStatusPresentation(indicator(guarantee, false)),
       );
@@ -125,21 +125,21 @@ describe("§2.2 no stronger claim for a weaker configuration", () => {
   it("gives every claim its own glyph and its own colour", () => {
     // Text and icon in every state, never colour alone — and never one glyph
     // standing in for two claims.
-    const presentations = (["none", "legacy", "web", "e2ee"] as const).map((guarantee) =>
+    const presentations = (["none", "legacy", "web", "account", "e2ee"] as const).map((guarantee) =>
       hostedConnectionStatusPresentation(indicator(guarantee, true)),
     );
     expect(new Set(presentations.map((entry) => entry.glyph)).size).toBe(presentations.length);
     // Colours may repeat where the glyphs already separate the rows — the
     // disconnected amber and the legacy amber are both "something is wrong" —
     // but the three states that ASSERT something must not share one.
-    const claimedTones = (["legacy", "web", "e2ee"] as const).map(
+    const claimedTones = (["legacy", "web", "account", "e2ee"] as const).map(
       (guarantee) => hostedConnectionStatusPresentation(indicator(guarantee, true)).iconClassName,
     );
     expect(new Set(claimedTones).size).toBe(claimedTones.length);
   });
 
   it("uses no hardcoded colour values", () => {
-    for (const guarantee of ["none", "legacy", "web", "e2ee"] as const) {
+    for (const guarantee of ["none", "legacy", "web", "account", "e2ee"] as const) {
       for (const connected of [true, false]) {
         const { iconClassName } = hostedConnectionStatusPresentation(
           indicator(guarantee, connected),
