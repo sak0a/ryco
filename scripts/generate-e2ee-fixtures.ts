@@ -325,12 +325,12 @@ interface FixtureFamily {
 // §16.4 obliges a named subset of the families to run in the web browser test
 // suite as well as the Node gate, and the COMPLETE corpus to pass on physical
 // devices on both mobile platforms before the native client ships E2EE support.
-// Neither run exists in this repository yet. That absence is a deferral exactly
-// like a missing case is, so it is DECLARED — once at the top of the manifest and
-// again in each family §16.4 names — rather than left as an unmentioned gap for a
-// reader to infer. A vector that produces different bytes on any supported
-// runtime is a release-blocking defect (§16.4); nothing here has yet shown that
-// none does.
+// The Chromium run is wired under `apps/web/src/components/hostedHub/` and its
+// executable census lives in `relayE2eeCorpusLiveness.ts`. The physical-device
+// run does not exist in this repository yet. That remaining absence is a
+// deferral exactly like a missing case is, so it is DECLARED — once at the top
+// of the manifest and again in each family §16.4 names — rather than left as an
+// unmentioned gap for a reader to infer.
 
 /** The families §16.4 names, with the part of each it names. */
 const CROSS_RUNTIME_SCOPES: ReadonlyMap<number, string> = new Map([
@@ -351,7 +351,7 @@ function crossRuntimeDeferral(family: number): string {
   if (scope === undefined) {
     throw new Error(`Family F${String(family)} is not named by §16.4.`);
   }
-  return `§16.4 cross-runtime equality: ${scope} MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra.`;
+  return `§16.4 cross-runtime equality: ${scope} now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate.`;
 }
 
 /** §16.2: byte strings are `{"$bytes": "<lowercase hex>"}`. */
@@ -8870,9 +8870,9 @@ async function buildFamily10(): Promise<FixtureFamily> {
     summary:
       "The NODE half of §16.3 F10. Every §4.4 node transition row N1–N17, with its state, its input class and payload bytes, the guards that select it, and its expected ACTION and NEXT STATE — including rows N15–N17, whose input is `channel.accept` and whose §12.5 occurrence accounting §16.3 states field by field, and the §8.9 deadline under each policy. Plus the §11.2 partition of the legacy-lock injection rows: an envelope after the lock is P5, a correctly sized and correctly directed negotiation record after it is P24 — proved to be neither over-bound nor misdirected, and therefore not P3 — and an unknown or absent first byte is P6, each FATAL-PRE because no session keys exist in `legacy`, with two P3 contrast cases fixing the boundary of that partition. The node rows are replayed against the real runtime by apps/server/src/hubConnector/relayE2eeNodeCorpus.test.ts.",
     deferred: [
-      "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state. No client mode machine exists in this repository, so no client row has an implementation to derive an expectation from. The node rows N1–N17 ARE emitted above and are held to the real `NodeE2eeChannelSession` by the node-side consuming test. Owned by the client phase.",
-      "The client rows' §12.1.1 selection classification, the `(hubOrigin, accountId)` scope, and the device-level `anyNodeVerified(hubOrigin)` marker, together with the account-scope-change cases that discharge the §12.1.1 provenance rule (K24/K23 versus K13). These need the §13.1 durable pin store and the §12.1.1 classifier, neither of which is landed. Owned by the client phase.",
-      "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — the stalled accept (K15), the buffered keepalive round trip, and the send-buffer overflow including the connection-wide multi-channel accounting. The buffering and flushing behavior they assert belongs to a client mode machine and to the client's relay engine, neither of which exists here; the §8.9 node deadline under each policy IS emitted above. Owned by the client phase.",
+      "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state — is not yet transcribed into this F10 fixture. The landed client mode machine is exercised by apps/web and packages/client-runtime tests, while the node rows N1–N17 ARE emitted above and held to the real `NodeE2eeChannelSession`. Owned by the F10 corpus expansion.",
+      "The client rows' §12.1.1 selection classification, `(hubOrigin, accountId)` scope, device-level `anyNodeVerified(hubOrigin)` marker, and account-scope-change cases (K24/K23 versus K13) are implemented and covered in client-runtime/Web/native tests but are not yet transcribed into this F10 fixture. Owned by the F10 corpus expansion.",
+      "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — stalled accept K15, buffered keepalive round trip, and send-buffer overflow including connection-wide multi-channel accounting — are implemented and covered by client-runtime/Web tests but are not yet transcribed into this F10 fixture; the §8.9 node deadline under each policy IS emitted above. Owned by the F10 corpus expansion.",
       crossRuntimeDeferral(10),
     ],
     testKeyMaterial: HANDSHAKE_TEST_KEY_MATERIAL,
@@ -10188,7 +10188,7 @@ function buildFamily19(): FixtureFamily {
       "Canonical Hub device-grant claims, domain-separated Ed25519 verification, hard pre-decode bounds, complete authenticated caller bindings, clock/key overlap, replay, revocation, authority intersection, and a deterministic full suite-0x02 IK trace independently composed through the reference Noise implementation.",
     deferred: [
       "§16.3 F19 relay-minor, connector-generation, statement-acknowledgement, retained-prekey, in-flight revocation, lease, durable-write, and four-mode policy vectors are deferred. Owned by the node and Hub lifecycle implementations.",
-      "§16.3 F19 Web-isolation vectors are deferred. Owned by the Web isolation implementation.",
+      "§16.3 F19 carries no standalone Web-isolation cases for suite selection, grant-free ticket requests, mixed-response rejection, and service-worker exclusion. Those behaviors are implemented and covered by apps/web browser and API tests, including the exact valid F19 grant as hostile relay input, but remain untranscribed into this family. Owned by the F19 corpus expansion.",
       crossRuntimeDeferral(19),
     ],
     testKeyMaterial: {
@@ -10734,9 +10734,9 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
       section: "16.4",
       requirement:
         "Every family runs under the repository's Node test gate. The families named below MUST ALSO run in the web browser test suite, and before the native client ships E2EE support the COMPLETE corpus MUST additionally pass on physical devices on both mobile platforms — an explicit acceptance gate of the native rollout, not an optional extra. A vector that produces different bytes on any supported runtime is a release-blocking defect.",
-      status: "declared-deferred",
+      status: "browser-wired-physical-deferred",
       browserRun: {
-        state: "not-wired",
+        state: "wired",
         families: [...CROSS_RUNTIME_SCOPES.keys()].toSorted((left, right) => left - right),
         scopes: Object.fromEntries(
           [...CROSS_RUNTIME_SCOPES.entries()]
@@ -10744,8 +10744,8 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
             .map(([family, scope]) => [`F${String(family)}`, scope]),
         ),
         reason:
-          "This repository has no browser test gate over packages/shared, so no vector in these families has yet been run anywhere but Node.",
-        ownedBy: "the web phase",
+          "The committed fixtures are loaded by apps/web/test/e2eeCorpus.ts and driven in Chromium by the E2ee*.browser.tsx consumers declared in packages/shared/src/relayE2eeCorpusLiveness.ts; the browser census fails when a family, scope, or consumer disappears.",
+        ownedBy: "apps/web's Chromium vector gate",
       },
       physicalDeviceRun: {
         state: "not-wired",

@@ -144,6 +144,7 @@ import {
   prepareRelayMessage,
 } from "./relayMessageChunks.ts";
 import {
+  E2EE_BROWSER_CROSS_RUNTIME_COVERAGE,
   E2EE_CORPUS_CASE_LIVENESS,
   E2EE_CORPUS_DELEGATED_LEAF_READS,
   E2eeCorpusLivenessRecorder,
@@ -6039,7 +6040,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     family: 19,
     section: "16.3 F19 (§18.1, §18.9)",
     spec: "Web-only negative cases proving suite selection/failure, grant-free browser tickets, mixed-response rejection, and no grant canary in decoder, state, DOM, service-worker cache, or relay send",
-    declared: /^§16\.3 F19 Web-isolation vectors are deferred/,
+    declared: /^§16\.3 F19 carries no standalone Web-isolation cases/,
   },
   {
     id: "f19-cross-runtime",
@@ -6307,12 +6308,12 @@ describe("§16.3 coverage ledger", () => {
   });
 
   it("declares the §16.4 cross-runtime run instead of leaving it unmentioned", () => {
-    // §16.4 is not a missing case — every vector exists — but a missing RUN, and
-    // an undeclared missing run reads exactly like a discharged obligation.
+    // §16.4 is not a missing case — every vector exists. The Chromium half is
+    // executable; the physical-device half remains explicitly deferred.
     const crossRuntime = MANIFEST.crossRuntime;
     expect(crossRuntime.section).toBe("16.4");
-    expect(crossRuntime.status).toBe("declared-deferred");
-    expect(crossRuntime.browserRun.state).toBe("not-wired");
+    expect(crossRuntime.status).toBe("browser-wired-physical-deferred");
+    expect(crossRuntime.browserRun.state).toBe("wired");
     expect(crossRuntime.physicalDeviceRun.state).toBe("not-wired");
     expect(crossRuntime.physicalDeviceRun.families).toBe("all");
     expect(crossRuntime.browserRun.ownedBy.length).toBeGreaterThan(0);
@@ -6324,8 +6325,22 @@ describe("§16.3 coverage ledger", () => {
     expect(Object.keys(crossRuntime.browserRun.scopes).toSorted()).toEqual(
       crossRuntime.browserRun.families.map((family) => `F${String(family)}`).toSorted(),
     );
-    // …and each of them repeats the declaration in its own file, so the family a
-    // reader opens tells them the run has not happened.
+    expect(crossRuntime.browserRun.families).toEqual(
+      E2EE_BROWSER_CROSS_RUNTIME_COVERAGE.map((entry) => entry.family),
+    );
+    expect(crossRuntime.browserRun.scopes).toEqual(
+      Object.fromEntries(
+        E2EE_BROWSER_CROSS_RUNTIME_COVERAGE.map((entry) => [
+          `F${String(entry.family)}`,
+          entry.scope,
+        ]),
+      ),
+    );
+    for (const coverage of E2EE_BROWSER_CROSS_RUNTIME_COVERAGE) {
+      expect(coverage.consumers.length, coverage.fixtureFile).toBeGreaterThan(0);
+    }
+    // …and each named family repeats both the completed browser run and the
+    // remaining physical-device deferral in its own file.
     for (const family of crossRuntime.browserRun.families) {
       const declarations = (familyByNumber(family).deferred ?? []).filter((reason) =>
         CROSS_RUNTIME.test(reason),
@@ -6333,6 +6348,12 @@ describe("§16.3 coverage ledger", () => {
       expect(declarations.length, `F${String(family)}`).toBe(1);
       expect(declarations[0], `F${String(family)}`).toContain(
         crossRuntime.browserRun.scopes[`F${String(family)}`]!,
+      );
+      expect(declarations[0], `F${String(family)}`).toContain(
+        "now runs against the committed fixture",
+      );
+      expect(declarations[0], `F${String(family)}`).toContain(
+        "physical-device run has not occurred",
       );
     }
     // And no family that §16.4 does NOT name carries the declaration.

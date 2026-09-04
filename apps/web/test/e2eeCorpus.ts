@@ -20,9 +20,11 @@ import f04Raw from "../../../packages/shared/fixtures/e2ee/v1/f04-prekey-certifi
 import f06Raw from "../../../packages/shared/fixtures/e2ee/v1/f06-ik-handshake.json?raw";
 import f07Raw from "../../../packages/shared/fixtures/e2ee/v1/f07-nx-handshake.json?raw";
 import f08Raw from "../../../packages/shared/fixtures/e2ee/v1/f08-record-protection.json?raw";
+import f10Raw from "../../../packages/shared/fixtures/e2ee/v1/f10-mode-machine.json?raw";
 import f14Raw from "../../../packages/shared/fixtures/e2ee/v1/f14-verification-display.json?raw";
 import f16Raw from "../../../packages/shared/fixtures/e2ee/v1/f16-authorization-context.json?raw";
 import f17Raw from "../../../packages/shared/fixtures/e2ee/v1/f17-key-material-validation.json?raw";
+import f19Raw from "../../../packages/shared/fixtures/e2ee/v1/f19-account-device-grant.json?raw";
 
 // THE §16.3 CORPUS, READ THE SAME WAY IN BOTH RUNTIMES.
 //
@@ -61,9 +63,11 @@ export const F04: E2eeFixtureFamily = JSON.parse(f04Raw) as E2eeFixtureFamily;
 export const F06: E2eeFixtureFamily = JSON.parse(f06Raw) as E2eeFixtureFamily;
 export const F07: E2eeFixtureFamily = JSON.parse(f07Raw) as E2eeFixtureFamily;
 export const F08: E2eeFixtureFamily = JSON.parse(f08Raw) as E2eeFixtureFamily;
+export const F10: E2eeFixtureFamily = JSON.parse(f10Raw) as E2eeFixtureFamily;
 export const F14: E2eeFixtureFamily = JSON.parse(f14Raw) as E2eeFixtureFamily;
 export const F16: E2eeFixtureFamily = JSON.parse(f16Raw) as E2eeFixtureFamily;
 export const F17: E2eeFixtureFamily = JSON.parse(f17Raw) as E2eeFixtureFamily;
+export const F19: E2eeFixtureFamily = JSON.parse(f19Raw) as E2eeFixtureFamily;
 
 /** §16.2: byte strings are `{"$bytes": "<lowercase hex>"}` and nothing else. */
 export function fixtureBytes(value: unknown): Uint8Array {
