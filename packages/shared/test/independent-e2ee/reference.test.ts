@@ -115,6 +115,30 @@ describe("import-isolated straight-line E2EE reference", () => {
     }
   });
 
+  it("independently replays the account-enrolled suite-0x02 IK trace", () => {
+    const fixture = family("f19-account-device-grant.json");
+    const entry = fixtureCase(fixture, "valid-account-enrolled-native-device-grant");
+    const material = record(fixture.testKeyMaterial.handshake);
+    const result = composeIndependentNoise({
+      pattern: "IK",
+      prologue: bytes(entry.expected.prologue),
+      initiatorStaticSecret: bytes(material.testOnlyClientAgreementSecretKey),
+      initiatorEphemeralSecret: bytes(material.testOnlyClientEphemeralSecretKey),
+      responderStaticSecret: bytes(material.testOnlyNodeAgreementSecretKey),
+      responderEphemeralSecret: bytes(material.testOnlyNodeEphemeralSecretKey),
+      message1Payload: bytes(entry.expected.message1PayloadPlaintext),
+      message2Payload: bytes(entry.expected.message2PayloadPlaintext),
+    });
+
+    expectBytes(result.message1, entry.expected.noiseMessage1);
+    expectBytes(result.message2, entry.expected.noiseMessage2);
+    expectBytes(result.handshakeHash, entry.expected.noiseHandshakeHash);
+    expectBytes(result.chainingKeyFinal, entry.expected.noiseChainingKeyFinal);
+    expectBytes(result.exporterSecret, entry.expected.exporterSecret);
+    expectBytes(result.splitFirst, entry.expected.epochSecretC2N);
+    expectBytes(result.splitSecond, entry.expected.epochSecretN2C);
+  });
+
   it("re-derives both F9 schedules and erases each owned predecessor", () => {
     const fixture = family("f09-rekey-boundaries.json");
     for (const name of ["epoch-key-schedule-client-to-node", "epoch-key-schedule-node-to-client"]) {

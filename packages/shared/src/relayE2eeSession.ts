@@ -29,7 +29,6 @@ import {
   E2EE_INNER_TYPE_CLOSE_ACK,
   E2EE_INNER_TYPE_ERROR,
   E2EE_INNER_TYPE_RPC,
-  E2EE_SUITE_25519_CHACHAPOLY_SHA256,
   decodeE2eeEnvelope,
   decodeE2eeInnerRecord,
   e2eeAeadNonceFromHeader,
@@ -401,7 +400,7 @@ export type E2eeRecordAeadFactory = (input: {
 }) => E2eeRecordAead;
 
 const suiteRecordAead: E2eeRecordAeadFactory = ({ version, suite, key }) => {
-  if (version !== E2EE_PROTOCOL_VERSION || suite !== E2EE_SUITE_25519_CHACHAPOLY_SHA256) {
+  if (version !== E2EE_PROTOCOL_VERSION || !isE2eeSuiteId(suite)) {
     throw new TypeError("Relay E2EE record AEAD selected for an unregistered version or suite.");
   }
   requireSecret(key, "AEAD key");

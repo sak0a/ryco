@@ -35,6 +35,7 @@ import {
   E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT,
   E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
   classifyPostStripPayload,
   decodeE2eeEnvelope,
   decodeE2eeInnerRecord,
@@ -133,6 +134,12 @@ const SPEC_REGISTRIES: ReadonlyArray<SpecRegistryRow> = [
     "25519 / ChaChaPoly / SHA-256",
     () => E2EE_SUITE_25519_CHACHAPOLY_SHA256,
     0x01,
+  ],
+  [
+    "§18 suite registry",
+    "account-grant IK / 25519 / ChaChaPoly / SHA-256",
+    () => E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+    0x02,
   ],
   ["§3.4 inner-record types", "RPC", () => E2EE_INNER_TYPE_RPC, 0x01],
   ["§3.4 inner-record types", "E2EEClose", () => E2EE_INNER_TYPE_CLOSE, 0x02],
@@ -402,13 +409,13 @@ describe("envelope codec (§3.3)", () => {
     // for a version it never validated.
     const both = envelope();
     both[1] = 0x02;
-    both[2] = 0x02;
+    both[2] = 0x03;
     expect(decodeE2eeEnvelope(both)).toEqual({ kind: "error", reason: "unsupported_version" });
 
     // With only the suite reserved the later check is the one that fires, so
     // the ordering above is a real ordering and not a missing suite check.
     const suiteOnly = envelope();
-    suiteOnly[2] = 0x02;
+    suiteOnly[2] = 0x03;
     expect(decodeE2eeEnvelope(suiteOnly)).toEqual({ kind: "error", reason: "unsupported_suite" });
   });
 
@@ -427,7 +434,7 @@ describe("envelope codec (§3.3)", () => {
       reason: "unsupported_version",
     });
 
-    for (const suite of [0x00, 0x02, 0xff]) {
+    for (const suite of [0x00, 0x03, 0xff]) {
       const badSuite = envelope();
       badSuite[2] = suite;
       expect(decodeE2eeEnvelope(badSuite)).toEqual({

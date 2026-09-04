@@ -36,6 +36,7 @@ import {
   encodeE2eeIkHelloPayload,
   encodeE2eeServerAccept,
   encodeE2eeServerAcceptPayload,
+  selectE2eeSuite,
   type E2eeAdvertisedChannelMaterial,
   type E2eeClientAuthorization,
   type E2eeClientAuthorizationKey,
@@ -75,6 +76,7 @@ import {
   E2EE_INNER_TYPE_ERROR,
   E2EE_INNER_TYPE_RPC,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
   classifyPostStripPayload,
   decodeE2eeNegotiationRecord,
   e2eeAeadNonceFromHeader,
@@ -1814,6 +1816,38 @@ describe("attacker relay: authorization-context mismatch by element class", () =
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe("attacker relay: downgrade attempts and key confirmation", () => {
+  it("cannot downgrade account-enrolled native trust to the local suite", () => {
+    const advertised = {
+      tier: "native" as const,
+      trustSource: "account-enrolled" as const,
+      localSuitePreference: [
+        E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+        E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+      ],
+      advertisedSuiteRegistry: [
+        E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+        E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+      ],
+      advertisedVersionMin: 1,
+      advertisedVersionMax: 1,
+      advertisedAdmittedPatterns: [E2EE_NOISE_PATTERN_IK],
+    } as const;
+    expect(selectE2eeSuite(advertised)).toEqual({
+      kind: "usable",
+      selectedSuite: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+    });
+
+    // Model the attacker-controlled relay stripping 0x02 from the authenticated
+    // node material it forwards. Account trust becomes unusable; it does not
+    // silently fall back to the locally-approved suite 0x01.
+    expect(
+      selectE2eeSuite({
+        ...advertised,
+        advertisedSuiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
+      }),
+    ).toEqual({ kind: "unusable", reason: "empty_suite_intersection" });
+  });
+
   it("breaks key confirmation when the relay strips a suite from `offeredSuites`", async () => {
     // §8.7 hashes the EXACT hello wire bytes, so the node confirms over the
     // stripped list and the client over the list it sent. The confirmation MAC

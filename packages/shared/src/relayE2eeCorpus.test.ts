@@ -59,6 +59,7 @@ import {
   deriveE2eeAeadKey,
   deriveE2eeEpochKeys,
   deriveE2eeServerConfirmationKey,
+  eraseE2eeSessionSecrets,
   type E2eeDirectionState,
   type E2eeProtectResult,
   type E2eeSessionSecrets,
@@ -76,6 +77,7 @@ import {
 } from "./relayE2eeKeys.ts";
 import {
   E2eeClientHandshake,
+  E2eeNodeHandshake,
   decodeE2eeClientHello,
   decodeE2eeServerAccept,
   e2eeAuthorizationKeysEqual,
@@ -83,6 +85,8 @@ import {
   e2eeConfirmationTranscript,
   e2eeServerConfirmation,
   e2eeSessionBindingHash,
+  encodeE2eeAccountGrantIkHelloPayload,
+  encodeE2eeServerAcceptPayload,
   selectE2eeSuite,
   verifyE2eeClientPrekeyCertificate,
 } from "./relayE2eeHandshake.ts";
@@ -96,6 +100,7 @@ import {
   decodeCanonicalE2eeCbor,
   e2eeAuthorizationContextCommitment,
   e2eeEffectiveAdmittedPatterns,
+  encodeClientE2eePrekeyCertificateCarrier,
   encodeClientE2eePrekeyTranscript,
   encodeNodeE2eeCapabilitySigningEnvelope,
   encodeNodeE2eePrekeyTranscript,
@@ -118,6 +123,7 @@ import {
   E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT,
   E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
   classifyPostStripPayload,
   decodeE2eeEnvelope,
   decodeE2eeNegotiationRecord,
@@ -4029,7 +4035,325 @@ describe("§16.3 F19 account-enrolled native Hub device grants (§18)", () => {
         actual.maximumEnvelopeBytes = E2EE_HUB_DEVICE_GRANT_MAX_BYTES;
         actual.withinBound = envelope.byteLength <= E2EE_HUB_DEVICE_GRANT_MAX_BYTES;
       }
-      expect(actual, entry.name).toEqual(entry.expected);
+      // The valid case also carries the suite-0x02 handshake trace. That trace
+      // is reconstructed below; comparing only the verifier-owned fields here
+      // keeps this loop honest about which implementation produced each value.
+      const expectedVerifier: Record<string, unknown> = {};
+      for (const key of [
+        "kind",
+        "reason",
+        "claimsBytes",
+        "signingEnvelope",
+        "signature",
+        "envelope",
+        "grantDigest",
+        "envelopeBytes",
+        "maximumEnvelopeBytes",
+        "withinBound",
+      ]) {
+        if (Object.hasOwn(entry.expected, key)) expectedVerifier[key] = entry.expected[key];
+      }
+      expect(actual, entry.name).toEqual(expectedVerifier);
+    }
+  });
+
+  it("reconstructs the complete suite-0x02 account-grant IK trace", () => {
+    const entry = caseByName(F19, "valid-account-enrolled-native-device-grant");
+    const expected = entry.expected;
+    const material = F19.testKeyMaterial.handshake as JsonRecord;
+    const identifiers = material.identifiers as JsonRecord;
+    const channelMaterial = material.channel as JsonRecord;
+    const bindings = bindingsFromFixture(entry.inputs.bindings);
+    const verificationKeys = (entry.inputs.verificationKeys as readonly unknown[]).map(
+      keyFromFixture,
+    );
+    const verifiedGrant = verifyHubDeviceGrant({
+      envelope: fixtureBytes(entry.inputs.envelope),
+      verificationKeys,
+      bindings,
+    });
+    expect(verifiedGrant.kind).toBe("ok");
+    if (verifiedGrant.kind !== "ok") return;
+
+    const selectedSuite = entry.inputs.selectedSuite as number;
+    expect(selectedSuite).toBe(E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256);
+    expect(entry.inputs.tier).toBe("native");
+    expect(entry.inputs.pattern).toBe("IK");
+    const offeredSuites = entry.inputs.offeredSuites as readonly number[];
+    expect(offeredSuites).toEqual([
+      E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+      E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+    ]);
+
+    const clientPrekeyTranscript = fixtureBytes(entry.inputs.clientPrekeyTranscript);
+    const clientPrekeySignature = fixtureBytes(entry.inputs.clientPrekeySignature);
+    const certificateCarrier = encodeClientE2eePrekeyCertificateCarrier(
+      clientPrekeyTranscript,
+      clientPrekeySignature,
+    );
+    expect(hex(certificateCarrier)).toBe(hex(fixtureBytes(entry.inputs.certificateCarrier)));
+    expect(hex(certificateCarrier)).toBe(hex(fixtureBytes(expected.certificateCarrier)));
+    expect(hex(sha256(certificateCarrier))).toBe(
+      hex(fixtureBytes(expected.certificateCarrierDigest)),
+    );
+
+    const channel = {
+      hubOrigin: bindings.issuerHubOrigin,
+      channelId: channelMaterial.channelId as string,
+      relayProtocolMajor: channelMaterial.relayProtocolMajor as number,
+      relayProtocolMinor: 3,
+      channelOpenCapability: channelMaterial.channelOpenCapability as string,
+      channelOpenEffectiveRole: channelMaterial.channelOpenEffectiveRole as string,
+      accountGrantContext: {
+        relayTicketId: bindings.relayTicketId,
+        deviceGrantDigest: verifiedGrant.grantDigest,
+        nodeCapabilityStatementDigest: bindings.nodeCapabilityStatementDigest,
+      },
+    } as const;
+    const advertised = {
+      nodeId: bindings.nodeId,
+      nodeIdentityFingerprint: fixtureBytes(material.nodeIdentityFingerprint),
+      prekeyId: identifiers.prekeyId as string,
+      agreementPublicKey: bindings.nodeAgreementPublicKey,
+      continuityChainTranscripts: [],
+      continuityId: bindings.nodeContinuityId,
+      policyGeneration: bindings.nodePolicyGeneration,
+      capabilityStatementDigest: bindings.nodeCapabilityStatementDigest,
+    } as const;
+    const now = entry.inputs.now as number;
+    const client = new E2eeClientHandshake({
+      channel,
+      advertised,
+      selectedSuite: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+      offeredSuites,
+      credentials: {
+        tier: "native",
+        trustSource: "account-enrolled",
+        accountId: bindings.accountId,
+        identityPublicKey: bindings.deviceIdentityPublicKey,
+        agreementPublicKey: bindings.deviceAgreementPublicKey,
+        agreementSecretKey: fixtureBytes(material.testOnlyClientAgreementSecretKey),
+        prekeyTranscript: clientPrekeyTranscript,
+        prekeySignature: clientPrekeySignature,
+        deviceGrant: verifiedGrant,
+      },
+      intendedCapability: channel.channelOpenCapability,
+      intendedRole: channel.channelOpenEffectiveRole,
+      testOnlyClientNonce: fixtureBytes(material.testOnlyClientNonce),
+      testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyClientEphemeralSecretKey),
+    });
+    const hello = client.createHello(now);
+    expect(hello.kind).toBe("hello");
+    if (hello.kind !== "hello") return;
+
+    let localAuthorizationReads = 0;
+    let pairingEvaluations = 0;
+    let grantVerifications = 0;
+    const node = new E2eeNodeHandshake({
+      channel,
+      advertised,
+      advertisedVersionMin: 1,
+      advertisedVersionMax: 1,
+      agreementSecretKey: fixtureBytes(material.testOnlyNodeAgreementSecretKey),
+      advertisementEmittedAt: now,
+      readPolicy: () => ({
+        requireApprovedClientE2EE: false,
+        suiteRegistry: [
+          E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+          E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        ],
+      }),
+      lookupClientAuthorization: () => {
+        localAuthorizationReads += 1;
+        return { status: "approved", maxRole: "owner", capabilitySet: ["ryco.rpc"] };
+      },
+      evaluatePairingAdmission: () => {
+        pairingEvaluations += 1;
+      },
+      verifyAccountGrant: (input) => {
+        grantVerifications += 1;
+        return (
+          verifyHubDeviceGrant({
+            envelope: input.grant.envelope,
+            verificationKeys,
+            bindings: {
+              ...bindings,
+              now: input.now,
+              clientPrekeyCertificateDigest: input.certificateDigest,
+              clientPrekeyCertificateExpiresAt: input.certificate.expiresAt,
+              nodeId: input.advertised.nodeId,
+              nodeAgreementPublicKey: input.advertised.agreementPublicKey,
+              nodeContinuityId: input.advertised.continuityId,
+              nodePolicyGeneration: input.advertised.policyGeneration ?? -1,
+              nodeCapabilityStatementDigest:
+                input.advertised.capabilityStatementDigest ?? new Uint8Array(0),
+              relayTicketId: input.channel.accountGrantContext?.relayTicketId ?? "",
+            },
+          }).kind === "ok"
+        );
+      },
+      testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyNodeEphemeralSecretKey),
+    });
+    const accepted = node.receiveHello(hello.record, now);
+    expect(accepted.kind).toBe("accepted");
+    if (accepted.kind !== "accepted") return;
+    const established = client.receiveServerAccept(accepted.record, now);
+    expect(established.kind).toBe("established");
+    if (established.kind !== "established") {
+      eraseE2eeSessionSecrets(accepted.secrets);
+      return;
+    }
+
+    try {
+      expect(hex(hello.contextBlock)).toBe(hex(fixtureBytes(expected.contextBlock)));
+      expect(hello.contextBlock.byteLength).toBe(expected.contextBlockBytes);
+      expect(hex(hello.contextCommitment)).toBe(hex(fixtureBytes(expected.contextCommitment)));
+      expect(hex(hello.prologue)).toBe(hex(fixtureBytes(expected.prologue)));
+      expect(hex(hello.record)).toBe(hex(fixtureBytes(expected.clientHello)));
+      expect(hello.record.byteLength).toBe(expected.clientHelloBytes);
+
+      const decodedHello = decodeE2eeClientHello(hello.record);
+      const decodedAccept = decodeE2eeServerAccept(accepted.record);
+      expect(decodedHello.kind).toBe("ok");
+      expect(decodedAccept.kind).toBe("ok");
+      if (decodedHello.kind !== "ok" || decodedAccept.kind !== "ok") return;
+
+      const message1Payload = encodeE2eeAccountGrantIkHelloPayload({
+        clientPrekeyTranscript,
+        clientPrekeySignature,
+        accountId: bindings.accountId,
+        intendedCapability: channel.channelOpenCapability,
+        intendedRole: channel.channelOpenEffectiveRole,
+        hubDeviceGrant: verifiedGrant.envelope,
+      });
+      const message2Payload = encodeE2eeServerAcceptPayload({
+        channelOpenCapability: channel.channelOpenCapability,
+        channelOpenEffectiveRole: channel.channelOpenEffectiveRole,
+        nodeAgreementKeyFingerprint: fixtureBytes(material.nodeAgreementFingerprint),
+      });
+      expect(hex(decodedHello.value.noiseMessage1)).toBe(hex(fixtureBytes(expected.noiseMessage1)));
+      expect(hex(message1Payload)).toBe(hex(fixtureBytes(expected.message1PayloadPlaintext)));
+      expect(message1Payload.byteLength).toBe(expected.message1PayloadPlaintextBytes);
+      expect(hex(accepted.serverAcceptTbs)).toBe(hex(fixtureBytes(expected.serverAcceptTbs)));
+      expect(hex(decodedAccept.value.noiseMessage2)).toBe(
+        hex(fixtureBytes(expected.noiseMessage2)),
+      );
+      expect(hex(message2Payload)).toBe(hex(fixtureBytes(expected.message2PayloadPlaintext)));
+
+      const replayInitiator = new E2eeNoiseHandshake({
+        pattern: "IK",
+        role: "initiator",
+        prologue: hello.prologue,
+        staticSecretKey: fixtureBytes(material.testOnlyClientAgreementSecretKey),
+        remoteStaticPublicKey: bindings.nodeAgreementPublicKey,
+        testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyClientEphemeralSecretKey),
+      });
+      const replayResponder = new E2eeNoiseHandshake({
+        pattern: "IK",
+        role: "responder",
+        prologue: hello.prologue,
+        staticSecretKey: fixtureBytes(material.testOnlyNodeAgreementSecretKey),
+        testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyNodeEphemeralSecretKey),
+      });
+      try {
+        expect(replayInitiator.writeMessage(message1Payload)).toEqual(
+          decodedHello.value.noiseMessage1,
+        );
+        expect(replayResponder.readMessage(decodedHello.value.noiseMessage1)).toEqual(
+          message1Payload,
+        );
+        expect(replayResponder.writeMessage(message2Payload)).toEqual(
+          decodedAccept.value.noiseMessage2,
+        );
+        expect(replayInitiator.readMessage(decodedAccept.value.noiseMessage2)).toEqual(
+          message2Payload,
+        );
+        expect(hex(replayInitiator.testOnlyHandshakeHash!)).toBe(
+          hex(fixtureBytes(expected.noiseHandshakeHash)),
+        );
+        // The import-isolated reference suite below checks the exact final ck;
+        // the shared implementation intentionally exposes no production ck.
+        expect(fixtureBytes(expected.noiseChainingKeyFinal)).toHaveLength(32);
+      } finally {
+        replayInitiator.destroy();
+        replayResponder.destroy();
+      }
+
+      expect(hex(established.secrets.exporterSecret)).toBe(
+        hex(fixtureBytes(expected.exporterSecret)),
+      );
+      expect(hex(established.secrets.serverConfirmationKey)).toBe(
+        hex(fixtureBytes(expected.serverConfirmationKey)),
+      );
+      expect(hex(accepted.confirmationTranscript)).toBe(
+        hex(fixtureBytes(expected.confirmationTranscript)),
+      );
+      expect(hex(decodedAccept.value.serverConfirmation)).toBe(
+        hex(fixtureBytes(expected.serverConfirmation)),
+      );
+      expect(hex(accepted.record)).toBe(hex(fixtureBytes(expected.serverAccept)));
+      expect(accepted.record.byteLength).toBe(expected.serverAcceptBytes);
+      expect(hex(established.sessionBindingHash)).toBe(
+        hex(fixtureBytes(expected.sessionBindingHash)),
+      );
+      expect(hex(established.secrets.epochSecretC2N)).toBe(
+        hex(fixtureBytes(expected.epochSecretC2N)),
+      );
+      expect(hex(established.secrets.epochSecretN2C)).toBe(
+        hex(fixtureBytes(expected.epochSecretN2C)),
+      );
+      expect(
+        hex(deriveE2eeAeadKey(established.secrets.epochSecretC2N, E2EE_DIRECTION_CLIENT_TO_NODE)),
+      ).toBe(hex(fixtureBytes(expected.aeadKeyC2NEpoch0)));
+      expect(
+        hex(deriveE2eeAeadKey(established.secrets.epochSecretN2C, E2EE_DIRECTION_NODE_TO_CLIENT)),
+      ).toBe(hex(fixtureBytes(expected.aeadKeyN2CEpoch0)));
+      expect(expected.bothEndpointsDerivedIdenticalSecrets).toBe(
+        hex(accepted.secrets.epochSecretC2N) === hex(established.secrets.epochSecretC2N) &&
+          hex(accepted.secrets.epochSecretN2C) === hex(established.secrets.epochSecretN2C) &&
+          hex(accepted.secrets.exporterSecret) === hex(established.secrets.exporterSecret) &&
+          hex(accepted.secrets.serverConfirmationKey) ===
+            hex(established.secrets.serverConfirmationKey),
+      );
+
+      const context = decodeCanonicalE2eeCbor(hello.contextBlock);
+      const wrapper = decodeCanonicalE2eeCbor(hello.record.subarray(2));
+      const payload = decodeCanonicalE2eeCbor(message1Payload);
+      expect(context.kind).toBe("ok");
+      expect(wrapper.kind).toBe("ok");
+      expect(payload.kind).toBe("ok");
+      if (context.kind !== "ok" || wrapper.kind !== "ok" || payload.kind !== "ok") return;
+      expect(Array.isArray(context.value) ? context.value.length : -1).toBe(
+        expected.contextElements,
+      );
+      expect(Array.isArray(wrapper.value) ? wrapper.value.length : -1).toBe(
+        expected.helloWrapperElements,
+      );
+      expect(Array.isArray(payload.value) ? payload.value.length : -1).toBe(
+        expected.message1PayloadElements,
+      );
+      expect(established.trustSource).toBe(expected.clientTrustSource);
+      expect(accepted.trustSource).toBe(expected.nodeTrustSource);
+      expect(localAuthorizationReads).toBe(expected.localAuthorizationReads);
+      expect(pairingEvaluations).toBe(expected.pairingEvaluations);
+      expect(grantVerifications).toBe(expected.grantVerifications);
+      expect(accepted.accountGrantAuthority).toBeDefined();
+      const authority = accepted.accountGrantAuthority!;
+      expect({
+        trustSource: authority.trustSource,
+        hubOrigin: authority.hubOrigin,
+        accountId: authority.accountId,
+        enrollmentId: authority.enrollmentId,
+        enrollmentRevision: authority.enrollmentRevision,
+        accountAuthEpoch: authority.accountAuthEpoch,
+        deviceAuthEpoch: authority.deviceAuthEpoch,
+        clientIdentityFingerprint: { $bytes: hex(authority.clientIdentityFingerprint) },
+        maximumRole: authority.maximumRole,
+        capabilitySet: [...authority.capabilitySet],
+      }).toEqual(expected.accountGrantAuthority);
+    } finally {
+      eraseE2eeSessionSecrets(established.secrets);
+      eraseE2eeSessionSecrets(accepted.secrets);
     }
   });
 
@@ -4113,7 +4437,7 @@ describe("§16.3 F19 account-enrolled native Hub device grants (§18)", () => {
 // corpus manifest under `livenessCensus`; the tests at the bottom of this file
 // hold the manifest to the corpus and to itself.
 //
-//   2,224 of 3,388 committed expectation leaves are read by some suite: 65.6%.
+//   2,270 of 3,434 committed expectation leaves are read by some suite: 66.1%.
 //   1,164 are read by nothing. 17 of the 334 committed cases carry no live
 //   leaf at all — they are named one by one in `E2EE_CORPUS_CASE_LIVENESS`,
 //   each with the reason and the owner of the missing work.
@@ -4121,7 +4445,7 @@ describe("§16.3 F19 account-enrolled native Hub device grants (§18)", () => {
 //   Per family, live/total: F1 161/161 · F2 16/30 · F3 80/190 · F4 80/81 ·
 //   F5 52/66 · F6 26/62 · F7 31/73 · F8 117/148 · F9 182/589 · F10 361/361 ·
 //   F11 198/396 · F12 42/120 · F13 8/8 · F14 30/46 · F15 22/22 · F16 144/332 ·
-//   F17 168/197 · F18 405/405 · F19 91/91.
+//   F17 168/197 · F18 405/405 · F19 137/137.
 //
 //   MOVED THIS ROUND, and only these two: F4 44→80 and F17 150→168, which took
 //   the contentless count from 32 to 17 and left every remaining one in F3.
@@ -4143,8 +4467,8 @@ describe("§16.3 F19 account-enrolled native Hub device grants (§18)", () => {
 // substantial. The distribution is what shows the shape, and the manifest
 // publishes it as `casesByLiveLeafCount`:
 //
-//   live leaves per case:  0 → 17 · 1 → 19 · 2 → 101 · 3–5 → 87 · 6–10 → 56 ·
-//   11–25 → 38 · 26+ → 16.   137 of 334 cases have at most TWO live leaves;
+//   live leaves per case:  0 → 17 · 1 → 19 · 2 → 101 · 3–5 → 87 · 6–10 → 55 ·
+//   11–25 → 38 · 26+ → 17.   137 of 334 cases have at most TWO live leaves;
 //   224 have at most five.
 //
 // READ-LIVENESS IS AN UPPER BOUND ON ASSERTION EVERYWHERE EXCEPT F4 AND F17. A
@@ -5607,8 +5931,8 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
   {
     id: "f19-valid-grant-artifacts",
     family: 19,
-    section: "16.3 F19 (§18.3)",
-    spec: "exact grant claims, signing input, signature, envelope, and envelope digest for a valid deterministic trace",
+    section: "16.3 F19 (§18.3, §18.4, §18.6)",
+    spec: "exact grant claims, signing input, signature, envelope and digest, certificate carrier and digest, suite-0x02 context block/commitment, hello, both Noise messages, confirmation, sessionBindingHash, and both directional epoch-zero secrets for one valid deterministic trace",
     generated: /^valid-account-enrolled-native-device-grant$/,
   },
   {
@@ -5704,13 +6028,6 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     cases: 3,
   },
   {
-    id: "f19-account-grant-ik-trace",
-    family: 19,
-    section: "16.3 F19 (§18.4, §18.6)",
-    spec: "certificate carrier and digest, suite-0x02 context block/commitment, hello, both Noise messages, confirmation, sessionBindingHash, and both directional epoch-zero secrets",
-    declared: /^§16\.3 F19 suite-0x02 context, Noise trace, and confirmation vectors are deferred/,
-  },
-  {
     id: "f19-relay-and-node-lifecycle",
     family: 19,
     section: "16.3 F19 (§18.5, §18.7, §18.8)",
@@ -5778,7 +6095,7 @@ describe("§16.3 coverage ledger", () => {
     // reviewer counts against §16.3's bullets. Pinning the total means growing
     // or shrinking the ledger is a deliberate, visible edit rather than a line
     // that slips in with an unrelated change.
-    expect(SECTION_16_3_LEDGER.length).toBe(186);
+    expect(SECTION_16_3_LEDGER.length).toBe(185);
   });
 
   it("resolves every §16.3-named case as generated or as declared, never as neither", () => {

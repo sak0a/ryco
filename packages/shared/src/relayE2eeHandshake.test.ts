@@ -1,3 +1,4 @@
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { p256 } from "@noble/curves/nist.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { utf8ToBytes } from "@noble/hashes/utils.js";
@@ -21,6 +22,7 @@ import {
   E2eeClientHandshake,
   E2eeNodeHandshake,
   decodeE2eeClientHello,
+  decodeE2eeAccountGrantIkHelloPayload,
   decodeE2eeIkHelloPayload,
   decodeE2eeServerAccept,
   decodeE2eeServerAcceptPayload,
@@ -36,6 +38,7 @@ import {
   e2eeSessionBindingHash,
   e2eeSuiteNoiseUsage,
   encodeE2eeClientHello,
+  encodeE2eeAccountGrantIkHelloPayload,
   encodeE2eeIkHelloPayload,
   encodeE2eeServerAccept,
   encodeE2eeServerAcceptPayload,
@@ -43,6 +46,7 @@ import {
   selectE2eeSuite,
   verifyE2eeClientPrekeyCertificate,
   type E2eeAdmittedAuthoritySnapshot,
+  type E2eeAccountGrantNodeVerificationInput,
   type E2eeAdvertisedChannelMaterial,
   type E2eeClientAuthorization,
   type E2eeClientAuthorizationKey,
@@ -53,6 +57,15 @@ import {
   type E2eeNodeAdmissionPolicy,
   type E2eeNodeModeTransitionSelection,
 } from "./relayE2eeHandshake.ts";
+import {
+  encodeHubDeviceGrantClaims,
+  encodeHubDeviceGrantEnvelope,
+  encodeHubDeviceGrantSigningEnvelope,
+  verifyHubDeviceGrant,
+  type HubDeviceGrantBindings,
+  type HubDeviceGrantClaimsInput,
+  type HubDeviceGrantVerificationKey,
+} from "./relayE2eeHubDeviceGrant.ts";
 import { RelayE2eeValidationError, e2eeKeyFingerprint } from "./relayE2eeKeys.ts";
 import { E2eeNoiseHandshake } from "./relayE2eeNoise.ts";
 import {
@@ -62,6 +75,7 @@ import {
   E2EE_NEGOTIATION_TYPE_CLIENT_HELLO,
   E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
 } from "./relayE2eeWire.ts";
 import { E2eeRecordSession, deriveE2eeSessionSecrets } from "./relayE2eeSession.ts";
 import {
@@ -70,6 +84,7 @@ import {
   decodeCanonicalE2eeCbor,
   e2eeAuthorizationContextCommitment,
   encodeClientE2eePrekeyTranscript,
+  encodeClientE2eePrekeyCertificateCarrier,
   encodeE2eeAuthorizationContext,
   encodeE2eeNoisePrologue,
   type E2eeAuthorizationContextInput,
@@ -164,6 +179,96 @@ const clientPrekeyTranscript = (
 
 const CLIENT_PREKEY_TRANSCRIPT = clientPrekeyTranscript();
 const CLIENT_PREKEY_SIGNATURE = signClientPrekey(CLIENT_PREKEY_TRANSCRIPT);
+const ACCOUNT_GRANT_ACCOUNT_ID = `acct_${"A".repeat(22)}`;
+const ACCOUNT_CLIENT_PREKEY_TRANSCRIPT = clientPrekeyTranscript({
+  accountId: ACCOUNT_GRANT_ACCOUNT_ID,
+});
+const ACCOUNT_CLIENT_PREKEY_SIGNATURE = signClientPrekey(ACCOUNT_CLIENT_PREKEY_TRANSCRIPT);
+const CLIENT_PREKEY_CARRIER = encodeClientE2eePrekeyCertificateCarrier(
+  ACCOUNT_CLIENT_PREKEY_TRANSCRIPT,
+  ACCOUNT_CLIENT_PREKEY_SIGNATURE,
+);
+const HUB_GRANT_SECRET = new Uint8Array(32).fill(0x4a);
+const HUB_GRANT_PUBLIC = ed25519.getPublicKey(HUB_GRANT_SECRET);
+const HUB_GRANT_KEY_ID = `hgk_${"K".repeat(22)}`;
+const HUB_GRANT_ID = `hgr_${"J".repeat(22)}`;
+const ENROLLMENT_ID = `enr_${"L".repeat(22)}`;
+const RELAY_TICKET_ID = `rtk_${"T".repeat(22)}`;
+const ACCOUNT_STATEMENT_DIGEST = sha256(utf8ToBytes("suite-0x02 statement"));
+const ACCOUNT_GRANT_CLAIMS = {
+  issuerHubOrigin: HUB_ORIGIN,
+  keyId: HUB_GRANT_KEY_ID,
+  grantId: HUB_GRANT_ID,
+  accountId: ACCOUNT_GRANT_ACCOUNT_ID,
+  accountAuthEpoch: 3,
+  enrollmentId: ENROLLMENT_ID,
+  enrollmentRevision: 4,
+  deviceAuthEpoch: 5,
+  deviceIdentityPublicKey: CLIENT_IDENTITY_PUBLIC,
+  deviceAgreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+  clientPrekeyCertificateDigest: sha256(CLIENT_PREKEY_CARRIER),
+  nodeId: NODE_ID,
+  nodeIdentityPublicKey: NODE_IDENTITY_PUBLIC,
+  nodeAgreementPublicKey: NODE_AGREEMENT_PUBLIC,
+  nodeContinuityId: CONTINUITY_ID,
+  nodePolicyGeneration: 7,
+  nodeCapabilityStatementDigest: ACCOUNT_STATEMENT_DIGEST,
+  relayTicketId: RELAY_TICKET_ID,
+  maximumRole: "operator",
+  capabilities: ["ryco.rpc"],
+  issuedAt: NOW,
+  notBefore: NOW - 1_000,
+  expiresAt: NOW + 60_000,
+  nonce: new Uint8Array(32).fill(0x5a),
+} as unknown as HubDeviceGrantClaimsInput;
+const ACCOUNT_GRANT_CLAIMS_BYTES = encodeHubDeviceGrantClaims(ACCOUNT_GRANT_CLAIMS);
+const ACCOUNT_GRANT_SIGNATURE = ed25519.sign(
+  encodeHubDeviceGrantSigningEnvelope(ACCOUNT_GRANT_CLAIMS_BYTES),
+  HUB_GRANT_SECRET,
+);
+const ACCOUNT_GRANT_ENVELOPE = encodeHubDeviceGrantEnvelope(
+  ACCOUNT_GRANT_CLAIMS_BYTES,
+  ACCOUNT_GRANT_SIGNATURE,
+);
+const ACCOUNT_GRANT_KEY: HubDeviceGrantVerificationKey = {
+  keyId: HUB_GRANT_KEY_ID,
+  publicKey: HUB_GRANT_PUBLIC,
+  notBefore: NOW - 60_000,
+  notAfter: NOW + 120_000,
+};
+const ACCOUNT_GRANT_BINDINGS: HubDeviceGrantBindings = {
+  issuerHubOrigin: HUB_ORIGIN,
+  accountId: ACCOUNT_GRANT_ACCOUNT_ID,
+  accountAuthEpoch: 3,
+  enrollmentId: ENROLLMENT_ID,
+  enrollmentRevision: 4,
+  deviceAuthEpoch: 5,
+  enrollmentStatus: "active",
+  deviceIdentityPublicKey: CLIENT_IDENTITY_PUBLIC,
+  deviceAgreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+  clientPrekeyCertificateDigest: sha256(CLIENT_PREKEY_CARRIER),
+  clientPrekeyCertificateExpiresAt: EXPIRES_AT,
+  nodeId: NODE_ID,
+  nodeIdentityPublicKey: NODE_IDENTITY_PUBLIC,
+  nodeAgreementPublicKey: NODE_AGREEMENT_PUBLIC,
+  nodeAgreementPrekeyExpiresAt: EXPIRES_AT,
+  nodeContinuityId: CONTINUITY_ID,
+  nodePolicyGeneration: 7,
+  nodeCapabilityStatementDigest: ACCOUNT_STATEMENT_DIGEST,
+  nodeCapabilityStatementExpiresAt: NOW + 120_000,
+  relayTicketId: RELAY_TICKET_ID,
+  relayTicketExpiresAt: NOW + 120_000,
+  effectiveRole: "operator",
+  effectiveCapabilities: ["ryco.rpc"],
+  accountGrantAllowed: true,
+  now: NOW,
+};
+const VERIFIED_ACCOUNT_GRANT = verifyHubDeviceGrant({
+  envelope: ACCOUNT_GRANT_ENVELOPE,
+  verificationKeys: [ACCOUNT_GRANT_KEY],
+  bindings: ACCOUNT_GRANT_BINDINGS,
+});
+if (VERIFIED_ACCOUNT_GRANT.kind !== "ok") throw new Error("invalid account-grant test fixture");
 
 // ─── golden §8 vectors ───────────────────────────────────────────────────────
 //
@@ -245,6 +350,26 @@ const advertised = (
   ...overrides,
 });
 
+const accountChannel = (overrides: Partial<E2eeHandshakeChannel> = {}): E2eeHandshakeChannel =>
+  channel({
+    relayProtocolMinor: 3,
+    accountGrantContext: {
+      relayTicketId: RELAY_TICKET_ID,
+      deviceGrantDigest: VERIFIED_ACCOUNT_GRANT.grantDigest,
+      nodeCapabilityStatementDigest: ACCOUNT_STATEMENT_DIGEST,
+    },
+    ...overrides,
+  });
+
+const accountAdvertised = (
+  overrides: Partial<E2eeAdvertisedChannelMaterial> = {},
+): E2eeAdvertisedChannelMaterial =>
+  advertised({
+    policyGeneration: 7,
+    capabilityStatementDigest: ACCOUNT_STATEMENT_DIGEST,
+    ...overrides,
+  });
+
 const nativeCredentials = (
   overrides: Record<string, unknown> = {},
 ): E2eeClientHandshakeCredentials => ({
@@ -255,6 +380,21 @@ const nativeCredentials = (
   agreementSecretKey: CLIENT_AGREEMENT_SECRET,
   prekeyTranscript: CLIENT_PREKEY_TRANSCRIPT,
   prekeySignature: CLIENT_PREKEY_SIGNATURE,
+  ...overrides,
+});
+
+const accountCredentials = (
+  overrides: Record<string, unknown> = {},
+): E2eeClientHandshakeCredentials => ({
+  tier: "native",
+  accountId: ACCOUNT_GRANT_ACCOUNT_ID,
+  identityPublicKey: CLIENT_IDENTITY_PUBLIC,
+  agreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+  agreementSecretKey: CLIENT_AGREEMENT_SECRET,
+  prekeyTranscript: ACCOUNT_CLIENT_PREKEY_TRANSCRIPT,
+  prekeySignature: ACCOUNT_CLIENT_PREKEY_SIGNATURE,
+  trustSource: "account-enrolled",
+  deviceGrant: VERIFIED_ACCOUNT_GRANT,
   ...overrides,
 });
 
@@ -300,7 +440,9 @@ interface NodeOverrides {
   readonly lookupClientAuthorization?: (
     key: E2eeClientAuthorizationKey,
   ) => E2eeClientAuthorization | undefined;
+  readonly evaluatePairingAdmission?: () => void;
   readonly enterE2eeMode?: (selection: E2eeNodeModeTransitionSelection) => E2eeModeTransition;
+  readonly verifyAccountGrant?: (input: E2eeAccountGrantNodeVerificationInput) => boolean;
   readonly advertisedVersionMin?: number;
   readonly advertisedVersionMax?: number;
   readonly advertisementEmittedAt?: number;
@@ -323,9 +465,57 @@ const makeNode = (overrides: NodeOverrides = {}): E2eeNodeHandshake =>
     lookupClientAuthorization:
       overrides.lookupClientAuthorization ??
       (() => ("authorization" in overrides ? overrides.authorization : APPROVED)),
+    evaluatePairingAdmission: overrides.evaluatePairingAdmission,
     enterE2eeMode: overrides.enterE2eeMode,
+    verifyAccountGrant: overrides.verifyAccountGrant,
     testOnlyEphemeralSecretKey:
       overrides.testOnlyEphemeralSecretKey ?? bytes(NODE_EPHEMERAL_SECRET),
+  });
+
+const makeAccountClient = (
+  overrides: Partial<ConstructorParameters<typeof E2eeClientHandshake>[0]> = {},
+): E2eeClientHandshake =>
+  new E2eeClientHandshake({
+    channel: accountChannel(),
+    advertised: accountAdvertised(),
+    selectedSuite: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+    offeredSuites: [2, 1],
+    credentials: accountCredentials(),
+    intendedCapability: "ryco.rpc",
+    intendedRole: "operator",
+    testOnlyClientNonce: bytes(CLIENT_NONCE),
+    testOnlyEphemeralSecretKey: bytes(CLIENT_EPHEMERAL_SECRET),
+    ...overrides,
+  });
+
+const verifyAccountGrantAtNode = (input: E2eeAccountGrantNodeVerificationInput): boolean =>
+  verifyHubDeviceGrant({
+    envelope: input.grant.envelope,
+    verificationKeys: [ACCOUNT_GRANT_KEY],
+    bindings: {
+      ...ACCOUNT_GRANT_BINDINGS,
+      now: input.now,
+      clientPrekeyCertificateDigest: input.certificateDigest,
+      clientPrekeyCertificateExpiresAt: input.certificate.expiresAt,
+      nodeId: input.advertised.nodeId,
+      nodeAgreementPublicKey: input.advertised.agreementPublicKey,
+      nodeContinuityId: input.advertised.continuityId,
+      nodePolicyGeneration: input.advertised.policyGeneration ?? -1,
+      nodeCapabilityStatementDigest:
+        input.advertised.capabilityStatementDigest ?? new Uint8Array(0),
+      relayTicketId: input.channel.accountGrantContext?.relayTicketId ?? "",
+      effectiveRole: input.intendedRole as "viewer" | "operator" | "owner",
+      effectiveCapabilities: [input.intendedCapability as "ryco.rpc"],
+    },
+  }).kind === "ok";
+
+const makeAccountNode = (overrides: NodeOverrides = {}): E2eeNodeHandshake =>
+  makeNode({
+    channel: accountChannel(),
+    advertised: accountAdvertised(),
+    policy: { requireApprovedClientE2EE: false, suiteRegistry: [2, 1] },
+    verifyAccountGrant: verifyAccountGrantAtNode,
+    ...overrides,
   });
 
 const expectHello = (client: E2eeClientHandshake, now = NOW) => {
@@ -414,6 +604,41 @@ const craftHello = (input: {
   });
 };
 
+const craftRawSuiteHello = (input: {
+  readonly channel: E2eeHandshakeChannel;
+  readonly suite: 1 | 2;
+  readonly tier: E2eeTier;
+  readonly contextBlock: Uint8Array;
+  readonly noisePayload: Uint8Array;
+}): Uint8Array => {
+  const commitment = e2eeAuthorizationContextCommitment(input.contextBlock);
+  const noise = new E2eeNoiseHandshake({
+    pattern: input.tier === "native" ? E2EE_NOISE_PATTERN_IK : E2EE_NOISE_PATTERN_NX,
+    role: "initiator",
+    prologue: encodeE2eeNoisePrologue({
+      hubOrigin: input.channel.hubOrigin,
+      channelId: input.channel.channelId,
+      relayProtocolMajor: input.channel.relayProtocolMajor,
+      relayProtocolMinor: input.channel.relayProtocolMinor,
+      e2eeVersion: 1,
+      suiteId: input.suite,
+      nodeId: NODE_ID,
+      contextCommitment: commitment,
+    }),
+    staticSecretKey: input.tier === "native" ? CLIENT_AGREEMENT_SECRET : undefined,
+    remoteStaticPublicKey: input.tier === "native" ? NODE_AGREEMENT_PUBLIC : undefined,
+    testOnlyEphemeralSecretKey: bytes(CLIENT_EPHEMERAL_SECRET),
+  });
+  return encodeE2eeClientHello({
+    tier: input.tier,
+    selectedSuite: input.suite,
+    offeredSuites: [input.suite],
+    clientNonce: bytes(CLIENT_NONCE),
+    contextCommitment: commitment,
+    noiseMessage1: noise.writeMessage(input.noisePayload),
+  });
+};
+
 const nativeContext = (
   overrides: Partial<E2eeAuthorizationContextInput> = {},
 ): E2eeAuthorizationContextInput => ({
@@ -462,6 +687,43 @@ describe("§8.2 client-selected suite and the §5.2 usability checks", () => {
     ).toEqual({ kind: "usable", selectedSuite: 1 });
   });
 
+  it("filters suites by tier and trust source before applying preference", () => {
+    const registry = [2, 1];
+    expect(
+      selectE2eeSuite({
+        ...usable,
+        trustSource: "account-enrolled",
+        localSuitePreference: [1, 2],
+        advertisedSuiteRegistry: registry,
+      }),
+    ).toEqual({ kind: "usable", selectedSuite: 2 });
+    expect(
+      selectE2eeSuite({
+        ...usable,
+        trustSource: "locally-verified",
+        localSuitePreference: [2, 1],
+        advertisedSuiteRegistry: registry,
+      }),
+    ).toEqual({ kind: "usable", selectedSuite: 1 });
+    expect(
+      selectE2eeSuite({
+        ...usable,
+        tier: "web",
+        trustSource: "web-unsigned",
+        localSuitePreference: [2, 1],
+        advertisedSuiteRegistry: registry,
+      }),
+    ).toEqual({ kind: "usable", selectedSuite: 1 });
+    expect(
+      selectE2eeSuite({
+        ...usable,
+        trustSource: "account-enrolled",
+        localSuitePreference: [1],
+        advertisedSuiteRegistry: [1],
+      }),
+    ).toEqual({ kind: "unusable", reason: "empty_suite_intersection" });
+  });
+
   it("rejects a protocol range excluding this version (§5.2 step 8)", () => {
     expect(
       selectE2eeSuite({ ...usable, advertisedVersionMin: 2, advertisedVersionMax: 3 }),
@@ -490,7 +752,8 @@ describe("§8.2 client-selected suite and the §5.2 usability checks", () => {
       kind: "unusable",
       reason: "empty_suite_intersection",
     });
-    // `2` is reserved by §3.4, so agreement on it is not a selection.
+    // Suite 2 is registered but is still unavailable to locally verified
+    // credentials, so agreement on its number alone is not a selection.
     expect(
       selectE2eeSuite({
         ...usable,
@@ -602,6 +865,68 @@ describe("§8.5 E2EEClientHello", () => {
       },
     });
     expect(payload[0]).toBe(0x85);
+  });
+
+  it("adds exactly one bounded grant element only to the suite-0x02 IK payload", () => {
+    const input = {
+      clientPrekeyTranscript: ACCOUNT_CLIENT_PREKEY_TRANSCRIPT,
+      clientPrekeySignature: ACCOUNT_CLIENT_PREKEY_SIGNATURE,
+      accountId: ACCOUNT_GRANT_ACCOUNT_ID,
+      intendedCapability: "ryco.rpc",
+      intendedRole: "operator",
+      hubDeviceGrant: ACCOUNT_GRANT_ENVELOPE,
+    } as const;
+    const payload = encodeE2eeAccountGrantIkHelloPayload(input);
+    expect(payload[0]).toBe(0x86);
+    expect(decodeE2eeAccountGrantIkHelloPayload(payload)).toEqual({ kind: "ok", value: input });
+    expect(decodeE2eeIkHelloPayload(payload)).toEqual({
+      kind: "error",
+      reason: "malformed_body",
+    });
+    expect(
+      decodeE2eeAccountGrantIkHelloPayload(
+        encodeE2eeIkHelloPayload({
+          clientPrekeyTranscript: CLIENT_PREKEY_TRANSCRIPT,
+          clientPrekeySignature: CLIENT_PREKEY_SIGNATURE,
+          accountId: ACCOUNT_ID,
+          intendedCapability: "ryco.rpc",
+          intendedRole: "operator",
+        }),
+      ),
+    ).toEqual({ kind: "error", reason: "malformed_body" });
+  });
+
+  it("does not let Web, local credentials, or minor-2 channels represent suite 0x02", () => {
+    const base = {
+      channel: accountChannel(),
+      advertised: accountAdvertised(),
+      selectedSuite: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+      offeredSuites: [2],
+      intendedCapability: "ryco.rpc",
+      intendedRole: "operator",
+    } as const;
+    expect(() => new E2eeClientHandshake({ ...base, credentials: { tier: "web" } })).toThrow(
+      TypeError,
+    );
+    expect(() => new E2eeClientHandshake({ ...base, credentials: nativeCredentials() })).toThrow(
+      TypeError,
+    );
+    expect(
+      () =>
+        new E2eeClientHandshake({
+          ...base,
+          channel: channel(),
+          credentials: accountCredentials(),
+        }),
+    ).toThrow(TypeError);
+    expect(
+      () =>
+        new E2eeClientHandshake({
+          ...base,
+          selectedSuite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+          credentials: accountCredentials(),
+        }),
+    ).toThrow(TypeError);
   });
 
   it("keeps the NX message-1 payload zero-length", () => {
@@ -1017,6 +1342,80 @@ describe("§8 full handshakes between two in-process endpoints", () => {
       "status",
     ]);
   });
+
+  it("completes account-enrolled IK without reading or writing local pairing state", () => {
+    const client = makeAccountClient();
+    const hello = expectHello(client);
+    const context = decodeCanonicalE2eeCbor(hello.contextBlock);
+    expect(context.kind).toBe("ok");
+    if (context.kind !== "ok" || !Array.isArray(context.value)) return;
+    expect(context.value).toHaveLength(29);
+    expect(context.value[0]).toBe("ryco.relay-e2ee.account-context.v1");
+    expect(context.value[18]).toEqual(VERIFIED_ACCOUNT_GRANT.grantDigest);
+    expect(context.value[19]).toBe(RELAY_TICKET_ID);
+
+    let localAuthorizationReads = 0;
+    let pairingEvaluations = 0;
+    const node = makeAccountNode({
+      lookupClientAuthorization: () => {
+        localAuthorizationReads += 1;
+        return APPROVED;
+      },
+      evaluatePairingAdmission: () => {
+        pairingEvaluations += 1;
+      },
+      verifyAccountGrant: (input) => {
+        expect(input.grant.envelope).toEqual(ACCOUNT_GRANT_ENVELOPE);
+        return verifyAccountGrantAtNode(input);
+      },
+    });
+    const accept = expectAccept(node, hello.record);
+    const established = expectEstablished(client, accept.record);
+    expect(established.sessionBindingHash).toEqual(accept.sessionBindingHash);
+    expect(established.secrets).toEqual(accept.secrets);
+    expect(established.trustSource).toBe("account-enrolled");
+    expect(accept.trustSource).toBe("account-enrolled");
+    expect(accept.admittedAuthority).toBeUndefined();
+    expect(localAuthorizationReads).toBe(0);
+    expect(pairingEvaluations).toBe(0);
+    expect(accept.accountGrantAuthority).toEqual({
+      trustSource: "account-enrolled",
+      hubOrigin: HUB_ORIGIN,
+      accountId: ACCOUNT_GRANT_ACCOUNT_ID,
+      enrollmentId: ENROLLMENT_ID,
+      enrollmentRevision: 4,
+      accountAuthEpoch: 3,
+      deviceAuthEpoch: 5,
+      clientIdentityFingerprint: CLIENT_IDENTITY_FINGERPRINT,
+      maximumRole: "operator",
+      capabilitySet: ["ryco.rpc"],
+    });
+    expect(node.accountGrantAuthority).toEqual(accept.accountGrantAuthority);
+  });
+
+  it("fails closed when node-owned grant verification or the row-N3 re-check withdraws authority", () => {
+    const deniedClient = makeAccountClient();
+    const denied = makeAccountNode({ verifyAccountGrant: () => false }).receiveHello(
+      expectHello(deniedClient).record,
+      NOW,
+    );
+    expect(denied).toEqual({ kind: "fatal", row: "P12", reason: "authorization" });
+
+    const transitioningClient = makeAccountClient();
+    const transitioning = makeAccountNode({
+      enterE2eeMode: (selection) => {
+        expect(selection.trustSource).toBe("account-enrolled");
+        expect(selection.admittedAuthority).toBeUndefined();
+        expect(selection.accountGrantAuthority?.enrollmentId).toBe(ENROLLMENT_ID);
+        return { kind: "refused", reason: "authorization_withdrawn" };
+      },
+    }).receiveHello(expectHello(transitioningClient).record, NOW);
+    expect(transitioning).toEqual({
+      kind: "fatal",
+      row: "P12",
+      reason: "authorization_withdrawn",
+    });
+  });
 });
 
 // ─── §8.6 responder processing ───────────────────────────────────────────────
@@ -1070,6 +1469,63 @@ describe("§8.6 responder processing", () => {
     // module, so the check is made on the decoded wrapper.
     const decoded = decodeE2eeClientHello(hello.record);
     expect(decoded.kind === "ok" && decoded.value.offeredSuites).toEqual([1]);
+  });
+
+  it("rejects suite/payload/tier confusion for account grants", () => {
+    const accountContext = expectHello(makeAccountClient()).contextBlock;
+    const basePayload = encodeE2eeIkHelloPayload({
+      clientPrekeyTranscript: ACCOUNT_CLIENT_PREKEY_TRANSCRIPT,
+      clientPrekeySignature: ACCOUNT_CLIENT_PREKEY_SIGNATURE,
+      accountId: ACCOUNT_GRANT_ACCOUNT_ID,
+      intendedCapability: "ryco.rpc",
+      intendedRole: "operator",
+    });
+    expect(
+      makeAccountNode().receiveHello(
+        craftRawSuiteHello({
+          channel: accountChannel(),
+          suite: 2,
+          tier: "native",
+          contextBlock: accountContext,
+          noisePayload: basePayload,
+        }),
+        NOW,
+      ),
+    ).toEqual({ kind: "fatal", row: "P11", reason: "client_binding" });
+
+    const grantPayload = encodeE2eeAccountGrantIkHelloPayload({
+      clientPrekeyTranscript: CLIENT_PREKEY_TRANSCRIPT,
+      clientPrekeySignature: CLIENT_PREKEY_SIGNATURE,
+      accountId: ACCOUNT_ID,
+      intendedCapability: "ryco.rpc",
+      intendedRole: "operator",
+      hubDeviceGrant: ACCOUNT_GRANT_ENVELOPE,
+    });
+    expect(
+      makeNode().receiveHello(
+        craftRawSuiteHello({
+          channel: channel(),
+          suite: 1,
+          tier: "native",
+          contextBlock: encodeE2eeAuthorizationContext(nativeContext()),
+          noisePayload: grantPayload,
+        }),
+        NOW,
+      ),
+    ).toEqual({ kind: "fatal", row: "P11", reason: "client_binding" });
+
+    expect(
+      makeAccountNode().receiveHello(
+        craftRawSuiteHello({
+          channel: accountChannel(),
+          suite: 2,
+          tier: "web",
+          contextBlock: accountContext,
+          noisePayload: E2EE_NX_HELLO_PAYLOAD,
+        }),
+        NOW,
+      ),
+    ).toEqual({ kind: "fatal", row: "P9", reason: "wrapper" });
   });
 
   it("reads the node's committed policy, never the advertised snapshot (step 2, §12.6)", () => {
@@ -1402,6 +1858,7 @@ describe("§8.6 responder processing", () => {
         tier: "native",
         pattern: E2EE_NOISE_PATTERN_IK,
         suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        trustSource: "locally-verified",
         admittedAuthority: {
           hubOrigin: HUB_ORIGIN,
           accountId: ACCOUNT_ID,
@@ -1410,6 +1867,7 @@ describe("§8.6 responder processing", () => {
           maxRole: "owner",
           capabilitySet: ["ryco.rpc"],
         },
+        accountGrantAuthority: undefined,
       },
     ]);
 
@@ -1429,7 +1887,9 @@ describe("§8.6 responder processing", () => {
         tier: "web",
         pattern: E2EE_NOISE_PATTERN_NX,
         suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        trustSource: "web-unsigned",
         admittedAuthority: undefined,
+        accountGrantAuthority: undefined,
       },
     ]);
   });
@@ -2020,6 +2480,35 @@ describe("§8.9 implicit client finish", () => {
       }),
     ).toEqual({ kind: "finished" });
     expect(called).toBe(false);
+  });
+
+  it("re-checks an account enrollment lease without consulting Branch A", () => {
+    const client = makeAccountClient();
+    const node = makeAccountNode();
+    const accept = expectAccept(node, expectHello(client).record);
+    expectEstablished(client, accept.record);
+    let branchARead = false;
+    let enrollmentRead: unknown;
+    expect(
+      node.authenticateImplicitFinish({
+        now: NOW,
+        reReadAuthorization: () => {
+          branchARead = true;
+          return APPROVED;
+        },
+        reReadAccountGrantAuthorization: (snapshot) => {
+          enrollmentRead = snapshot;
+          return false;
+        },
+      }),
+    ).toEqual({
+      kind: "fatal",
+      row: "Q9",
+      errorCode: "policy",
+      reason: "authorization_withdrawn",
+    });
+    expect(branchARead).toBe(false);
+    expect(enrollmentRead).toEqual(accept.accountGrantAuthority);
   });
 
   it("refuses an implicit finish on a handshake that never established", () => {

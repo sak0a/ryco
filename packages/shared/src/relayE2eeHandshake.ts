@@ -1,3 +1,4 @@
+import type { NativeE2eeTrustSource } from "@ryco/contracts/native-e2ee";
 import { equalBytes } from "@noble/ciphers/utils.js";
 import { x25519 } from "@noble/curves/ed25519.js";
 import { hmac } from "@noble/hashes/hmac.js";
@@ -10,6 +11,7 @@ import {
   E2EE_CONFIRMATION_BYTES,
   E2EE_CONTEXT_COMMITMENT_BYTES,
   E2EE_HANDSHAKE_NONCE_BYTES,
+  E2EE_HUB_DEVICE_GRANT_MAX_BYTES,
   E2EE_KEY_FINGERPRINT_BYTES,
   E2EE_MAX_CLOCK_SKEW,
   E2EE_PREKEY_LIFETIME,
@@ -45,13 +47,18 @@ import {
   e2eeAuthorizationContextCommitment,
   e2eeEffectiveAdmittedPatterns,
   e2eeTierNoisePattern,
+  encodeClientE2eePrekeyCertificateCarrier,
+  encodeE2eeAccountGrantAuthorizationContext,
   encodeClientE2eePrekeyTranscript,
   encodeE2eeAuthorizationContext,
   encodeE2eeNoisePrologue,
   type E2eeNoisePattern,
   type E2eeTier,
 } from "./relayE2eeTranscripts.ts";
+import { decodeHubDeviceGrant, type DecodedHubDeviceGrant } from "./relayE2eeHubDeviceGrant.ts";
 import {
+  E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
   E2EE_NEGOTIATION_TYPE_CLIENT_HELLO,
   E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT,
   decodeE2eeNegotiationRecord,
@@ -279,6 +286,11 @@ export type E2eeSuiteSelection =
 
 export interface E2eeSuiteSelectionInput {
   readonly tier: E2eeTier;
+  /**
+   * The credential class available for this attempt. Omission preserves the
+   * version-1 default: locally verified for native, unsigned for Web.
+   */
+  readonly trustSource?: NativeE2eeTrustSource | undefined;
   /** The client's own FIXED local preference order (§8.2). */
   readonly localSuitePreference: readonly number[];
   /** §7.6 element 9, as the validated statement advertises it, in signed order. */
@@ -288,6 +300,21 @@ export interface E2eeSuiteSelectionInput {
   readonly advertisedVersionMax: number;
   /** §7.6 element 14, the effective admitted pattern set. */
   readonly advertisedAdmittedPatterns: readonly E2eeNoisePattern[];
+}
+
+function effectiveSelectionTrustSource(input: E2eeSuiteSelectionInput): NativeE2eeTrustSource {
+  return input.trustSource ?? (input.tier === "native" ? "locally-verified" : "web-unsigned");
+}
+
+function suiteSupportsCredential(
+  suite: E2eeSuiteId,
+  tier: E2eeTier,
+  trustSource: NativeE2eeTrustSource,
+): boolean {
+  if (suite === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256) {
+    return tier === "native" && trustSource === "account-enrolled";
+  }
+  return tier === "web" ? trustSource === "web-unsigned" : trustSource === "locally-verified";
 }
 
 /**
@@ -331,10 +358,17 @@ export function selectE2eeSuite(input: E2eeSuiteSelectionInput): E2eeSuiteSelect
   if (!input.advertisedAdmittedPatterns.includes(pattern)) {
     return { kind: "unusable", reason: "pattern_not_admitted" };
   }
+  const trustSource = effectiveSelectionTrustSource(input);
   // §3.4 reserves every unregistered suite id, so an unregistered entry is not
-  // selectable even where both lists carry it.
+  // selectable even where both lists carry it. A registered suite that does
+  // not represent this tier and trust source is filtered before preference,
+  // preventing Web from selecting 0x02 and account credentials from silently
+  // downgrading to the local-approval suite.
   const selected = input.localSuitePreference.find(
-    (suite) => isE2eeSuiteId(suite) && input.advertisedSuiteRegistry.includes(suite),
+    (suite) =>
+      isE2eeSuiteId(suite) &&
+      suiteSupportsCredential(suite, input.tier, trustSource) &&
+      input.advertisedSuiteRegistry.includes(suite),
   );
   if (selected === undefined || !isE2eeSuiteId(selected)) {
     return { kind: "unusable", reason: "empty_suite_intersection" };
@@ -359,6 +393,7 @@ export function e2eeSuiteNoiseUsage(suite: E2eeSuiteId): {
 
 const CLIENT_HELLO_ELEMENTS = 7;
 const IK_HELLO_PAYLOAD_ELEMENTS = 5;
+const ACCOUNT_GRANT_IK_HELLO_PAYLOAD_ELEMENTS = 6;
 const SERVER_ACCEPT_ELEMENTS = 5;
 const ACCEPT_PAYLOAD_ELEMENTS = 3;
 
@@ -512,6 +547,12 @@ export interface E2eeIkHelloPayload {
   readonly intendedRole: string;
 }
 
+/** The suite-0x02 IK message-1 payload; suite 0x01 remains exactly five elements. */
+export interface E2eeAccountGrantIkHelloPayload extends E2eeIkHelloPayload {
+  /** Exact signed §18.3 Hub device-grant envelope. */
+  readonly hubDeviceGrant: Uint8Array;
+}
+
 /**
  * The §8.5 IK message-1 payload: a canonical-CBOR array of exactly 5 elements,
  * encrypted inside `noiseMessage1`.
@@ -577,6 +618,48 @@ export function decodeE2eeIkHelloPayload(
       intendedCapability: capability,
       intendedRole: role,
     },
+  };
+}
+
+export function encodeE2eeAccountGrantIkHelloPayload(
+  input: E2eeAccountGrantIkHelloPayload,
+): Uint8Array {
+  if (
+    !isBytesElement(input.hubDeviceGrant) ||
+    input.hubDeviceGrant.byteLength === 0 ||
+    input.hubDeviceGrant.byteLength > E2EE_HUB_DEVICE_GRANT_MAX_BYTES
+  ) {
+    invalidRelayE2eeInput();
+  }
+  const local = decodeCanonicalE2eeCbor(encodeE2eeIkHelloPayload(input));
+  if (local.kind !== "ok" || !Array.isArray(local.value)) invalidRelayE2eeInput();
+  return encodeCanonical([...local.value, copyBytes(input.hubDeviceGrant)]);
+}
+
+export function decodeE2eeAccountGrantIkHelloPayload(
+  payload: Uint8Array,
+): E2eeDecodeResult<E2eeAccountGrantIkHelloPayload, "malformed_body"> {
+  const decoded = decodeCanonicalE2eeCbor(payload);
+  if (decoded.kind === "error") return { kind: "error", reason: "malformed_body" };
+  const elements = decoded.value;
+  if (!Array.isArray(elements) || elements.length !== ACCOUNT_GRANT_IK_HELLO_PAYLOAD_ELEMENTS) {
+    return { kind: "error", reason: "malformed_body" };
+  }
+  const [transcript, signature, accountId, capability, role, deviceGrant] = elements;
+  if (
+    !(deviceGrant instanceof Uint8Array) ||
+    deviceGrant.byteLength === 0 ||
+    deviceGrant.byteLength > E2EE_HUB_DEVICE_GRANT_MAX_BYTES
+  ) {
+    return { kind: "error", reason: "malformed_body" };
+  }
+  const base = decodeE2eeIkHelloPayload(
+    encodeCanonical([transcript, signature, accountId, capability, role]),
+  );
+  if (base.kind === "error") return base;
+  return {
+    kind: "ok",
+    value: { ...base.value, hubDeviceGrant: copyBytes(deviceGrant) },
   };
 }
 
@@ -1106,6 +1189,14 @@ export interface E2eeHandshakeChannel {
   readonly channelOpenCapability: string;
   /** The `channel.open.effectiveRole` THIS endpoint received (§8.3 element 14). */
   readonly channelOpenEffectiveRole: string;
+  /** Relay-minor-3 context delivered on both authenticated Hub paths for suite 0x02. */
+  readonly accountGrantContext?:
+    | {
+        readonly relayTicketId: string;
+        readonly deviceGrantDigest: Uint8Array;
+        readonly nodeCapabilityStatementDigest: Uint8Array;
+      }
+    | undefined;
 }
 
 /**
@@ -1138,23 +1229,59 @@ export interface E2eeAdvertisedChannelMaterial {
   readonly continuityChainTranscripts: readonly Uint8Array[];
   /** §7.6 element 18 (§8.3 element 17). Nonempty on BOTH tiers. */
   readonly continuityId: string;
+  /** §18.3 element 26; required only by the account-enrolled suite. */
+  readonly policyGeneration?: number | undefined;
+  /** SHA-256 of the exact signed capability statement; required only by suite 0x02. */
+  readonly capabilityStatementDigest?: Uint8Array | undefined;
 }
 
-/** The client credentials of the tier, with §8.3's absence semantics unrepresentable-wrong. */
+interface E2eeNativeClientHandshakeKeyMaterial {
+  readonly tier: "native";
+  readonly accountId: string;
+  /** P-256 client identity key; its `ryco.client-key.v1` fingerprint is recomputed here. */
+  readonly identityPublicKey: Uint8Array;
+  /** X25519 client agreement key, the Noise `s` of IK. */
+  readonly agreementPublicKey: Uint8Array;
+  readonly agreementSecretKey: Uint8Array;
+  /** Exact §7.4 transcript bytes. */
+  readonly prekeyTranscript: Uint8Array;
+  readonly prekeySignature: Uint8Array;
+}
+
+/**
+ * Client credentials, split by trust source so Web cannot represent a grant
+ * and a native account grant cannot accidentally run as the local suite.
+ * `trustSource` remains optional only on the legacy local arm so existing
+ * suite-0x01 callers retain their exact source shape and bytes.
+ */
 export type E2eeClientHandshakeCredentials =
-  | {
-      readonly tier: "native";
-      readonly accountId: string;
-      /** P-256 client identity key; its `ryco.client-key.v1` fingerprint is recomputed here. */
-      readonly identityPublicKey: Uint8Array;
-      /** X25519 client agreement key, the Noise `s` of IK. */
-      readonly agreementPublicKey: Uint8Array;
-      readonly agreementSecretKey: Uint8Array;
-      /** Exact §7.4 transcript bytes. */
-      readonly prekeyTranscript: Uint8Array;
-      readonly prekeySignature: Uint8Array;
-    }
-  | { readonly tier: "web" };
+  | (E2eeNativeClientHandshakeKeyMaterial & {
+      readonly trustSource?: "locally-verified" | undefined;
+    })
+  | (E2eeNativeClientHandshakeKeyMaterial & {
+      readonly trustSource: "account-enrolled";
+      /** Result of `verifyHubDeviceGrant`; exact envelope bytes are retained. */
+      readonly deviceGrant: DecodedHubDeviceGrant;
+    })
+  | { readonly tier: "web"; readonly trustSource?: "web-unsigned" | undefined };
+
+type E2eeAccountGrantClientCredentials = Extract<
+  E2eeClientHandshakeCredentials,
+  { readonly trustSource: "account-enrolled" }
+>;
+
+function isAccountGrantCredentials(
+  credentials: E2eeClientHandshakeCredentials,
+): credentials is E2eeAccountGrantClientCredentials {
+  return credentials.tier === "native" && credentials.trustSource === "account-enrolled";
+}
+
+function e2eeHandshakeTrustSource(tier: E2eeTier, suite: E2eeSuiteId): NativeE2eeTrustSource {
+  if (tier === "web") return "web-unsigned";
+  return suite === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256
+    ? "account-enrolled"
+    : "locally-verified";
+}
 
 function buildContext(input: {
   readonly channel: E2eeHandshakeChannel;
@@ -1188,6 +1315,95 @@ function buildContext(input: {
     nodeContinuityChainTranscripts: input.advertised.continuityChainTranscripts,
     nodeContinuityId: input.advertised.continuityId,
     client: input.client,
+  });
+  return { block, commitment: e2eeAuthorizationContextCommitment(block) };
+}
+
+function accountGrantBindingsMatch(input: {
+  readonly channel: E2eeHandshakeChannel;
+  readonly advertised: E2eeAdvertisedChannelMaterial;
+  readonly grant: DecodedHubDeviceGrant;
+  readonly certificate: E2eeClientPrekeyCertificate;
+  readonly certificateDigest: Uint8Array;
+  readonly intendedCapability: string;
+  readonly intendedRole: string;
+}): boolean {
+  const { channel, advertised, grant, certificate } = input;
+  const claims = grant.claims;
+  const grantContext = channel.accountGrantContext;
+  const statementDigest = advertised.capabilityStatementDigest;
+  const policyGeneration = advertised.policyGeneration;
+  return (
+    channel.relayProtocolMajor === 1 &&
+    channel.relayProtocolMinor >= 3 &&
+    grantContext !== undefined &&
+    statementDigest instanceof Uint8Array &&
+    Number.isSafeInteger(policyGeneration) &&
+    policyGeneration !== undefined &&
+    claims.suiteId === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256 &&
+    claims.issuerHubOrigin === channel.hubOrigin &&
+    claims.accountId === certificate.accountId &&
+    claims.nodeId === advertised.nodeId &&
+    claims.nodeContinuityId === advertised.continuityId &&
+    claims.nodePolicyGeneration === policyGeneration &&
+    claims.relayTicketId === grantContext.relayTicketId &&
+    claims.capabilities.some((capability) => capability === input.intendedCapability) &&
+    e2eeRoleWithinCeiling(input.intendedRole, claims.maximumRole) &&
+    e2eeSecretBytesEqual(grant.grantDigest, sha256(grant.envelope)) &&
+    e2eeSecretBytesEqual(grant.grantDigest, grantContext.deviceGrantDigest) &&
+    e2eeSecretBytesEqual(
+      claims.nodeCapabilityStatementDigest,
+      grantContext.nodeCapabilityStatementDigest,
+    ) &&
+    e2eeSecretBytesEqual(claims.nodeCapabilityStatementDigest, statementDigest) &&
+    e2eeSecretBytesEqual(claims.clientPrekeyCertificateDigest, input.certificateDigest) &&
+    e2eeSecretBytesEqual(claims.deviceIdentityPublicKey, certificate.identityPublicKey) &&
+    e2eeSecretBytesEqual(claims.deviceIdentityFingerprint, certificate.identityFingerprint) &&
+    e2eeSecretBytesEqual(claims.deviceAgreementPublicKey, certificate.agreementPublicKey) &&
+    e2eeSecretBytesEqual(claims.deviceAgreementFingerprint, certificate.agreementFingerprint) &&
+    e2eeSecretBytesEqual(claims.nodeIdentityFingerprint, advertised.nodeIdentityFingerprint) &&
+    e2eeSecretBytesEqual(claims.nodeAgreementPublicKey, advertised.agreementPublicKey) &&
+    e2eeSecretBytesEqual(
+      claims.nodeAgreementFingerprint,
+      e2eeKeyFingerprint("agreement", advertised.agreementPublicKey),
+    )
+  );
+}
+
+function buildAccountGrantContext(input: {
+  readonly channel: E2eeHandshakeChannel;
+  readonly advertised: E2eeAdvertisedChannelMaterial;
+  readonly grant: DecodedHubDeviceGrant;
+  readonly certificate: E2eeClientPrekeyCertificate;
+  readonly certificateDigest: Uint8Array;
+  readonly intendedCapability: string;
+  readonly intendedRole: string;
+}): { readonly block: Uint8Array; readonly commitment: Uint8Array } {
+  if (!accountGrantBindingsMatch(input)) invalidRelayE2eeInput();
+  const block = encodeE2eeAccountGrantAuthorizationContext({
+    hubOrigin: input.channel.hubOrigin,
+    channelId: input.channel.channelId,
+    relayProtocolMajor: input.channel.relayProtocolMajor,
+    relayProtocolMinor: input.channel.relayProtocolMinor,
+    e2eeVersion: E2EE_PROTOCOL_VERSION,
+    suiteId: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+    nodeId: input.advertised.nodeId,
+    nodeIdentityFingerprint: input.advertised.nodeIdentityFingerprint,
+    clientIntendedCapability: input.intendedCapability,
+    clientIntendedRole: input.intendedRole,
+    channelOpenCapability: input.channel.channelOpenCapability,
+    channelOpenEffectiveRole: input.channel.channelOpenEffectiveRole,
+    nodeAgreementFingerprint: e2eeKeyFingerprint("agreement", input.advertised.agreementPublicKey),
+    nodeContinuityChainTranscripts: input.advertised.continuityChainTranscripts,
+    nodeContinuityId: input.advertised.continuityId,
+    client: {
+      tier: "native",
+      accountId: input.certificate.accountId,
+      identityFingerprint: input.certificate.identityFingerprint,
+      agreementFingerprint: input.certificate.agreementFingerprint,
+    },
+    grant: input.grant.claims,
+    deviceGrantDigest: input.grant.grantDigest,
   });
   return { block, commitment: e2eeAuthorizationContextCommitment(block) };
 }
@@ -1268,6 +1484,7 @@ export type E2eeClientEstablishedResult =
       /** §6.5 secrets; OWNERSHIP TRANSFERS to the caller, which erases them (§9.5). */
       readonly secrets: E2eeSessionSecrets;
       readonly suite: E2eeSuiteId;
+      readonly trustSource: NativeE2eeTrustSource;
       readonly contextBlock: Uint8Array;
       readonly serverAcceptTbs: Uint8Array;
       readonly confirmationTranscript: Uint8Array;
@@ -1311,6 +1528,18 @@ export class E2eeClientHandshake {
   constructor(options: E2eeClientHandshakeOptions) {
     if (!isE2eeSuiteId(options.selectedSuite)) {
       throw new TypeError("Relay E2EE client handshake requires a registered suite selection.");
+    }
+    const accountSuite = options.selectedSuite === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256;
+    if (
+      accountSuite !== isAccountGrantCredentials(options.credentials) ||
+      (accountSuite &&
+        (options.credentials.tier !== "native" ||
+          options.channel.relayProtocolMajor !== 1 ||
+          options.channel.relayProtocolMinor < 3 ||
+          options.channel.accountGrantContext === undefined)) ||
+      (!accountSuite && options.channel.accountGrantContext !== undefined)
+    ) {
+      throw new TypeError("Relay E2EE suite, trust source, and channel context do not agree.");
     }
     this.#options = options;
     this.#tier = options.credentials.tier;
@@ -1379,32 +1608,90 @@ export class E2eeClientHandshake {
       return this.#fail(fatal("P13", "context_mismatch"));
     }
 
+    let accountGrantCertificate:
+      | {
+          readonly certificate: E2eeClientPrekeyCertificate;
+          readonly digest: Uint8Array;
+          readonly grant: DecodedHubDeviceGrant;
+        }
+      | undefined;
+    if (isAccountGrantCredentials(credentials)) {
+      const carrier = encodeClientE2eePrekeyCertificateCarrier(
+        credentials.prekeyTranscript,
+        credentials.prekeySignature,
+      );
+      const verifiedCertificate = verifyE2eeClientPrekeyCertificate({
+        transcript: credentials.prekeyTranscript,
+        signature: credentials.prekeySignature,
+        hubOrigin: options.channel.hubOrigin,
+        suite: options.selectedSuite,
+        now,
+      });
+      const decodedGrant = decodeHubDeviceGrant(credentials.deviceGrant.envelope);
+      if (
+        verifiedCertificate.kind === "error" ||
+        decodedGrant.kind === "error" ||
+        !e2eeSecretBytesEqual(decodedGrant.claimsBytes, credentials.deviceGrant.claimsBytes) ||
+        !e2eeSecretBytesEqual(decodedGrant.signature, credentials.deviceGrant.signature) ||
+        !e2eeSecretBytesEqual(decodedGrant.grantDigest, credentials.deviceGrant.grantDigest) ||
+        verifiedCertificate.certificate.accountId !== credentials.accountId ||
+        !e2eeSecretBytesEqual(
+          verifiedCertificate.certificate.identityPublicKey,
+          credentials.identityPublicKey,
+        ) ||
+        !e2eeSecretBytesEqual(
+          verifiedCertificate.certificate.agreementPublicKey,
+          credentials.agreementPublicKey,
+        )
+      ) {
+        throw new TypeError("Relay E2EE account grant does not match the client certificate.");
+      }
+      accountGrantCertificate = {
+        certificate: verifiedCertificate.certificate,
+        digest: sha256(carrier),
+        grant: decodedGrant,
+      };
+    }
+
     const context =
-      credentials.tier === "native"
-        ? buildContext({
+      isAccountGrantCredentials(credentials) && accountGrantCertificate !== undefined
+        ? buildAccountGrantContext({
             channel: options.channel,
             advertised: options.advertised,
-            suite: options.selectedSuite,
+            grant: accountGrantCertificate.grant,
+            certificate: accountGrantCertificate.certificate,
+            certificateDigest: accountGrantCertificate.digest,
             intendedCapability: options.intendedCapability,
             intendedRole: options.intendedRole,
-            client: {
-              tier: "native",
-              accountId: credentials.accountId,
-              identityFingerprint: e2eeKeyFingerprint(
-                "client-identity",
-                credentials.identityPublicKey,
-              ),
-              agreementFingerprint: e2eeKeyFingerprint("agreement", credentials.agreementPublicKey),
-            },
           })
-        : buildContext({
-            channel: options.channel,
-            advertised: options.advertised,
-            suite: options.selectedSuite,
-            intendedCapability: options.intendedCapability,
-            intendedRole: options.intendedRole,
-            client: { tier: "web" },
-          });
+        : credentials.tier === "native"
+          ? buildContext({
+              channel: options.channel,
+              advertised: options.advertised,
+              suite: options.selectedSuite,
+              intendedCapability: options.intendedCapability,
+              intendedRole: options.intendedRole,
+              client: {
+                tier: "native",
+                accountId: credentials.accountId,
+                identityFingerprint: e2eeKeyFingerprint(
+                  "client-identity",
+                  credentials.identityPublicKey,
+                ),
+                agreementFingerprint: e2eeKeyFingerprint(
+                  "agreement",
+                  credentials.agreementPublicKey,
+                ),
+              },
+            })
+          : buildContext({
+              channel: options.channel,
+              advertised: options.advertised,
+              suite: options.selectedSuite,
+              intendedCapability: options.intendedCapability,
+              intendedRole: options.intendedRole,
+              client: { tier: "web" },
+            });
 
     const prologue = encodeE2eeNoisePrologue({
       hubOrigin: options.channel.hubOrigin,
@@ -1428,13 +1715,19 @@ export class E2eeClientHandshake {
           "Relay E2EE client agreement secret key does not match its certificate key.",
         );
       }
-      payload = encodeE2eeIkHelloPayload({
+      const nativePayload = {
         clientPrekeyTranscript: credentials.prekeyTranscript,
         clientPrekeySignature: credentials.prekeySignature,
         accountId: credentials.accountId,
         intendedCapability: options.intendedCapability,
         intendedRole: options.intendedRole,
-      });
+      };
+      payload = isAccountGrantCredentials(credentials)
+        ? encodeE2eeAccountGrantIkHelloPayload({
+            ...nativePayload,
+            hubDeviceGrant: accountGrantCertificate!.grant.envelope,
+          })
+        : encodeE2eeIkHelloPayload(nativePayload);
     } else {
       // §8.5: NX message-1 payload MUST be zero-length.
       payload = E2EE_NX_HELLO_PAYLOAD;
@@ -1675,6 +1968,7 @@ export class E2eeClientHandshake {
       sessionBindingHash,
       secrets,
       suite: this.#options.selectedSuite,
+      trustSource: e2eeHandshakeTrustSource(this.#tier, this.#options.selectedSuite),
       contextBlock,
       serverAcceptTbs,
       confirmationTranscript,
@@ -1727,8 +2021,41 @@ export interface E2eeNodeModeTransitionSelection {
   /** §7.6 element 14's vocabulary; `e2eeTierNoisePattern(tier)`, computed once here. */
   readonly pattern: E2eeNoisePattern;
   readonly suite: E2eeSuiteId;
+  readonly trustSource: NativeE2eeTrustSource;
   /** §8.6 step 6; IK only — NX carries no Branch A record and no snapshot. */
   readonly admittedAuthority: E2eeAdmittedAuthoritySnapshot | undefined;
+  /** §18.7; suite 0x02 only. Contains no grant envelope or raw public key. */
+  readonly accountGrantAuthority: E2eeAccountGrantAuthoritySnapshot | undefined;
+}
+
+/** The bounded enrollment/authority handle retained by an account-enrolled channel. */
+export interface E2eeAccountGrantAuthoritySnapshot {
+  readonly trustSource: "account-enrolled";
+  readonly hubOrigin: string;
+  readonly accountId: string;
+  readonly enrollmentId: string;
+  readonly enrollmentRevision: number;
+  readonly accountAuthEpoch: number;
+  readonly deviceAuthEpoch: number;
+  readonly clientIdentityFingerprint: Uint8Array;
+  readonly maximumRole: string;
+  readonly capabilitySet: readonly string[];
+}
+
+/**
+ * Inputs handed to the node owner's authenticated Hub/keyset verifier. The
+ * callback performs signature, time, revocation, ticket, policy, and local
+ * restriction checks; this pure handshake layer performs no fetch or write.
+ */
+export interface E2eeAccountGrantNodeVerificationInput {
+  readonly grant: DecodedHubDeviceGrant;
+  readonly certificate: E2eeClientPrekeyCertificate;
+  readonly certificateDigest: Uint8Array;
+  readonly channel: E2eeHandshakeChannel;
+  readonly advertised: E2eeAdvertisedChannelMaterial;
+  readonly intendedCapability: string;
+  readonly intendedRole: string;
+  readonly now: number;
 }
 
 /** Row N3 (§4.4): the channel's transition into `e2ee`. */
@@ -1805,6 +2132,10 @@ export interface E2eeNodeHandshakeOptions {
         readonly clientIdentityPublicKey: Uint8Array;
       }) => void)
     | undefined;
+  /** §18.7 suite-0x02 authorization against connector-owned Hub state. */
+  readonly verifyAccountGrant?:
+    | ((input: E2eeAccountGrantNodeVerificationInput) => boolean)
+    | undefined;
   /**
    * Row N3 (§8.6 step 8). The caller performs the transition into `e2ee` here,
    * inside whatever serialization makes the step-2 and step-6 reads atomic with
@@ -1842,12 +2173,15 @@ export type E2eeNodeAcceptResult =
       readonly secrets: E2eeSessionSecrets;
       readonly suite: E2eeSuiteId;
       readonly tier: E2eeTier;
+      readonly trustSource: NativeE2eeTrustSource;
       readonly contextBlock: Uint8Array;
       readonly contextCommitment: Uint8Array;
       readonly serverAcceptTbs: Uint8Array;
       readonly confirmationTranscript: Uint8Array;
       /** §8.6 step 6; IK only — NX carries no Branch A record and no snapshot. */
       readonly admittedAuthority: E2eeAdmittedAuthoritySnapshot | undefined;
+      /** §18.7 suite-0x02 lease handle; never includes the grant envelope. */
+      readonly accountGrantAuthority: E2eeAccountGrantAuthoritySnapshot | undefined;
       /** §8.9: the implicit-finish deadline, armed unconditionally. */
       readonly implicitFinishDeadlineAt: number;
     }
@@ -1878,6 +2212,7 @@ export class E2eeNodeHandshake {
   readonly #options: E2eeNodeHandshakeOptions;
   #state: NodeState = "awaiting_hello";
   #admittedAuthority: E2eeAdmittedAuthoritySnapshot | undefined;
+  #accountGrantAuthority: E2eeAccountGrantAuthoritySnapshot | undefined;
   #tier: E2eeTier | undefined;
   #implicitFinishDeadlineAt: number;
 
@@ -1898,6 +2233,11 @@ export class E2eeNodeHandshake {
   /** §8.6 step 6 / §15. IK only. */
   get admittedAuthority(): E2eeAdmittedAuthoritySnapshot | undefined {
     return this.#admittedAuthority;
+  }
+
+  /** §18.7 suite-0x02 lease handle. */
+  get accountGrantAuthority(): E2eeAccountGrantAuthoritySnapshot | undefined {
+    return this.#accountGrantAuthority;
   }
 
   /**
@@ -2003,7 +2343,14 @@ export class E2eeNodeHandshake {
       !admittedPatterns.includes(e2eeTierNoisePattern(hello.tier)) ||
       !isE2eeSuiteId(hello.selectedSuite) ||
       !policy.suiteRegistry.includes(hello.selectedSuite) ||
-      !hello.offeredSuites.includes(hello.selectedSuite)
+      !hello.offeredSuites.includes(hello.selectedSuite) ||
+      (hello.selectedSuite === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256 &&
+        (hello.tier !== "native" ||
+          options.channel.relayProtocolMajor !== 1 ||
+          options.channel.relayProtocolMinor < 3 ||
+          options.channel.accountGrantContext === undefined)) ||
+      (hello.selectedSuite === E2EE_SUITE_25519_CHACHAPOLY_SHA256 &&
+        options.channel.accountGrantContext !== undefined)
     ) {
       return this.#fail(fatal("P9", "wrapper"));
     }
@@ -2061,9 +2408,15 @@ export class E2eeNodeHandshake {
           readonly identityPublicKey: Uint8Array;
         }
       | { readonly tier: "web" };
-    let claims: E2eeIkHelloPayload | undefined;
+    let claims: E2eeIkHelloPayload | E2eeAccountGrantIkHelloPayload | undefined;
+    let clientCertificate: E2eeClientPrekeyCertificate | undefined;
+    let certificateDigest: Uint8Array | undefined;
+    let accountGrant: DecodedHubDeviceGrant | undefined;
     if (tier === "native") {
-      const payloadDecoded = decodeE2eeIkHelloPayload(helloPayload);
+      const payloadDecoded =
+        suite === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256
+          ? decodeE2eeAccountGrantIkHelloPayload(helloPayload)
+          : decodeE2eeIkHelloPayload(helloPayload);
       if (payloadDecoded.kind === "error") {
         noise.destroy();
         return this.#fail(fatal("P11", "client_binding"));
@@ -2079,6 +2432,25 @@ export class E2eeNodeHandshake {
       if (certificate.kind === "error") {
         noise.destroy();
         return this.#fail(fatal("P11", "client_binding"));
+      }
+      clientCertificate = certificate.certificate;
+      certificateDigest = sha256(
+        encodeClientE2eePrekeyCertificateCarrier(
+          claims.clientPrekeyTranscript,
+          claims.clientPrekeySignature,
+        ),
+      );
+      if (suite === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256) {
+        if (!("hubDeviceGrant" in claims) || !(claims.hubDeviceGrant instanceof Uint8Array)) {
+          noise.destroy();
+          return this.#fail(fatal("P11", "client_binding"));
+        }
+        const decodedGrant = decodeHubDeviceGrant(claims.hubDeviceGrant);
+        if (decodedGrant.kind === "error") {
+          noise.destroy();
+          return this.#fail(fatal("P12", "authorization"));
+        }
+        accountGrant = decodedGrant;
       }
       const remoteStatic = noise.remoteStaticPublicKey;
       if (
@@ -2122,46 +2494,86 @@ export class E2eeNodeHandshake {
 
     // ── Step 6: authorization (IK) ──────────────────────────────────────────
     let snapshot: E2eeAdmittedAuthoritySnapshot | undefined;
+    let accountGrantSnapshot: E2eeAccountGrantAuthoritySnapshot | undefined;
     if (clientContext.tier === "native") {
-      const key: E2eeClientAuthorizationKey = {
-        hubOrigin: options.channel.hubOrigin,
-        accountId: clientContext.accountId,
-        clientIdentityFingerprint: clientContext.identityFingerprint,
-      };
-      const record = options.lookupClientAuthorization?.(key);
-      // §13.2 step 3, between the read and the refusal: the caps and the window
-      // reservation, in memory, with nothing emitted yet. It is deliberately not
-      // conditioned on `record` — see the option's own note for why the window
-      // is spent by a matching attempt whatever this read returned — and it
-      // deliberately changes nothing below it, because §11.2 requires the wire
-      // surface of a pairing attempt to be the one every other pre-key cause
-      // takes.
-      options.evaluatePairingAdmission?.({
-        hubOrigin: key.hubOrigin,
-        accountId: key.accountId,
-        clientIdentityFingerprint: key.clientIdentityFingerprint,
-        clientIdentityPublicKey: clientContext.identityPublicKey,
-      });
-      if (
-        record === undefined ||
-        record.status !== "approved" ||
-        !record.capabilitySet.includes(intendedCapability) ||
-        !e2eeRoleWithinCeiling(intendedRole, record.maxRole)
-      ) {
-        noise.destroy();
-        return this.#fail(fatal("P12", "authorization"));
+      if (suite === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256) {
+        if (
+          accountGrant === undefined ||
+          clientCertificate === undefined ||
+          certificateDigest === undefined ||
+          !accountGrantBindingsMatch({
+            channel: options.channel,
+            advertised: options.advertised,
+            grant: accountGrant,
+            certificate: clientCertificate,
+            certificateDigest,
+            intendedCapability,
+            intendedRole,
+          }) ||
+          options.verifyAccountGrant?.({
+            grant: accountGrant,
+            certificate: clientCertificate,
+            certificateDigest,
+            channel: options.channel,
+            advertised: options.advertised,
+            intendedCapability,
+            intendedRole,
+            now,
+          }) !== true
+        ) {
+          noise.destroy();
+          return this.#fail(fatal("P12", "authorization"));
+        }
+        accountGrantSnapshot = {
+          trustSource: "account-enrolled",
+          hubOrigin: options.channel.hubOrigin,
+          accountId: accountGrant.claims.accountId,
+          enrollmentId: accountGrant.claims.enrollmentId,
+          enrollmentRevision: accountGrant.claims.enrollmentRevision,
+          accountAuthEpoch: accountGrant.claims.accountAuthEpoch,
+          deviceAuthEpoch: accountGrant.claims.deviceAuthEpoch,
+          clientIdentityFingerprint: copyBytes(accountGrant.claims.deviceIdentityFingerprint),
+          maximumRole: accountGrant.claims.maximumRole,
+          capabilitySet: [...accountGrant.claims.capabilities],
+        };
+      } else {
+        const key: E2eeClientAuthorizationKey = {
+          hubOrigin: options.channel.hubOrigin,
+          accountId: clientContext.accountId,
+          clientIdentityFingerprint: clientContext.identityFingerprint,
+        };
+        const record = options.lookupClientAuthorization?.(key);
+        // §13.2 step 3, between the read and the refusal: the caps and the window
+        // reservation, in memory, with nothing emitted yet. It is deliberately not
+        // conditioned on `record` — see the option's own note for why the window
+        // is spent by a matching attempt whatever this read returned — and it
+        // deliberately changes nothing below it, because §11.2 requires the wire
+        // surface of a pairing attempt to be the one every other pre-key cause
+        // takes.
+        options.evaluatePairingAdmission?.({
+          hubOrigin: key.hubOrigin,
+          accountId: key.accountId,
+          clientIdentityFingerprint: key.clientIdentityFingerprint,
+          clientIdentityPublicKey: clientContext.identityPublicKey,
+        });
+        if (
+          record === undefined ||
+          record.status !== "approved" ||
+          !record.capabilitySet.includes(intendedCapability) ||
+          !e2eeRoleWithinCeiling(intendedRole, record.maxRole)
+        ) {
+          noise.destroy();
+          return this.#fail(fatal("P12", "authorization"));
+        }
+        snapshot = {
+          hubOrigin: key.hubOrigin,
+          accountId: key.accountId,
+          clientIdentityFingerprint: copyBytes(key.clientIdentityFingerprint),
+          status: record.status,
+          maxRole: record.maxRole,
+          capabilitySet: [...record.capabilitySet],
+        };
       }
-      // The admitted-authority snapshot: the full record key plus the status,
-      // ceiling, and capability set THIS READ returned, and no other record
-      // content (§8.6 step 6, §15).
-      snapshot = {
-        hubOrigin: key.hubOrigin,
-        accountId: key.accountId,
-        clientIdentityFingerprint: copyBytes(key.clientIdentityFingerprint),
-        status: record.status,
-        maxRole: record.maxRole,
-        capabilitySet: [...record.capabilitySet],
-      };
     }
 
     // ── Step 7: context reconstruction ──────────────────────────────────────
@@ -2169,14 +2581,27 @@ export class E2eeNodeHandshake {
     // claims, and the identity, prekey, chain, and continuity-id material IT
     // ADVERTISED ON THIS CHANNEL — never its current state, which a rotation
     // or prune concurrent with this channel may already have moved.
-    const context = buildContext({
-      channel: options.channel,
-      advertised: options.advertised,
-      suite,
-      intendedCapability,
-      intendedRole,
-      client: clientContext,
-    });
+    const context =
+      accountGrant !== undefined &&
+      clientCertificate !== undefined &&
+      certificateDigest !== undefined
+        ? buildAccountGrantContext({
+            channel: options.channel,
+            advertised: options.advertised,
+            grant: accountGrant,
+            certificate: clientCertificate,
+            certificateDigest,
+            intendedCapability,
+            intendedRole,
+          })
+        : buildContext({
+            channel: options.channel,
+            advertised: options.advertised,
+            suite,
+            intendedCapability,
+            intendedRole,
+            client: clientContext,
+          });
     if (!e2eeSecretBytesEqual(context.commitment, hello.contextCommitment)) {
       noise.destroy();
       return this.#fail(fatal("P13", "context_mismatch"));
@@ -2187,7 +2612,9 @@ export class E2eeNodeHandshake {
       tier,
       pattern: e2eeTierNoisePattern(tier),
       suite,
+      trustSource: e2eeHandshakeTrustSource(tier, suite),
       admittedAuthority: snapshot,
+      accountGrantAuthority: accountGrantSnapshot,
     }) ?? { kind: "entered" as const };
     if (transition.kind === "refused") {
       noise.destroy();
@@ -2259,6 +2686,7 @@ export class E2eeNodeHandshake {
     });
 
     this.#admittedAuthority = snapshot;
+    this.#accountGrantAuthority = accountGrantSnapshot;
     this.#state = "e2ee";
     return {
       kind: "accepted",
@@ -2268,11 +2696,13 @@ export class E2eeNodeHandshake {
       secrets,
       suite,
       tier,
+      trustSource: e2eeHandshakeTrustSource(tier, suite),
       contextBlock: context.block,
       contextCommitment: context.commitment,
       serverAcceptTbs,
       confirmationTranscript,
       admittedAuthority: snapshot,
+      accountGrantAuthority: accountGrantSnapshot,
       implicitFinishDeadlineAt: this.#implicitFinishDeadlineAt,
     };
   }
@@ -2305,6 +2735,10 @@ export class E2eeNodeHandshake {
     readonly reReadAuthorization?:
       | ((key: E2eeClientAuthorizationKey) => E2eeClientAuthorization | undefined)
       | undefined;
+    /** §18.7 account/enrollment epoch and policy re-check for suite 0x02. */
+    readonly reReadAccountGrantAuthorization?:
+      | ((snapshot: E2eeAccountGrantAuthoritySnapshot) => boolean)
+      | undefined;
   }): E2eeImplicitFinishResult {
     if (this.#state !== "e2ee") {
       throw new TypeError("Relay E2EE implicit finish requires an established handshake.");
@@ -2328,6 +2762,9 @@ export class E2eeNodeHandshake {
     readonly now: number;
     readonly reReadAuthorization?:
       | ((key: E2eeClientAuthorizationKey) => E2eeClientAuthorization | undefined)
+      | undefined;
+    readonly reReadAccountGrantAuthorization?:
+      | ((snapshot: E2eeAccountGrantAuthoritySnapshot) => boolean)
       | undefined;
   }): E2eeImplicitFinishResult {
     if (this.deadlineExpired(input.now)) {
@@ -2355,6 +2792,20 @@ export class E2eeNodeHandshake {
           reason: "authorization_withdrawn",
         };
       }
+    }
+    const accountSnapshot = this.#accountGrantAuthority;
+    if (
+      accountSnapshot !== undefined &&
+      input.reReadAccountGrantAuthorization !== undefined &&
+      !input.reReadAccountGrantAuthorization(accountSnapshot)
+    ) {
+      this.#state = "failed";
+      return {
+        kind: "fatal",
+        row: "Q9",
+        errorCode: "policy",
+        reason: "authorization_withdrawn",
+      };
     }
     this.#state = "finished";
     return { kind: "finished" };

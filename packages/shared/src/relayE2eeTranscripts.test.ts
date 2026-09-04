@@ -1,3 +1,5 @@
+import type { HubDeviceGrantClaims } from "@ryco/contracts/native-e2ee";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vite-plus/test";
 
 import { canonicalizeHubOrigin } from "./nodeIdentity.ts";
@@ -17,6 +19,7 @@ import {
 } from "./relayE2eeKeys.ts";
 import {
   E2EE_CLIENT_PREKEY_TRANSCRIPT_DOMAIN,
+  E2EE_ACCOUNT_CONTEXT_DOMAIN,
   E2EE_CONTEXT_DOMAIN,
   E2EE_NODE_CAPABILITY_DIGEST_DOMAIN,
   E2EE_NODE_CAPABILITY_TRANSCRIPT_DOMAIN,
@@ -35,6 +38,8 @@ import {
   e2eeEffectiveAdmittedPatterns,
   e2eeTierNoisePattern,
   encodeClientE2eePrekeyTranscript,
+  encodeClientE2eePrekeyCertificateCarrier,
+  encodeE2eeAccountGrantAuthorizationContext,
   encodeE2eeAuthorizationContext,
   encodeE2eeNoisePrologue,
   encodeNodeE2eeCapabilitySigningEnvelope,
@@ -45,6 +50,7 @@ import {
   validateNodeE2eeContinuityChain,
   verifyNodeE2eeCapabilityCrossSignature,
   type E2eeAuthorizationContextInput,
+  type E2eeAccountGrantAuthorizationContextInput,
   type NodeE2eeCapabilityTranscriptInput,
   type NodeIdentityContinuityChainEntry,
 } from "./relayE2eeTranscripts.ts";
@@ -211,6 +217,62 @@ const webContextInput: E2eeAuthorizationContextInput = {
   channelOpenEffectiveRole: "viewer",
   nodeContinuityChainTranscripts: [],
   client: { tier: "web" },
+};
+
+const ACCOUNT_CONTEXT_ACCOUNT_ID = `acct_${"A".repeat(22)}`;
+const ACCOUNT_CERTIFICATE_CARRIER = encodeClientE2eePrekeyCertificateCarrier(
+  bytes(CLIENT_PREKEY_TRANSCRIPT),
+  bytes(CLIENT_PREKEY_SIGNATURE),
+);
+const ACCOUNT_STATEMENT_DIGEST = sha256(bytes(CAPABILITY_TRANSCRIPT));
+const ACCOUNT_GRANT: HubDeviceGrantClaims = {
+  version: 1,
+  suiteId: 2,
+  issuerHubOrigin: HUB_ORIGIN,
+  keyId: `hgk_${"K".repeat(22)}`,
+  grantId: `hgr_${"H".repeat(22)}`,
+  accountId: ACCOUNT_CONTEXT_ACCOUNT_ID,
+  accountAuthEpoch: 3,
+  enrollmentId: `enr_${"E".repeat(22)}`,
+  enrollmentRevision: 4,
+  deviceAuthEpoch: 5,
+  deviceIdentityAlgorithm: "p256",
+  deviceIdentityPublicKey: CLIENT_PUBLIC_KEY,
+  deviceIdentityFingerprint: e2eeKeyFingerprint("client-identity", CLIENT_PUBLIC_KEY),
+  deviceAgreementAlgorithm: "x25519",
+  deviceAgreementPublicKey: CLIENT_AGREEMENT_PUBLIC_KEY,
+  deviceAgreementFingerprint: e2eeKeyFingerprint("agreement", CLIENT_AGREEMENT_PUBLIC_KEY),
+  clientPrekeyCertificateDigest: sha256(ACCOUNT_CERTIFICATE_CARRIER),
+  nodeId: NODE_ID,
+  nodeIdentityAlgorithm: "ed25519",
+  nodeIdentityPublicKey: NODE_PUBLIC_KEY,
+  nodeIdentityFingerprint: e2eeKeyFingerprint("node-identity", NODE_PUBLIC_KEY),
+  nodeAgreementAlgorithm: "x25519",
+  nodeAgreementPublicKey: NODE_AGREEMENT_PUBLIC_KEY,
+  nodeAgreementFingerprint: e2eeKeyFingerprint("agreement", NODE_AGREEMENT_PUBLIC_KEY),
+  nodeContinuityId: CONTINUITY_ID,
+  nodePolicyGeneration: 7,
+  nodeCapabilityStatementDigest: ACCOUNT_STATEMENT_DIGEST,
+  relayTicketId: `rtk_${"T".repeat(22)}`,
+  maximumRole: "operator",
+  capabilities: ["ryco.rpc"],
+  issuedAt: ISSUED_AT,
+  notBefore: ISSUED_AT - 1_000,
+  expiresAt: ISSUED_AT + 60_000,
+  nonce: new Uint8Array(32).fill(0x5a),
+} as unknown as HubDeviceGrantClaims;
+const accountContextInput: E2eeAccountGrantAuthorizationContextInput = {
+  ...nativeContextInput,
+  relayProtocolMinor: 3,
+  suiteId: 2,
+  client: {
+    tier: "native",
+    accountId: ACCOUNT_CONTEXT_ACCOUNT_ID,
+    identityFingerprint: ACCOUNT_GRANT.deviceIdentityFingerprint,
+    agreementFingerprint: ACCOUNT_GRANT.deviceAgreementFingerprint,
+  },
+  grant: ACCOUNT_GRANT,
+  deviceGrantDigest: sha256(new TextEncoder().encode("exact signed grant envelope")),
 };
 
 describe("relay E2EE transcript domains and literals (§3.5, §7)", () => {
@@ -691,7 +753,7 @@ describe("§7.6 capability statement transcript and §7.2.1 envelope", () => {
       encodeNodeE2eeCapabilityTranscript({ ...capabilityInput, suiteRegistry: [] }),
     ).toThrow(RelayE2eeValidationError);
     expect(() =>
-      encodeNodeE2eeCapabilityTranscript({ ...capabilityInput, suiteRegistry: [2] }),
+      encodeNodeE2eeCapabilityTranscript({ ...capabilityInput, suiteRegistry: [3] }),
     ).toThrow(RelayE2eeValidationError);
     expect(() =>
       encodeNodeE2eeCapabilityTranscript({
@@ -913,6 +975,56 @@ describe("§8.3 authorization context and §8.4 prologue", () => {
     // 0x92 is a definite-length CBOR array of exactly 18 elements (§8.3).
     expect(context[0]).toBe(0x92);
     expect(hex(e2eeAuthorizationContextCommitment(context))).toBe(NATIVE_CONTEXT_COMMITMENT);
+  });
+
+  it("encodes the exact certificate carrier and 29-element account context", () => {
+    const carrier = decodeCanonicalE2eeCbor(ACCOUNT_CERTIFICATE_CARRIER);
+    expect(carrier).toEqual({
+      kind: "ok",
+      value: [bytes(CLIENT_PREKEY_TRANSCRIPT), bytes(CLIENT_PREKEY_SIGNATURE)],
+    });
+
+    const context = encodeE2eeAccountGrantAuthorizationContext(accountContextInput);
+    const decoded = decodeCanonicalE2eeCbor(context);
+    expect(decoded.kind).toBe("ok");
+    if (decoded.kind !== "ok" || !Array.isArray(decoded.value)) return;
+    expect(decoded.value).toHaveLength(29);
+    expect(decoded.value[0]).toBe(E2EE_ACCOUNT_CONTEXT_DOMAIN);
+    expect(decoded.value.slice(18)).toEqual([
+      accountContextInput.deviceGrantDigest,
+      ACCOUNT_GRANT.relayTicketId,
+      ACCOUNT_GRANT.nodeCapabilityStatementDigest,
+      ACCOUNT_GRANT.clientPrekeyCertificateDigest,
+      ACCOUNT_GRANT.enrollmentId,
+      ACCOUNT_GRANT.enrollmentRevision,
+      ACCOUNT_GRANT.accountAuthEpoch,
+      ACCOUNT_GRANT.deviceAuthEpoch,
+      ACCOUNT_GRANT.maximumRole,
+      ACCOUNT_GRANT.capabilities,
+      ACCOUNT_GRANT.nonce,
+    ]);
+    expect(hex(e2eeAuthorizationContextCommitment(context))).not.toBe(NATIVE_CONTEXT_COMMITMENT);
+  });
+
+  it("rejects account-context suite, protocol, and overlapping-identity disagreement", () => {
+    expect(() =>
+      encodeE2eeAccountGrantAuthorizationContext({
+        ...accountContextInput,
+        relayProtocolMinor: 2,
+      }),
+    ).toThrow(RelayE2eeValidationError);
+    expect(() =>
+      encodeE2eeAccountGrantAuthorizationContext({
+        ...accountContextInput,
+        nodeContinuityId: "nct_ZZZZZZZZZZZZZZZZZZZZZZ",
+      }),
+    ).toThrow(RelayE2eeValidationError);
+    expect(() =>
+      encodeE2eeAccountGrantAuthorizationContext({
+        ...accountContextInput,
+        client: { ...accountContextInput.client, accountId: `acct_${"Z".repeat(22)}` },
+      }),
+    ).toThrow(RelayE2eeValidationError);
   });
 
   it("applies the NX absence semantics to elements 10 and 16 only", () => {

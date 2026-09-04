@@ -108,6 +108,8 @@ export type HubDeviceGrantFailureReason =
 
 export interface DecodedHubDeviceGrant {
   readonly claims: HubDeviceGrantClaims;
+  /** Exact canonical signed envelope bytes. */
+  readonly envelope: Uint8Array;
   readonly claimsBytes: Uint8Array;
   readonly signature: Uint8Array;
   readonly grantDigest: Uint8Array;
@@ -353,6 +355,7 @@ export function decodeHubDeviceGrant(envelope: Uint8Array): HubDeviceGrantDecode
   return {
     kind: "ok",
     claims: semantic.value,
+    envelope: Uint8Array.from(envelope),
     claimsBytes: Uint8Array.from(claimsBytes),
     signature: Uint8Array.from(signature),
     grantDigest: sha256(envelope),

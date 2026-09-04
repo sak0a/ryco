@@ -18,8 +18,13 @@ import {
 import {
   E2EE_NOISE_PATTERN_IK,
   E2EE_NOISE_PATTERN_NX,
+  encodeE2eeNoisePrologue,
   type E2eeNoisePattern,
 } from "./relayE2eeTranscripts.ts";
+import {
+  E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+} from "./relayE2eeWire.ts";
 
 // THE PROPERTY-BASED STATE-MACHINE SUITE — docs/relay-e2ee-protocol.md §14.1.
 //
@@ -979,6 +984,62 @@ describe("property: role symmetry and transcript binding", () => {
           first.destroy();
           second.destroy();
         }
+      }),
+      { seed: PROPERTY_SEED, numRuns: HANDSHAKE_RUNS },
+    );
+  });
+
+  it("domain-separates suite 0x01 and account-grant suite 0x02 in IK", () => {
+    const commitmentArb = fc.uint8Array({ minLength: 32, maxLength: 32 });
+    fc.assert(
+      fc.property(materialArb, commitmentArb, (drawn, contextCommitment) => {
+        const base = {
+          hubOrigin: "https://hub.example.com",
+          channelId: "ch_GGGGGGGGGGGGGGGGGGGGGG",
+          relayProtocolMajor: 1,
+          relayProtocolMinor: 3,
+          e2eeVersion: 1,
+          nodeId: "node_AAAAAAAAAAAAAAAAAAAAAA",
+          contextCommitment,
+        } as const;
+        const localMaterial: HandshakeMaterial = {
+          ...drawn,
+          pattern: E2EE_NOISE_PATTERN_IK,
+          prologue: encodeE2eeNoisePrologue({
+            ...base,
+            suiteId: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+          }),
+        };
+        const accountMaterial: HandshakeMaterial = {
+          ...localMaterial,
+          prologue: encodeE2eeNoisePrologue({
+            ...base,
+            suiteId: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+          }),
+        };
+        const localInitiator = initiatorOf(localMaterial);
+        const accountInitiator = initiatorOf(accountMaterial);
+        try {
+          const localMessage = localInitiator.writeMessage(localMaterial.payload1);
+          const accountMessage = accountInitiator.writeMessage(accountMaterial.payload1);
+          expect(equalBytes(localMaterial.prologue, accountMaterial.prologue)).toBe(false);
+          expect(equalBytes(localMessage, accountMessage)).toBe(false);
+          expect(
+            equalBytes(
+              localInitiator.testOnlyHandshakeHash!,
+              accountInitiator.testOnlyHandshakeHash!,
+            ),
+          ).toBe(false);
+        } finally {
+          localInitiator.destroy();
+          accountInitiator.destroy();
+        }
+
+        // The suite changes the transcript/AAD binding, not the registered
+        // X25519/ChaChaPoly/SHA-256 primitive schedule itself.
+        const local = runPair(localMaterial);
+        const account = runPair(accountMaterial);
+        return sessionKeysEqual(local.initiator, account.initiator);
       }),
       { seed: PROPERTY_SEED, numRuns: HANDSHAKE_RUNS },
     );

@@ -355,12 +355,11 @@
         "18.7",
         "16.3 F19"
       ],
-      "sha256": "e201e932db1594c04cac306f81bd76231961875d4b3f05ce37681762848a13c3",
+      "sha256": "1ca3c923a16669b1e78579078a251eb707eb1a48892d08e58615961dda525529",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 43,
       "deferred": [
-        "§16.3 F19 suite-0x02 context, Noise trace, and confirmation vectors are deferred. Owned by the account-grant IK suite implementation.",
         "§16.3 F19 relay-minor, connector-generation, statement-acknowledgement, retained-prekey, in-flight revocation, lease, durable-write, and four-mode policy vectors are deferred. Owned by the node and Hub lifecycle implementations.",
         "§16.3 F19 Web-isolation vectors are deferred. Owned by the Web isolation implementation.",
         "§16.4 cross-runtime equality: the Web-isolation cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
@@ -2935,7 +2934,6 @@
       "title": "Account-enrolled native Hub device grants",
       "file": "f19-account-device-grant.json",
       "deferred": [
-        "§16.3 F19 suite-0x02 context, Noise trace, and confirmation vectors are deferred. Owned by the account-grant IK suite implementation.",
         "§16.3 F19 relay-minor, connector-generation, statement-acknowledgement, retained-prekey, in-flight revocation, lease, durable-write, and four-mode policy vectors are deferred. Owned by the node and Hub lifecycle implementations.",
         "§16.3 F19 Web-isolation vectors are deferred. Owned by the Web isolation implementation.",
         "§16.4 cross-runtime equality: the Web-isolation cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
@@ -2985,7 +2983,7 @@
   "livenessCensus": {
     "section": "16.3",
     "status": "read-liveness measured; per-case rule is a one-live-leaf floor",
-    "measuredOn": "2026-08-05",
+    "measuredOn": "2026-09-04",
     "unit": "One LEAF is one scalar under a case's `expected` block; a §16.2 `{\"$bytes\": …}` wrapper counts as one leaf, not two.",
     "method": "READ-LIVENESS, measured in one run of each consuming suite and unioned. Every family is loaded through `packages/shared/src/relayE2eeCorpusLiveness.ts`, which hands each leaf to the suite behind an accessor that records the read; a leaf is LIVE when some suite read it. The three runs are `bun run --cwd packages/shared test` (the shared corpus suite and the F15 Noise suite) and `bun run --cwd apps/server test src` (the node suite). Re-measuring means re-running those with the recorder in place. The union is not taken on trust: every leaf a suite other than the shared one is the sole reader of is listed path by path in `E2EE_CORPUS_DELEGATED_LEAF_READS`, the shared suite rejects any such path that is not a real leaf or that it reads itself, the named suite asserts it really reads its own paths, and the per-family `liveLeaves` below is then asserted to EQUAL that union. A published figure that drifts above what the suites read fails a test.",
     "whatLiveMeans": "Read-liveness is an UPPER BOUND on assertion. A suite that reads a value and does not compare it, or reads it only to feed it back as an input, marks it live here. It is exact in the direction that matters: a leaf no suite reads cannot be asserted by one, so every INERT leaf below is proof of absent coverage, while a LIVE leaf is only evidence of present coverage.",
@@ -3018,10 +3016,10 @@
     },
     "totals": {
       "cases": 334,
-      "expectedLeaves": 3388,
-      "liveLeaves": 2224,
+      "expectedLeaves": 3434,
+      "liveLeaves": 2270,
       "inertLeaves": 1164,
-      "livePercent": 65.6,
+      "livePercent": 66.1,
       "casesWithNoLiveLeaf": 17
     },
     "casesByLiveLeafCount": {
@@ -3045,7 +3043,7 @@
         },
         {
           "liveLeaves": "6-10",
-          "cases": 56
+          "cases": 55
         },
         {
           "liveLeaves": "11-25",
@@ -3053,7 +3051,7 @@
         },
         {
           "liveLeaves": "26+",
-          "cases": 16
+          "cases": 17
         }
       ],
       "atMostTwoLiveLeaves": 137,
@@ -3280,13 +3278,13 @@
         "family": 19,
         "file": "f19-account-device-grant.json",
         "cases": 43,
-        "expectedLeaves": 91,
-        "liveLeaves": 91,
+        "expectedLeaves": 137,
+        "liveLeaves": 137,
         "inertLeaves": 0,
         "livePercent": 100,
         "casesWithNoLiveLeaf": 0,
-        "residual": "None measured in the landed pure-grant slice: every expected byte and verdict is replayed through the shared verifier. The family-level deferred list names the later Noise, node/Hub lifecycle, Web-isolation, and cross-runtime work not yet carried by this file.",
-        "residualOwner": "the later F19 implementation phases named by the family deferrals"
+        "residual": "None measured in the landed grant and suite-0x02 IK slices: every expected grant byte and verdict is replayed through the shared verifier, and the complete account-enrolled handshake trace is reconstructed by the shared implementation plus the import-isolated Noise reference. The family-level deferred list names the node/Hub lifecycle, Web-isolation, and cross-runtime work not yet carried by this file.",
+        "residualOwner": "the remaining F19 implementation phases named by the family deferrals"
       }
     ]
   },
