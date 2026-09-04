@@ -72,6 +72,24 @@ claim they would say something false.
 
 ## What remains
 
+### F19 account-grant isolation
+
+The account-enrolled native extension in `relay-e2ee-protocol.md` §18 adds F19. Its positive grant
+verification and full IK trace belong to shared/native and node tests, not to the browser's supported
+feature set. Chromium nevertheless has a mandatory negative obligation before the extension ships:
+
+- an advertisement containing `[0x02, 0x01]` still selects `0x01` for Web NX;
+- an advertisement containing only `0x02` is unusable and produces no hello;
+- a browser ticket request remains the grant-free request shape;
+- a response carrying native grant fields is rejected as mixed mode; and
+- grant/keyset canary bytes never reach a Web decoder, DOM, store, diagnostic, service-worker cache, or
+  relay payload.
+
+These cases are not wired today. They must be fixture-driven from the generated F19 corpus in the same
+Chromium gate as the families below. The manifest MUST remain honest about that state until the files
+are imported and the liveness census proves they ran. This is compatibility and isolation coverage;
+it does not upgrade the Web threat model.
+
 ### Scopes §16.4 names that are still not driven in Chromium
 
 The scope strings below are quoted from `crossRuntime.browserRun.scopes` in
