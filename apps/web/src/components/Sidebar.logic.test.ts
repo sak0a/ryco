@@ -30,6 +30,7 @@ import {
   shouldConfirmSidebarThreadDelete,
   shouldConfirmSidebarThreadSelectionDelete,
   shouldClearThreadSelectionOnMouseDown,
+  shouldEnableSidebarRowGitStatus,
   shouldQuerySidebarSourceControlCounts,
   sortProjectsForSidebar,
   sortThreadsWithPinned,
@@ -225,6 +226,10 @@ describe("createThreadJumpHintVisibilityController", () => {
 });
 
 describe("getSidebarThreadIdsToPrewarm", () => {
+  it("prewarms at most three threads by default", () => {
+    expect(getSidebarThreadIdsToPrewarm(["a1", "a2", "a3", "a4"])).toEqual(["a1", "a2", "a3"]);
+  });
+
   it("returns only the first visible thread ids up to the prewarm limit", () => {
     expect(getSidebarThreadIdsToPrewarm(["a1", "a2", "a3"], 2)).toEqual(["a1", "a2"]);
   });
@@ -235,6 +240,14 @@ describe("getSidebarThreadIdsToPrewarm", () => {
 
   it("returns no thread ids when the limit is zero", () => {
     expect(getSidebarThreadIdsToPrewarm(["t1", "t2"], 0)).toEqual([]);
+  });
+});
+
+describe("shouldEnableSidebarRowGitStatus", () => {
+  it("enables visible rows and keeps the active row enabled while offscreen", () => {
+    expect(shouldEnableSidebarRowGitStatus({ isActive: false, isIntersecting: true })).toBe(true);
+    expect(shouldEnableSidebarRowGitStatus({ isActive: true, isIntersecting: false })).toBe(true);
+    expect(shouldEnableSidebarRowGitStatus({ isActive: false, isIntersecting: false })).toBe(false);
   });
 });
 

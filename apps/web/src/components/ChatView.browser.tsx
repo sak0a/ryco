@@ -3326,7 +3326,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("replaces the full sidebar body between Projects and Inbox without workspace churn", async () => {
+  it("mounts only the active Projects or Inbox sidebar body", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -3340,27 +3340,39 @@ describe("ChatView timeline estimator parity (full app)", () => {
         '[data-testid="sidebar-add-project-trigger"]',
       );
       expect(projectTrigger?.checkVisibility()).toBe(true);
-      const inboxSidebar = document.querySelector<HTMLElement>('[data-testid="inbox-sidebar"]');
-      expect(inboxSidebar?.checkVisibility()).toBe(false);
+      expect(document.querySelector('[data-testid="inbox-sidebar"]')).toBeNull();
       await waitForWsRequestsToSettle();
-      const requestCountBeforeSwitch = wsRequests.length;
+      const stableRequestTags = [
+        ORCHESTRATION_WS_METHODS.subscribeShell,
+        WS_METHODS.subscribeServerConfig,
+        WS_METHODS.subscribeServerLifecycle,
+        WS_METHODS.serverGetConfig,
+        WS_METHODS.serverGetSettings,
+      ];
+      const countStableRequests = () =>
+        stableRequestTags.map((tag) => wsRequests.filter((request) => request._tag === tag).length);
+      const stableRequestCountsBeforeSwitch = countStableRequests();
 
       const showInboxButton = page.getByRole("button", { name: "Show Inbox sidebar" });
       await expect.element(showInboxButton).toHaveAttribute("aria-pressed", "false");
       await showInboxButton.click();
 
       await expect.element(page.getByTestId("inbox-sidebar")).toBeInTheDocument();
-      expect(inboxSidebar?.checkVisibility()).toBe(true);
-      expect(projectTrigger?.checkVisibility()).toBe(false);
-      expect(wsRequests).toHaveLength(requestCountBeforeSwitch);
+      expect(document.querySelector('[data-testid="sidebar-add-project-trigger"]')).toBeNull();
       expect(useUiStateStore.getState().sidebarMode).toBe("inbox");
 
       const showProjectsButton = page.getByRole("button", { name: "Show Projects sidebar" });
       await expect.element(showProjectsButton).toHaveAttribute("aria-pressed", "true");
       await showProjectsButton.click();
       expect(useUiStateStore.getState().sidebarMode).toBe("projects");
-      expect(projectTrigger?.checkVisibility()).toBe(true);
-      expect(wsRequests).toHaveLength(requestCountBeforeSwitch);
+      expect(document.querySelector('[data-testid="inbox-sidebar"]')).toBeNull();
+      expect(
+        document
+          .querySelector<HTMLElement>('[data-testid="sidebar-add-project-trigger"]')
+          ?.checkVisibility(),
+      ).toBe(true);
+      await waitForWsRequestsToSettle();
+      expect(countStableRequests()).toEqual(stableRequestCountsBeforeSwitch);
     } finally {
       await mounted.cleanup();
     }

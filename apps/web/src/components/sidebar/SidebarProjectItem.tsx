@@ -510,14 +510,14 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
           onOpenWorktree={openWorktree}
           onRenameWorktree={renameWorktree}
           onRestoreWorktree={restoreWorktree}
-          renderThread={(thread: SidebarTreeThread, treeThreadKeys, gitStatus) => {
+          renderThread={(thread: SidebarTreeThread, treeThreadKeys, gitStatusTarget) => {
             const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
             return (
               <SidebarThreadRow
                 key={threadKey}
                 thread={thread}
                 projectCwd={project.cwd}
-                gitStatus={gitStatus}
+                gitStatusTarget={gitStatusTarget}
                 orderedProjectThreadKeys={treeThreadKeys}
                 isActive={activeRouteThreadKey === threadKey}
                 jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
