@@ -4,12 +4,16 @@
   review with no blocking finding and has merged; its wire formats, constants, and registries
   bind every implementation. A change to any of them is a protocol change: it requires its own
   review, and it may not be made to accommodate an implementation difficulty. Implementations
-  track the merged revision. The §18 account-enrolled extension is a normative amendment draft;
-  its node-admission path remains disabled until its dedicated protocol/security review completes.
+  track the merged revision. The §18 account-enrolled extension is implemented and covered by its
+  normative amendment and generated corpus, but broad admission/default rollout remains gated by
+  independent review, physical-device qualification, and live staged-rollout evidence.
 - **Protocol version**: 1 (`E2EE_PROTOCOL_VERSION`, §3).
 - **Layers inside**: [Ryco relay protocol 1.2/1.3](./relay-protocol.md) `data.payload`.
 - **Companion documents**: [relay protocol](./relay-protocol.md),
-  [node identity primitives](./node-identity.md), [hosted Hub client](./hosted-hub-client.md).
+  [node identity primitives](./node-identity.md), [hosted Hub client](./hosted-hub-client.md),
+  [browser vectors](./relay-e2ee-web-browser-vectors.md),
+  [third-party audit scope](./relay-e2ee-noise-audit-scope.md), and
+  [rollout readiness](./relay-e2ee-rollout-readiness.md).
 
 ## 1. Status and scope
 
@@ -4981,6 +4985,16 @@ of each package carries only a maintainer self-audit on top of the independently
 lineage; adopting any version whose changes are covered only by self-audit is a
 protocol-relevant decision that REQUIRES explicit recorded owner acceptance in a revision of
 this section — it MUST NOT happen as an incidental dependency bump.
+
+**Recorded owner acceptance, 2026-09-04.** The runtime pins all three packages at exactly `2.3.0`
+with lockfile integrity digests; the protocol constants retain `2.2.0` as the April 2026
+maintainer-self-audit baseline. The accepted delta is `2.2.0…2.3.0` over Ryco's production import
+closure: curves `ed25519.js`/`nist.js` and their abstract dependencies, ciphers
+`chacha.js`/`utils.js`, and hashes `sha2.js`/`hmac.js`/`hkdf.js`/`utils.js`. The owner accepted that
+delta after the byte-exact, differential, adversarial, Chromium, mobile/Hermes, build, and full
+repository gates passed. This is an explicit dependency-risk acceptance, not an independent audit
+of Noble 2.x, Ryco's first-party Noise state machine, or the §18 composition. Those independent
+review gates remain open and are tracked in the rollout-readiness document.
 
 ### 14.3 Mandated primitive behavior
 

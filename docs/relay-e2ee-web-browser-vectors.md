@@ -131,3 +131,5 @@ guarantee-keyed glyph, and the claim they carry is now one the phone tier can su
 §16.4 also requires the COMPLETE corpus to pass on physical devices on both mobile platforms before
 the native client ships E2EE support. That is a separate acceptance gate of the native rollout, is
 not discharged by anything in this repository's automated suites, and is not what this note tracks.
+The dated status and explicit rollout blockers are maintained in
+[`relay-e2ee-rollout-readiness.md`](./relay-e2ee-rollout-readiness.md).

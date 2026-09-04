@@ -30,16 +30,16 @@ rather than partially applied. Fetches respect the
         "fable-5-1": {
           // Decodes against the contracts `ModelCapabilities` schema and is
           // served to clients verbatim (option descriptors for the picker).
-          "capabilities": { "optionDescriptors": [ /* … */ ] },
+          "capabilities": { "optionDescriptors": [/* … */] },
           // Claude-specific runtime behavior (allowlisted adapter payload):
           "adapter": {
             "claudeCode": {
               "effortMap": { "ultracode": "xhigh", "ultrathink": null },
               "modelSuffixes": { "contextWindow": { "1m": "[1m]" } },
-              "contextWindowTokens": { "200k": 200000, "1m": 1000000 }
-            }
-          }
-        }
+              "contextWindowTokens": { "200k": 200000, "1m": 1000000 },
+            },
+          },
+        },
       },
       "models": [
         {
@@ -47,14 +47,14 @@ rather than partially applied. Fetches respect the
           "name": "Claude Fable 5.1",
           "shortName": "Fable 5.1",
           "aliases": ["fable", "fable-5.1", "claude-fable-5.1"],
-          "status": "current",            // "legacy" sets isLegacy
+          "status": "current", // "legacy" sets isLegacy
           "profile": "fable-5-1",
           // CLI version compatibility gate:
-          "adapter": { "claudeCode": { "minVersion": "2.1.257" } }
-        }
-      ]
-    }
-  }
+          "adapter": { "claudeCode": { "minVersion": "2.1.257" } },
+        },
+      ],
+    },
+  },
 }
 ```
 
@@ -76,7 +76,7 @@ Semantics of the Claude adapter payloads:
 
 1. Add a profile (or reuse one) and a `models` entry with the version gate.
 2. Validate locally: `bun run test src/provider/ModelManifest.test.ts
-   src/provider/ClaudeModelCatalog.test.ts` in `apps/server` (the first test
+src/provider/ClaudeModelCatalog.test.ts` in `apps/server` (the first test
    decodes the bundled file).
 3. Merge to `main`. Running installs pick it up on their next provider check
    after the TTL window; releases bundle it.
