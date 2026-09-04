@@ -14,6 +14,7 @@ const hoisted = vi.hoisted(() => ({
   localPrepare: vi.fn(async () => undefined),
   begin: vi.fn(),
   dispose: vi.fn(),
+  invalidateEnrollment: vi.fn(async () => undefined),
 }));
 
 vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
@@ -103,6 +104,19 @@ const READY = {
   },
 } as const;
 
+const authorizedResolution = () => ({
+  kind: "authorized" as const,
+  trustSource: "account-enrolled" as const,
+  suiteId: 2 as const,
+  ticket: "account-ticket",
+  expiresAt: 2_000,
+  grant: { claims: { nodePolicyGeneration: 9 } },
+  effectiveRole: "operator" as const,
+  capability: "ryco.rpc" as const,
+  nodeCapabilityStatement: new Uint8Array([3]),
+  dispose: hoisted.dispose,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   resetMobileAccountE2eeAttemptForTests();
@@ -120,19 +134,9 @@ beforeEach(() => {
   setMobileNativeE2eeEnrollmentCoordinator({
     getState: () => ({ status: "ready", generation: 4, ready: READY, errorCode: null }),
     subscribe: () => () => undefined,
+    invalidate: hoisted.invalidateEnrollment,
   } as never);
-  hoisted.resolveTrust.mockResolvedValue({
-    kind: "authorized",
-    trustSource: "account-enrolled",
-    suiteId: 2,
-    ticket: "account-ticket",
-    expiresAt: 2_000,
-    grant: { claims: { nodePolicyGeneration: 9 } },
-    effectiveRole: "operator",
-    capability: "ryco.rpc",
-    nodeCapabilityStatement: new Uint8Array([3]),
-    dispose: hoisted.dispose,
-  });
+  hoisted.resolveTrust.mockResolvedValue(authorizedResolution());
 });
 
 describe("mobile account E2EE relay attempt", () => {
@@ -209,6 +213,56 @@ describe("mobile account E2EE relay attempt", () => {
       failure: { kind: "incompatible", retryable: false },
     });
     expect(hoisted.issueRelayTicket).not.toHaveBeenCalled();
+    expect(hoisted.begin).not.toHaveBeenCalled();
+  });
+
+  it("erases and rejects an account grant that resolves after an account switch", async () => {
+    let resolveGrant!: (value: ReturnType<typeof authorizedResolution>) => void;
+    hoisted.resolveTrust.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGrant = resolve;
+        }),
+    );
+    const prepared = await prepareMobileRelaySocketContext();
+    const issuing = issueMobileRelayAttempt({
+      nodeId: `node_${"n".repeat(22)}`,
+      preparedSocketContext: prepared,
+    });
+
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: { id: `acct_${"b".repeat(22)}` },
+      selectedNode: {
+        id: `node_${"n".repeat(22)}`,
+        label: "Studio",
+        environmentId: "env-1",
+      },
+      generation: 8,
+    } as never);
+    resolveGrant(authorizedResolution());
+
+    await expect(issuing).rejects.toMatchObject({
+      failure: { kind: "protocol", retryable: false },
+    });
+    expect(hoisted.dispose).toHaveBeenCalledOnce();
+    expect(hoisted.begin).not.toHaveBeenCalled();
+  });
+
+  it("invalidates native enrollment immediately when the Hub reports revocation", async () => {
+    hoisted.resolveTrust.mockResolvedValueOnce({
+      kind: "blocked",
+      reason: "enrollment-revoked",
+    });
+    const prepared = await prepareMobileRelaySocketContext();
+
+    await expect(
+      issueMobileRelayAttempt({
+        nodeId: `node_${"n".repeat(22)}`,
+        preparedSocketContext: prepared,
+      }),
+    ).rejects.toMatchObject({ failure: { kind: "revoked", retryable: false } });
+    expect(hoisted.invalidateEnrollment).toHaveBeenCalledWith("revoked");
     expect(hoisted.begin).not.toHaveBeenCalled();
   });
 });
