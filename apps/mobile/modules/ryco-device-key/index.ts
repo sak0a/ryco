@@ -2,7 +2,8 @@ import { requireNativeModule } from "expo-modules-core";
 
 /**
  * Hardware-backed P-256 device key (Secure Enclave on iOS, StrongBox on
- * Android) used to sign DPoP proofs for the hosted plane.
+ * Android, with hardware-backed TEE as the conservative fallback) used to sign DPoP proofs for the
+ * hosted plane.
  *
  * The private key never crosses this boundary: the module exposes no export or
  * extract path, only "make sure a key exists", "sign these bytes", and
@@ -28,6 +29,6 @@ export interface RycoDeviceKeyModule {
   readonly deleteKey: () => Promise<void>;
 }
 
-export type DeviceKeyBacking = "secure-enclave" | "strongbox" | "unavailable";
+export type DeviceKeyBacking = "secure-enclave" | "strongbox" | "tee" | "unavailable";
 
 export default requireNativeModule<RycoDeviceKeyModule>("RycoDeviceKey");

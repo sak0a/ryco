@@ -14,6 +14,7 @@ vi.mock("@ryco/mobile-device-key", () => ({
 
 import {
   getMobileDeviceIdentityPublicKey,
+  getMobileDeviceKeyBacking,
   getMobileDeviceSigningKey,
   isMobileDeviceKeyAvailable,
   resetMobileDeviceKeyForTests,
@@ -58,6 +59,14 @@ describe("hardware device key", () => {
   it("accepts a StrongBox-backed key", async () => {
     ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "strongbox" });
     await expect(getMobileDeviceSigningKey()).resolves.toBeDefined();
+  });
+
+  it("accepts a proven Android TEE key and reports its lower assurance exactly", async () => {
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "tee" });
+
+    await expect(getMobileDeviceSigningKey()).resolves.toBeDefined();
+    await expect(getMobileDeviceKeyBacking()).resolves.toBe("tee");
+    expect(ensureKey).toHaveBeenCalledOnce();
   });
 
   it("converts the native DER signature to raw r ‖ s", async () => {

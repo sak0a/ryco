@@ -132,8 +132,8 @@ export interface HostedAccountState {
   readonly externalIdentityConfigurationStatus: HostedExternalIdentityConfigurationStatus;
   readonly passkeys: ReadonlyArray<HostedHubPasskey>;
   readonly passkeysStatus: HostedPasskeyDirectoryStatus;
-  readonly e2eeDevices: ReadonlyArray<HostedAccountE2eeDevice>;
-  readonly e2eeDevicesStatus: HostedE2eeDeviceDirectoryStatus;
+  readonly e2eeDevices?: ReadonlyArray<HostedAccountE2eeDevice>;
+  readonly e2eeDevicesStatus?: HostedE2eeDeviceDirectoryStatus;
   readonly security: HostedAccountSecurity | null;
   readonly securityStatus: HostedAccountSecurityStatus;
   readonly actionStatus: HostedAccountActionStatus;
@@ -864,7 +864,7 @@ class HostedHubController {
       if (this.#e2eeDevicesPromise === promise) this.#e2eeDevicesPromise = null;
     });
     this.#e2eeDevicesPromise = promise;
-    if (hostedAccountStore.getState().e2eeDevices.length === 0) {
+    if ((hostedAccountStore.getState().e2eeDevices?.length ?? 0) === 0) {
       patchAccountState({ e2eeDevicesStatus: "loading" });
     }
     return promise;

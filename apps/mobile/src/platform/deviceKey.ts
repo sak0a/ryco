@@ -19,13 +19,14 @@ import { derSignatureToRaw, uncompressedPointToJwk } from "./ecdsa";
  * §7.2's rule is that only a named encoder's output is ever signed.
  */
 
-export type DeviceKeyBacking = "secure-enclave" | "strongbox" | "unavailable";
+export type DeviceKeyBacking = "secure-enclave" | "strongbox" | "tee" | "unavailable";
 
 type DeviceKeyModule = (typeof import("@ryco/mobile-device-key"))["default"];
 
 const HARDWARE_BACKINGS: ReadonlySet<string> = new Set<DeviceKeyBacking>([
   "secure-enclave",
   "strongbox",
+  "tee",
 ]);
 
 const UNAVAILABLE = "A hardware-backed device key is unavailable on this device.";
@@ -44,6 +45,7 @@ const UNAVAILABLE = "A hardware-backed device key is unavailable on this device.
 interface LoadedDeviceKey {
   readonly publicKey: Uint8Array;
   readonly publicJwk: DpopPublicJwk;
+  readonly backing: Exclude<DeviceKeyBacking, "unavailable">;
   readonly sign: (signingInput: Uint8Array) => Promise<Uint8Array>;
 }
 
@@ -81,7 +83,7 @@ async function loadDeviceKey(): Promise<LoadedDeviceKey> {
   deviceKeyPromise ??= (async () => {
     const module = await loadDeviceKeyModule();
     const { publicKey, backing } = await module.ensureKey();
-    if (!HARDWARE_BACKINGS.has(backing)) throw new Error(UNAVAILABLE);
+    if (!HARDWARE_BACKINGS.has(backing) || backing === "unavailable") throw new Error(UNAVAILABLE);
     const point = fromBase64(publicKey);
     // Rejects a wrong-length or wrong-prefix point, so the point memoized here
     // has already passed the same encoding check the JWK conversion applies.
@@ -89,6 +91,7 @@ async function loadDeviceKey(): Promise<LoadedDeviceKey> {
     return {
       publicKey: point,
       publicJwk,
+      backing: backing as Exclude<DeviceKeyBacking, "unavailable">,
       sign: async (signingInput: Uint8Array): Promise<Uint8Array> => {
         const signature = await module.sign(toBase64(signingInput));
         // Both platforms return DER; JWS ES256 and §7.1's client signature
@@ -100,7 +103,7 @@ async function loadDeviceKey(): Promise<LoadedDeviceKey> {
     deviceKeyPromise = undefined;
     throw cause instanceof Error && cause.message === UNAVAILABLE ? cause : new Error(UNAVAILABLE);
   });
-  return await deviceKeyPromise;
+  return await deviceKeyPromise!;
 }
 
 /** The DPoP view of the device key: the JWK and the signer, never the point. */
@@ -137,6 +140,13 @@ export async function getMobileDeviceSigningKey(): Promise<DpopSigningKey> {
 export async function getMobileDeviceIdentityPublicKey(): Promise<Uint8Array> {
   const { publicKey } = await loadDeviceKey();
   return Uint8Array.from(publicKey);
+}
+
+/** The native module's measured backing, kept separate from the key's public bytes. */
+export async function getMobileDeviceKeyBacking(): Promise<
+  Exclude<DeviceKeyBacking, "unavailable">
+> {
+  return (await loadDeviceKey()).backing;
 }
 
 /** Whether a hardware key can be used, without surfacing why it cannot. */
