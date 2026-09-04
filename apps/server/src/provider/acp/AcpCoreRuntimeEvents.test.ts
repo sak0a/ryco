@@ -7,6 +7,7 @@ import {
   makeAcpPlanUpdatedEvent,
   makeAcpRequestOpenedEvent,
   makeAcpRequestResolvedEvent,
+  makeAcpThoughtDeltaEvent,
   makeAcpTokenUsageEvent,
   makeAcpToolCallEvent,
 } from "./AcpCoreRuntimeEvents.ts";
@@ -150,6 +151,26 @@ describe("AcpCoreRuntimeEvents", () => {
       payload: {
         itemType: "assistant_message",
         status: "inProgress",
+      },
+    });
+
+    expect(
+      makeAcpThoughtDeltaEvent({
+        stamp,
+        provider: ProviderDriverKind.make("cursor"),
+        threadId: "thread-1" as never,
+        turnId,
+        text: "thinking",
+        rawPayload: { sessionId: "session-1" },
+      }),
+    ).toMatchObject({
+      type: "content.delta",
+      payload: {
+        streamKind: "reasoning_text",
+        delta: "thinking",
+      },
+      raw: {
+        method: "session/update",
       },
     });
 

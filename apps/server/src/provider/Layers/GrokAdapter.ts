@@ -49,6 +49,7 @@ import {
   makeAcpPlanUpdatedEvent,
   makeAcpRequestOpenedEvent,
   makeAcpRequestResolvedEvent,
+  makeAcpThoughtDeltaEvent,
   makeAcpTokenUsageEvent,
   makeAcpToolCallEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
@@ -677,6 +678,20 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                         threadId: ctx.threadId,
                         turnId: ctx.activeTurnId,
                         ...(event.itemId ? { itemId: event.itemId } : {}),
+                        text: event.text,
+                        rawPayload: event.rawPayload,
+                      }),
+                    );
+                    return;
+                  case "ThoughtDelta":
+                    yield* logNative(ctx.threadId, "session/update", event.rawPayload);
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
+                      makeAcpThoughtDeltaEvent({
+                        stamp: yield* makeEventStamp(),
+                        provider: PROVIDER,
+                        threadId: ctx.threadId,
+                        turnId: ctx.activeTurnId,
                         text: event.text,
                         rawPayload: event.rawPayload,
                       }),

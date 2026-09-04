@@ -329,6 +329,114 @@ describe("AcpRuntimeModel", () => {
     ]);
   });
 
+  it("projects ACP thought chunks into reasoning stream deltas", () => {
+    const result = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: {
+          type: "text",
+          text: "Considering edge cases",
+        },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    expect(result.events).toEqual([
+      {
+        _tag: "ThoughtDelta",
+        text: "Considering edge cases",
+        rawPayload: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+              type: "text",
+              text: "Considering edge cases",
+            },
+          },
+        },
+      },
+    ]);
+  });
+
+  it("drops non-text thought chunks", () => {
+    const result = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: {
+          type: "image",
+          data: "aGVsbG8=",
+          mimeType: "image/png",
+        },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    expect(result.events).toEqual([]);
+  });
+
+  it("normalizes ACP diff tool content into shared change payloads", () => {
+    const result = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-edit-1",
+        title: "Edit file",
+        kind: "edit",
+        status: "completed",
+        content: [
+          {
+            type: "diff",
+            path: "src/app.ts",
+            oldText: "const a = 1;\nconst b = 2;\nconst c = 3;\n",
+            newText: "const a = 1;\nconst b = 42;\nconst c = 3;\nconst d = 4;\n",
+          },
+        ],
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    const event = result.events[0];
+    expect(event?._tag).toBe("ToolCallUpdated");
+    if (event?._tag === "ToolCallUpdated") {
+      expect(event.toolCall.data.changes).toEqual([
+        {
+          path: "src/app.ts",
+          additions: 2,
+          deletions: 1,
+          diff: `--- a/src/app.ts
++++ b/src/app.ts
+@@ -2,2 +2,3 @@
+-const b = 2;
++const b = 42;
+ const c = 3;
++const d = 4;`,
+        },
+      ]);
+      expect(event.toolCall.data.path).toBe("src/app.ts");
+    }
+  });
+
+  it("falls back to the first tool-call location when no diff content exists", () => {
+    const result = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-read-1",
+        title: "Read file",
+        kind: "read",
+        status: "completed",
+        locations: [{ path: "src/index.ts", line: 10 }],
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    const event = result.events[0];
+    expect(event?._tag).toBe("ToolCallUpdated");
+    if (event?._tag === "ToolCallUpdated") {
+      expect(event.toolCall.data.path).toBe("src/index.ts");
+      expect(event.toolCall.data.changes).toBeUndefined();
+    }
+  });
+
   it("projects ACP usage updates into cumulative token usage snapshots", () => {
     const result = parseSessionUpdateEvent({
       sessionId: "session-1",

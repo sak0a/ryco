@@ -1543,6 +1543,13 @@ function extractToolFullOutput(payload: Record<string, unknown> | null): string 
     return codexOutput;
   }
 
+  // Provider-normalized per-file changes (ACP tool calls, Codex fileChange
+  // conventions): joined per-file diffs render as the item's output.
+  const changeDiffs = extractDiffTextsFromChanges(data.changes);
+  if (changeDiffs) {
+    return changeDiffs;
+  }
+
   const rawOutput = asRecord(data.rawOutput);
   if (rawOutput) {
     const stdout = asTrimmedString(rawOutput.stdout);
@@ -1561,6 +1568,21 @@ function extractToolFullOutput(payload: Record<string, unknown> | null): string 
   }
 
   return null;
+}
+
+function extractDiffTextsFromChanges(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const diffs: string[] = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    const diff = asTrimmedString(record?.diff);
+    if (diff) {
+      diffs.push(diff);
+    }
+  }
+  return diffs.length > 0 ? diffs.join("\n\n") : null;
 }
 
 function extractToolExitCode(payload: Record<string, unknown> | null): number | null {

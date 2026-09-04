@@ -1230,6 +1230,178 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("projects root-session todos, token usage, and permission resolutions", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-plan-usage");
+      const rootSessionId = "http://127.0.0.1:9999/session";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "todo.updated",
+          properties: {
+            sessionID: rootSessionId,
+            todos: [
+              { id: "todo-1", content: "Inspect retries", status: "completed", priority: "high" },
+              {
+                id: "todo-2",
+                content: "Patch the dedup key",
+                status: "in_progress",
+                priority: "high",
+              },
+              { id: "todo-3", content: "Cancelled work", status: "cancelled", priority: "low" },
+            ],
+          },
+        },
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: rootSessionId,
+            info: {
+              id: "root-message-1",
+              sessionID: rootSessionId,
+              role: "assistant",
+              time: { created: Date.now() },
+              parentID: rootSessionId,
+              modelID: "test-model",
+              providerID: "test-provider",
+              mode: "build",
+              path: { cwd: "/tmp/project", root: "/tmp/project" },
+              cost: 0,
+              tokens: {
+                input: 100,
+                output: 40,
+                reasoning: 10,
+                cache: { read: 25, write: 5 },
+              },
+            },
+          },
+        },
+        {
+          type: "permission.asked",
+          properties: {
+            id: "permission-root-1",
+            sessionID: rootSessionId,
+            permission: "edit",
+            patterns: ["src/app.ts"],
+            metadata: {},
+            always: [],
+          },
+        },
+        {
+          type: "permission.replied",
+          properties: {
+            requestID: "permission-root-1",
+            sessionID: rootSessionId,
+            reply: "once",
+          },
+        },
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.take(6),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-plan-usage"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      const types = events.map((event) => event.type);
+      assert.deepEqual(types, [
+        "session.started",
+        "thread.started",
+        "turn.plan.updated",
+        "thread.token-usage.updated",
+        "request.opened",
+        "request.resolved",
+      ]);
+
+      const planUpdated = events.find((event) => event.type === "turn.plan.updated");
+      if (planUpdated?.type === "turn.plan.updated") {
+        assert.deepEqual(planUpdated.payload.plan, [
+          { step: "Inspect retries", status: "completed" },
+          { step: "Patch the dedup key", status: "inProgress" },
+        ]);
+      }
+
+      const tokenUsage = events.find((event) => event.type === "thread.token-usage.updated");
+      if (tokenUsage?.type === "thread.token-usage.updated") {
+        assert.equal(tokenUsage.payload.usage.usedTokens, 180);
+        assert.equal(tokenUsage.payload.usage.inputTokens, 130);
+        assert.equal(tokenUsage.payload.usage.cachedInputTokens, 25);
+        assert.equal(tokenUsage.payload.usage.outputTokens, 40);
+        assert.equal(tokenUsage.payload.usage.reasoningOutputTokens, 10);
+      }
+
+      const resolved = events.find((event) => event.type === "request.resolved");
+      if (resolved?.type === "request.resolved") {
+        assert.equal(resolved.payload.requestType, "file_change_approval");
+        assert.equal(resolved.payload.decision, "accept");
+      }
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("suppresses duplicate retry warnings and re-emits on new attempts", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-retry-dedup");
+      const rootSessionId = "http://127.0.0.1:9999/session";
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "session.status",
+          properties: {
+            sessionID: rootSessionId,
+            status: { type: "retry", attempt: 1, message: "rate limited", next: 1 },
+          },
+        },
+        {
+          type: "session.status",
+          properties: {
+            sessionID: rootSessionId,
+            status: { type: "retry", attempt: 1, message: "rate limited", next: 2 },
+          },
+        },
+        {
+          type: "session.status",
+          properties: {
+            sessionID: rootSessionId,
+            status: { type: "retry", attempt: 2, message: "rate limited", next: 3 },
+          },
+        },
+      ];
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.threadId === threadId &&
+            (event.type === "runtime.warning" || event.type === "session.started"),
+        ),
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-retry-dedup"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      const warnings = events.filter((event) => event.type === "runtime.warning");
+      assert.equal(warnings.length, 2);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("writes provider-native observability records using the session thread id", () =>
     Effect.gen(function* () {
       const nativeEvents: Array<{

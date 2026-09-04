@@ -14,6 +14,7 @@ import {
   RuntimeRequestId,
   type SubagentRef,
   ThreadId,
+  type ThreadTokenUsageSnapshot,
   type ToolLifecycleItemType,
   TurnId,
   type UserInputQuestion,
@@ -98,6 +99,10 @@ interface OpenCodeSessionContext {
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
+  /** Dedup guard: last emitted todo fingerprint (root session only). */
+  lastPlanFingerprint: string | undefined;
+  /** Dedup guard: `${attempt}:${message}` of the last emitted retry warning. */
+  lastRetryKey: string | undefined;
   readonly promptSemaphore: Semaphore.Semaphore;
   pendingPrompt:
     | {
@@ -393,6 +398,73 @@ function mapPermissionDecision(reply: "once" | "always" | "reject"): string {
     default:
       return "decline";
   }
+}
+
+/**
+ * Maps an OpenCode assistant message's token snapshot into the shared usage
+ * shape. OpenCode reports no context window here, so `usedTokens` is the full
+ * bucket sum (input incl. cache + output + reasoning) — the same estimate
+ * other apps derive by summing buckets when the server reports no total.
+ * Reads defensively: older servers and partial event payloads may omit fields.
+ */
+function threadTokenUsageFromOpenCodeTokens(tokens: unknown): ThreadTokenUsageSnapshot | undefined {
+  if (typeof tokens !== "object" || tokens === null) {
+    return undefined;
+  }
+  const record = tokens as {
+    readonly input?: unknown;
+    readonly output?: unknown;
+    readonly reasoning?: unknown;
+    readonly cache?: { readonly read?: unknown; readonly write?: unknown };
+  };
+  const nonNegative = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  const inputTokens =
+    nonNegative(record.input) + nonNegative(record.cache?.read) + nonNegative(record.cache?.write);
+  const outputTokens = nonNegative(record.output);
+  const reasoningTokens = nonNegative(record.reasoning);
+  const usedTokens = inputTokens + outputTokens + reasoningTokens;
+  if (usedTokens <= 0) {
+    return undefined;
+  }
+  return {
+    usedTokens,
+    lastUsedTokens: usedTokens,
+    ...(inputTokens > 0 ? { inputTokens } : {}),
+    ...(nonNegative(record.cache?.read) > 0
+      ? { cachedInputTokens: nonNegative(record.cache?.read) }
+      : {}),
+    ...(outputTokens > 0 ? { outputTokens } : {}),
+    ...(reasoningTokens > 0 ? { reasoningOutputTokens: reasoningTokens } : {}),
+  };
+}
+
+function planStepsFromOpenCodeTodos(
+  todos: ReadonlyArray<{ readonly content: string; readonly status: string }>,
+): Array<{ readonly step: string; readonly status: "pending" | "inProgress" | "completed" }> {
+  const steps: Array<{
+    readonly step: string;
+    readonly status: "pending" | "inProgress" | "completed";
+  }> = [];
+  for (const todo of todos) {
+    if (todo.status === "cancelled") {
+      continue;
+    }
+    const step = typeof todo.content === "string" ? todo.content.trim() : "";
+    if (!step) {
+      continue;
+    }
+    steps.push({
+      step,
+      status:
+        todo.status === "completed"
+          ? "completed"
+          : todo.status === "in_progress"
+            ? "inProgress"
+            : "pending",
+    });
+  }
+  return steps;
 }
 
 function resolveTurnSnapshot(
@@ -1249,12 +1321,51 @@ export function makeOpenCodeAdapter(
           break;
         }
 
+        case "todo.updated": {
+          if (event.properties.sessionID !== context.openCodeSessionId) {
+            break;
+          }
+          const plan = planStepsFromOpenCodeTodos(event.properties.todos);
+          if (plan.length === 0) {
+            break;
+          }
+          const fingerprint = JSON.stringify(plan);
+          if (context.lastPlanFingerprint === fingerprint) {
+            break;
+          }
+          context.lastPlanFingerprint = fingerprint;
+          yield* emitForContext(context, {
+            ...(yield* buildEventBase({
+              threadId: context.session.threadId,
+              turnId,
+              raw: event,
+            })),
+            type: "turn.plan.updated",
+            payload: { plan },
+          });
+          break;
+        }
+
         case "message.updated": {
           context.messageRoleById.set(
             scopedOpenCodeId(event.properties.sessionID, event.properties.info.id),
             event.properties.info.role,
           );
           if (event.properties.info.role === "assistant") {
+            if (event.properties.sessionID === context.openCodeSessionId) {
+              const usage = threadTokenUsageFromOpenCodeTokens(event.properties.info.tokens);
+              if (usage) {
+                yield* emitForContext(context, {
+                  ...(yield* buildEventBase({
+                    threadId: context.session.threadId,
+                    turnId,
+                    raw: event,
+                  })),
+                  type: "thread.token-usage.updated",
+                  payload: { usage },
+                });
+              }
+            }
             for (const part of context.partById.values()) {
               if (
                 part.sessionID !== event.properties.sessionID ||
@@ -1435,6 +1546,7 @@ export function makeOpenCodeAdapter(
         }
 
         case "permission.replied": {
+          const permissionRequest = context.pendingPermissions.get(event.properties.requestID);
           context.resolvedRequestIds.add(event.properties.requestID);
           context.pendingPermissions.delete(event.properties.requestID);
           yield* emitForContext(context, {
@@ -1446,7 +1558,9 @@ export function makeOpenCodeAdapter(
             })),
             type: "request.resolved",
             payload: {
-              requestType: "unknown",
+              requestType: permissionRequest
+                ? mapPermissionToRequestType(permissionRequest.permission)
+                : "unknown",
               decision: mapPermissionDecision(event.properties.reply),
             },
           });
@@ -1538,6 +1652,7 @@ export function makeOpenCodeAdapter(
           }
 
           if (event.properties.status.type === "busy") {
+            context.lastRetryKey = undefined;
             updateProviderSession(context, {
               status: "running",
               activeTurnId: turnId,
@@ -1545,22 +1660,29 @@ export function makeOpenCodeAdapter(
           }
 
           if (event.properties.status.type === "retry") {
-            yield* emitForContext(context, {
-              ...(yield* buildEventBase({
-                threadId: context.session.threadId,
-                turnId,
-                raw: event,
-              })),
-              type: "runtime.warning",
-              payload: {
-                message: event.properties.status.message,
-                detail: event.properties.status,
-              },
-            });
+            // OpenCode re-emits the retry status while backing off; only
+            // surface a warning when the attempt/message actually changes.
+            const retryKey = `${event.properties.status.attempt}:${event.properties.status.message}`;
+            if (context.lastRetryKey !== retryKey) {
+              context.lastRetryKey = retryKey;
+              yield* emitForContext(context, {
+                ...(yield* buildEventBase({
+                  threadId: context.session.threadId,
+                  turnId,
+                  raw: event,
+                })),
+                type: "runtime.warning",
+                payload: {
+                  message: event.properties.status.message,
+                  detail: event.properties.status,
+                },
+              });
+            }
             break;
           }
 
           if (event.properties.status.type === "idle" && turnId) {
+            context.lastRetryKey = undefined;
             if (context.pendingPrompt?.turnId === turnId) {
               context.pendingPrompt.idleEvent = event;
               break;
@@ -1927,6 +2049,8 @@ export function makeOpenCodeAdapter(
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,
+          lastPlanFingerprint: undefined,
+          lastRetryKey: undefined,
           promptSemaphore: yield* Semaphore.make(1),
           pendingPrompt: undefined,
           promptGeneration: 0,

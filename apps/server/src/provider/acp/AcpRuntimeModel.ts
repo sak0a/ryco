@@ -86,6 +86,11 @@ export type AcpParsedSessionEvent =
       readonly rawPayload: unknown;
     }
   | {
+      readonly _tag: "ThoughtDelta";
+      readonly text: string;
+      readonly rawPayload: unknown;
+    }
+  | {
       readonly _tag: "UsageUpdated";
       readonly usage: ThreadTokenUsageSnapshot;
       readonly rawPayload: unknown;
@@ -257,8 +262,210 @@ function extractTextContentFromToolCallContent(
   return chunks.length > 0 ? chunks.join("\n") : undefined;
 }
 
+export interface AcpToolCallChange {
+  readonly path: string;
+  readonly diff?: string;
+  readonly additions?: number;
+  readonly deletions?: number;
+}
+
+/**
+ * Above this many changed lines per side the LCS diff is skipped (quadratic
+ * memory); counts stay exact via multiset comparison instead.
+ */
+const UNIFIED_DIFF_MIDDLE_LINE_CAP = 2_000;
+/** LCS DP table cell budget for the changed middle region after prefix/suffix trim. */
+const UNIFIED_DIFF_LCS_CELL_CAP = 400_000;
+
+function splitDiffLines(text: string): string[] {
+  const lines = text.split("\n");
+  const last = lines[lines.length - 1];
+  if (lines.length > 1 && last === "") {
+    lines.pop();
+  }
+  return lines;
+}
+
+function countLineChanges(
+  oldLines: ReadonlyArray<string>,
+  newLines: ReadonlyArray<string>,
+): { readonly additions: number; readonly deletions: number } {
+  const oldCounts = new Map<string, number>();
+  for (const line of oldLines) {
+    oldCounts.set(line, (oldCounts.get(line) ?? 0) + 1);
+  }
+  let additions = 0;
+  for (const line of newLines) {
+    const remaining = oldCounts.get(line) ?? 0;
+    if (remaining > 0) {
+      oldCounts.set(line, remaining - 1);
+    } else {
+      additions += 1;
+    }
+  }
+  let deletions = 0;
+  for (const count of oldCounts.values()) {
+    deletions += count;
+  }
+  return { additions, deletions };
+}
+
+function diffMiddleLines(
+  middleOld: ReadonlyArray<string>,
+  middleNew: ReadonlyArray<string>,
+): Array<{ readonly marker: "-" | "+" | " "; readonly text: string }> {
+  if (middleOld.length * middleNew.length > UNIFIED_DIFF_LCS_CELL_CAP) {
+    return [
+      ...middleOld.map((text) => ({ marker: "-" as const, text })),
+      ...middleNew.map((text) => ({ marker: "+" as const, text })),
+    ];
+  }
+  const rows = middleOld.length;
+  const cols = middleNew.length;
+  const table = new Uint32Array((rows + 1) * (cols + 1));
+  for (let i = rows - 1; i >= 0; i -= 1) {
+    for (let j = cols - 1; j >= 0; j -= 1) {
+      const diagonal = table[(i + 1) * (cols + 1) + j + 1] ?? 0;
+      const down = table[(i + 1) * (cols + 1) + j] ?? 0;
+      const right = table[i * (cols + 1) + j + 1] ?? 0;
+      const oldLine = middleOld[i];
+      const newLine = middleNew[j];
+      table[i * (cols + 1) + j] =
+        oldLine !== undefined && newLine !== undefined && oldLine === newLine
+          ? diagonal + 1
+          : Math.max(down, right);
+    }
+  }
+  const ops: Array<{ readonly marker: "-" | "+" | " "; readonly text: string }> = [];
+  let i = 0;
+  let j = 0;
+  while (i < rows && j < cols) {
+    const oldLine = middleOld[i];
+    const newLine = middleNew[j];
+    if (oldLine !== undefined && newLine !== undefined && oldLine === newLine) {
+      ops.push({ marker: " ", text: oldLine });
+      i += 1;
+      j += 1;
+    } else if (
+      oldLine !== undefined &&
+      (newLine === undefined ||
+        (table[(i + 1) * (cols + 1) + j] ?? 0) >= (table[i * (cols + 1) + j + 1] ?? 0))
+    ) {
+      ops.push({ marker: "-", text: oldLine });
+      i += 1;
+    } else if (newLine !== undefined) {
+      ops.push({ marker: "+", text: newLine });
+      j += 1;
+    } else {
+      break;
+    }
+  }
+  while (i < rows) {
+    const oldLine = middleOld[i];
+    if (oldLine !== undefined) {
+      ops.push({ marker: "-", text: oldLine });
+    }
+    i += 1;
+  }
+  while (j < cols) {
+    const newLine = middleNew[j];
+    if (newLine !== undefined) {
+      ops.push({ marker: "+", text: newLine });
+    }
+    j += 1;
+  }
+  return ops;
+}
+
+function buildLineUnifiedDiff(path: string, oldText: string, newText: string): string | undefined {
+  const oldLines = splitDiffLines(oldText);
+  const newLines = splitDiffLines(newText);
+  if (
+    oldLines.length > UNIFIED_DIFF_MIDDLE_LINE_CAP ||
+    newLines.length > UNIFIED_DIFF_MIDDLE_LINE_CAP
+  ) {
+    return undefined;
+  }
+  let start = 0;
+  while (
+    start < oldLines.length &&
+    start < newLines.length &&
+    oldLines[start] === newLines[start]
+  ) {
+    start += 1;
+  }
+  let endOld = oldLines.length;
+  let endNew = newLines.length;
+  while (
+    endOld > start &&
+    endNew > start &&
+    oldLines[endOld - 1] === newLines[endNew - 1] &&
+    oldLines[endOld - 1] !== undefined
+  ) {
+    endOld -= 1;
+    endNew -= 1;
+  }
+  const middleOld = oldLines.slice(start, endOld);
+  const middleNew = newLines.slice(start, endNew);
+  if (middleOld.length === 0 && middleNew.length === 0) {
+    return undefined;
+  }
+  const ops = diffMiddleLines(middleOld, middleNew);
+  const header =
+    `--- a/${path}\n+++ b/${path}\n` +
+    `@@ -${middleOld.length > 0 ? start + 1 : start},${middleOld.length} ` +
+    `+${middleNew.length > 0 ? start + 1 : start},${middleNew.length} @@\n`;
+  return header + ops.map((op) => `${op.marker}${op.text}`).join("\n");
+}
+
+/**
+ * Normalizes ACP `type: "diff"` tool-call content into the shared
+ * `changes[{path, diff, additions, deletions}]` shape the web fold already
+ * consumes generically (same convention as Codex `fileChange` items).
+ */
+export function extractToolCallChanges(
+  content: ReadonlyArray<EffectAcpSchema.ToolCallContent> | null | undefined,
+): Array<AcpToolCallChange> | undefined {
+  if (!content) return undefined;
+  const changes: Array<AcpToolCallChange> = [];
+  for (const entry of content) {
+    if (entry.type !== "diff" || !entry.path.trim()) {
+      continue;
+    }
+    const path = entry.path.trim();
+    const oldText = entry.oldText ?? "";
+    const newText = entry.newText ?? "";
+    const { additions, deletions } = countLineChanges(
+      splitDiffLines(oldText),
+      splitDiffLines(newText),
+    );
+    const diff =
+      oldText.length > 0 || newText.length > 0
+        ? buildLineUnifiedDiff(path, oldText, newText)
+        : undefined;
+    changes.push({
+      path,
+      ...(additions > 0 || deletions > 0 ? { additions, deletions } : {}),
+      ...(diff !== undefined ? { diff } : {}),
+    });
+  }
+  return changes.length > 0 ? changes : undefined;
+}
+
 function normalizeToolKind(kind: unknown): string | undefined {
   return typeof kind === "string" && kind.trim().length > 0 ? kind.trim() : undefined;
+}
+
+function firstToolCallLocationPath(
+  locations: ReadonlyArray<EffectAcpSchema.ToolCallLocation> | null | undefined,
+): string | undefined {
+  for (const location of locations ?? []) {
+    const path = typeof location.path === "string" ? location.path.trim() : "";
+    if (path) {
+      return path;
+    }
+  }
+  return undefined;
 }
 
 function containsSubagentKeyword(value: string | undefined): boolean {
@@ -441,6 +648,14 @@ function makeToolCallState(
   }
   if (input.locations !== undefined) {
     data.locations = input.locations;
+  }
+  const changes = extractToolCallChanges(input.content);
+  if (changes) {
+    data.changes = changes;
+  }
+  const primaryPath = changes?.[0]?.path ?? firstToolCallLocationPath(input.locations);
+  if (primaryPath) {
+    data.path = primaryPath;
   }
   const fallbackDetail = command ?? normalizedTitle ?? textContent;
   const hasPresentationSeed =
@@ -634,6 +849,16 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
       if (upd.content.type === "text" && upd.content.text.length > 0) {
         events.push({
           _tag: "ContentDelta",
+          text: upd.content.text,
+          rawPayload: params,
+        });
+      }
+      break;
+    }
+    case "agent_thought_chunk": {
+      if (upd.content.type === "text" && upd.content.text.length > 0) {
+        events.push({
+          _tag: "ThoughtDelta",
           text: upd.content.text,
           rawPayload: params,
         });
