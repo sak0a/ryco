@@ -11,7 +11,11 @@ import {
   deriveProjectGroupLabel,
   type ProjectGroupingMode,
 } from "../../lib/logicalProject";
-import { NODE_TRUST_UNVERIFIED_LABEL, type NodeTrust } from "../home/nodeTrustModel";
+import {
+  NODE_TRUST_ACCOUNT_LABEL,
+  NODE_TRUST_UNVERIFIED_LABEL,
+  type NodeTrust,
+} from "../home/nodeTrustModel";
 
 export interface ProjectEnvironment {
   readonly environmentId: EnvironmentId;
@@ -402,6 +406,9 @@ export function projectRowAccessibilityLabel(row: ProjectListRow): string {
   if (row.machines.some((machine) => machine.role === "viewer")) parts.push("Viewer");
   if (row.machines.some((machine) => machine.trust === "unverified")) {
     parts.push(NODE_TRUST_UNVERIFIED_LABEL);
+  }
+  if (row.machines.some((machine) => machine.trust === "account-trusted")) {
+    parts.push(NODE_TRUST_ACCOUNT_LABEL);
   }
   return parts.join(", ");
 }

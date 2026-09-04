@@ -6,7 +6,7 @@ import { SymbolView } from "../../components/AppSymbol";
 import { EmptyState } from "../../components/EmptyState";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { HOME_LIST_PADDING_BOTTOM } from "../home/homeChromeModel";
-import { NODE_TRUST_UNVERIFIED_LABEL } from "../home/nodeTrustModel";
+import { NODE_TRUST_ACCOUNT_LABEL, NODE_TRUST_UNVERIFIED_LABEL } from "../home/nodeTrustModel";
 import {
   projectMachineStatusLabel,
   projectRowAccessibilityLabel,
@@ -43,6 +43,12 @@ function MachineProvenance(props: { readonly machine: ProjectRowMachine }) {
         <Text className="shrink-0 text-2xs font-ryco-medium text-danger-foreground">
           {" "}
           · {NODE_TRUST_UNVERIFIED_LABEL}
+        </Text>
+      ) : null}
+      {props.machine.trust === "account-trusted" ? (
+        <Text className="shrink-0 text-2xs font-ryco-medium text-foreground-tertiary">
+          {" "}
+          · {NODE_TRUST_ACCOUNT_LABEL}
         </Text>
       ) : null}
     </View>

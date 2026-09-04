@@ -19,6 +19,7 @@ export type WorkspaceNativeTrustState =
   | "not-required"
   | "unknown"
   | "unverified"
+  | "account-trusted"
   | "verified"
   | "identity-conflict";
 

@@ -145,6 +145,25 @@ describe("native E2EE enrollment coordinator", () => {
     expect(coordinator.getState().ready?.enrollment.enrollmentRevision).toBe(2);
   });
 
+  it("never carries an enrollment revision across account scopes", async () => {
+    const { coordinator, api } = harness();
+    vi.mocked(api.upsertE2eeDeviceEnrollment).mockImplementation(async (request) => ({
+      ...summary(),
+      identityFingerprint: request.identityFingerprint,
+      agreementFingerprint: request.agreementFingerprint,
+      clientPrekeyCertificateDigest: request.clientPrekeyCertificateDigest,
+      certificateExpiresAt: request.certificateExpiresAt,
+    }));
+
+    await coordinator.ensure(ACCOUNT_ID);
+    await coordinator.ensure(OTHER_ACCOUNT_ID);
+
+    expect(api.upsertE2eeDeviceEnrollment).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ expectedEnrollmentRevision: expect.anything() }),
+    );
+    expect(coordinator.getState().ready?.namespace.accountId).toBe(OTHER_ACCOUNT_ID);
+  });
+
   it("fences a completion from an account that was replaced", async () => {
     const { coordinator, platform, api, invalidateHostedGeneration } = harness();
     vi.mocked(api.upsertE2eeDeviceEnrollment).mockImplementation(async (request) => ({

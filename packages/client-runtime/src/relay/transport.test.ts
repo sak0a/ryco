@@ -19,6 +19,7 @@ import type { HostedHubNode, HostedRelayFailure } from "../authorization/types";
 import { encodeBase64Url } from "./base64url";
 import {
   HostedRelayAttemptFactory,
+  HostedRelayPreparationError,
   ticketFailure,
   type HostedRelayAttemptBinding,
 } from "./transport";
@@ -140,6 +141,40 @@ afterEach(() => {
 });
 
 describe("HostedRelayAttemptFactory", () => {
+  it("publishes a bounded native grant failure before reconnect policy runs", async () => {
+    const failure = vi.fn();
+    const binding: HostedRelayAttemptBinding = {
+      nodeId: () => selectedNode.id,
+      generation: () => 4,
+      isAuthenticated: () => true,
+      isCurrent: () => true,
+      issueRelayAttempt: async () => {
+        throw new HostedRelayPreparationError({
+          kind: "protocol",
+          retryable: false,
+          closeReason: "channel_rejected",
+        });
+      },
+      authorizeRequest: () => false,
+      shouldReconnect: () => false,
+      transportStatus: () => undefined,
+      sessionStatus: () => undefined,
+      role: () => undefined,
+      failure,
+      markDeliveryUnknown: () => undefined,
+      connectionClosed: () => undefined,
+    };
+
+    await expect(new HostedRelayAttemptFactory(binding).nextUrl()).rejects.toThrow(
+      "Hosted relay preparation failed.",
+    );
+    expect(failure).toHaveBeenCalledWith(4, {
+      kind: "protocol",
+      retryable: false,
+      closeReason: "channel_rejected",
+    });
+  });
+
   it("holds native grant context for one socket and disposes abandoned attempts", async () => {
     let current = true;
     let sequence = 0;

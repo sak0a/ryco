@@ -66,6 +66,7 @@ function begin(
   overrides: {
     readonly classification?: E2eeTrustClassification;
     readonly pinVerified?: boolean;
+    readonly trustSource?: "locally-verified" | "account-enrolled";
   } = {},
 ): void {
   beginMobileE2eeChannel({
@@ -83,6 +84,7 @@ function begin(
     markerSet: false,
     pinVerified: overrides.pinVerified ?? false,
     previouslyVerified: null,
+    ...(overrides.trustSource === undefined ? {} : { trustSource: overrides.trustSource }),
   });
 }
 
@@ -180,6 +182,16 @@ describe("the channel's claim", () => {
     // row is spelled.
     lockMobileE2eeChannelMode("e2ee");
     expect(getMobileE2eeSessionState().channel).toBe("unverified");
+  });
+
+  it("labels account-authorized E2EE without marking it locally verified", () => {
+    begin({ trustSource: "account-enrolled", pinVerified: false });
+    lockMobileE2eeChannelMode("e2ee");
+    expect(getMobileE2eeSessionState()).toMatchObject({
+      channel: "account-trusted",
+      trustSource: "account-enrolled",
+      pinVerified: false,
+    });
   });
 
   it("never reports the shared vocabulary's web row, from any publisher", () => {

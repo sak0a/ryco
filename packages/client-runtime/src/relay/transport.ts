@@ -20,6 +20,17 @@ interface PendingTicket {
   used: boolean;
 }
 
+/** Bounded preparation failure for native ticket/grant validation. Carries no secret detail. */
+export class HostedRelayPreparationError extends Error {
+  readonly failure: HostedRelayFailure;
+
+  constructor(failure: HostedRelayFailure) {
+    super("Hosted relay preparation failed.");
+    this.name = "HostedRelayPreparationError";
+    this.failure = failure;
+  }
+}
+
 const HOSTED_SESSION_SYNC_SUBSCRIPTIONS = new Set<string>([
   ORCHESTRATION_WS_METHODS.subscribeShell,
   ORCHESTRATION_WS_METHODS.subscribeThread,
@@ -160,6 +171,20 @@ function defaultBinding(): HostedRelayAttemptBinding {
     generation: () => hostedHubStore.getState().generation,
     isAuthenticated: () => hostedHubStore.getState().accountStatus === "authenticated",
     isCurrent: (generation) => hostedHubStore.getState().generation === generation,
+    prepareSocketContext: () =>
+      getHostedRuntimeConfiguration().prepareRelaySocketContext?.() ?? Promise.resolve(undefined),
+    issueRelayAttempt: async (input) => {
+      const issue = getHostedRuntimeConfiguration().issueRelayAttempt;
+      if (issue) return issue(input);
+      const result = await getHostedHubApi().issueRelayTicket(input.nodeId);
+      return {
+        ticket: result.ticket,
+        expiresAt: result.expiresAt,
+        preparedSocketContext: input.preparedSocketContext,
+      };
+    },
+    disposeSocketContext: (context) =>
+      getHostedRuntimeConfiguration().disposeRelaySocketContext?.(context),
     authorizeRequest: authorizeHostedRequest,
     shouldReconnect: (generation) => {
       const state = hostedHubStore.getState();
@@ -267,6 +292,9 @@ export class HostedRelayAttemptFactory {
       this.#disposeSocketContext(preparedSocketContext);
       if (error instanceof HostedHubApiError && error.status === 401) {
         void hostedHubController.expireSession();
+      } else if (error instanceof HostedRelayPreparationError) {
+        this.#lastRetryAfterMs = error.failure.retryAfterMs;
+        this.#binding.failure(generation, error.failure);
       } else if (error instanceof HostedHubApiError) {
         const failure = ticketFailure(error);
         this.#lastRetryAfterMs = failure.retryAfterMs;
@@ -336,6 +364,7 @@ export class HostedRelayAttemptFactory {
             ticket,
             ticketExpiresAt,
             callbacks,
+            preparedSocketContext: pending.preparedSocketContext,
           });
       if (isCurrentAttempt()) this.#activeSocket = socket;
       return socket;

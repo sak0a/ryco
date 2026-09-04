@@ -149,6 +149,7 @@ const UNEXPECTED_FRESH: E2eeTrustClassification = {
 function session(overrides: Partial<MobileE2eeSessionState> = {}): MobileE2eeSessionState {
   return {
     channel: "negotiating",
+    trustSource: "locally-verified",
     selection: {
       hubOrigin: HUB,
       accountId: ACCOUNT,
@@ -567,7 +568,7 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
     // satisfied it vacuously.
     const verified = securityView(session({ channel: "verified" }));
     expect(verified.claim).toBe("verified");
-    expect(verified.channelLabel).toBe("Encrypted");
+    expect(verified.channelLabel).toBe("Encrypted · Verified locally");
     expect(verified.channelMessage).toContain("encrypted end to end");
     expect(verified.channelMessage).toContain("cannot read");
   });
@@ -601,6 +602,17 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
     expect(view.channelMessage).toBe(
       securityView(session({ channel: "unavailable" })).channelMessage,
     );
+  });
+
+  it("describes automatic account trust without claiming local verification", () => {
+    const view = securityView(
+      session({ channel: "account-trusted", trustSource: "account-enrolled" }),
+    );
+    expect(view.claim).toBe("account-trusted");
+    expect(view.channelLabel).toBe("Encrypted · Account trusted");
+    expect(view.channelMessage).toContain("signed-in Ryco account");
+    expect(view.channelMessage).toContain("active Hub");
+    expect(view.channelMessage).not.toContain("cannot read");
   });
 
   it("gives every claim its own word and its own sentence", () => {

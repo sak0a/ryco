@@ -43,6 +43,7 @@ export interface NativeE2eeEnrollmentState {
 export type NativeE2eeEnrollmentErrorCode =
   | "device_material_unavailable"
   | "device_material_invalid"
+  | "enrollment_unavailable"
   | "enrollment_refused";
 
 export class NativeE2eeEnrollmentError extends Error {
@@ -178,8 +179,8 @@ export function createNativeE2eeEnrollmentCoordinator(
     if (operation && sameNamespace(namespace, nextNamespace)) return operation;
     if (!sameNamespace(namespace, nextNamespace)) {
       const previous = namespace;
-      invalidateCurrent("idle");
       namespace = nextNamespace;
+      invalidateCurrent("idle");
       if (previous) await input.platform.clearEnrollment(previous).catch(() => undefined);
     }
     const previousReady = state.ready;
@@ -189,6 +190,7 @@ export function createNativeE2eeEnrollmentCoordinator(
 
     let pending: Promise<NativeE2eeReadyEnrollment>;
     pending = (async () => {
+      let phase: "device" | "enrollment" = "device";
       try {
         const identity = await input.platform.ensureIdentity();
         if (issued !== generation) enrollmentError("enrollment_refused");
@@ -202,6 +204,7 @@ export function createNativeE2eeEnrollmentCoordinator(
         if (issued !== generation) enrollmentError("enrollment_refused");
         validateMaterial(nextNamespace, identity, prekey, input.now?.() ?? Date.now());
         const previousRevision =
+          sameNamespace(previousReady?.namespace ?? null, nextNamespace) &&
           previousReady?.enrollment.enrollmentId === enrollmentId
             ? previousReady.enrollment.enrollmentRevision
             : undefined;
@@ -234,6 +237,7 @@ export function createNativeE2eeEnrollmentCoordinator(
         } catch {
           return enrollmentError("device_material_invalid");
         }
+        phase = "enrollment";
         const enrollment = await input.api.upsertE2eeDeviceEnrollment(request);
         if (issued !== generation || !sameNamespace(namespace, nextNamespace)) {
           return enrollmentError("enrollment_refused");
@@ -251,7 +255,9 @@ export function createNativeE2eeEnrollmentCoordinator(
         const error =
           cause instanceof NativeE2eeEnrollmentError
             ? cause
-            : new NativeE2eeEnrollmentError("device_material_unavailable");
+            : new NativeE2eeEnrollmentError(
+                phase === "device" ? "device_material_unavailable" : "enrollment_unavailable",
+              );
         if (issued === generation && state.status !== "revoked") {
           publish({ status: "unavailable", ready: null, errorCode: error.code });
         }

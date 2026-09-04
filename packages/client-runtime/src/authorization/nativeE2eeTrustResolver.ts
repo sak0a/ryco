@@ -4,6 +4,7 @@ import {
   type NativeAccountGrantRelayTicketResponse,
 } from "@ryco/contracts/native-e2ee";
 import type { RelayCapability } from "@ryco/contracts";
+import { verifyNodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeCapabilityVerify";
 import type { NodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeTranscripts";
 import { e2eeBytesEqual, e2eeKeyFingerprint, e2eeSha256 } from "@ryco/shared/relayE2eeKeys";
 import {
@@ -18,7 +19,7 @@ import {
 
 import type { NativeE2eeAccountTrustedNode, NativeE2eePlatformService } from "../platform/index.ts";
 import { decodeBase64Url } from "../relay/base64url.ts";
-import type { HostedHubApi } from "./api.ts";
+import { HostedHubApiError, type HostedHubApi } from "./api.ts";
 import type { NativeE2eeReadyEnrollment } from "./nativeE2eeEnrollment.ts";
 
 export interface NativeE2eeVerifiedPin {
@@ -28,9 +29,9 @@ export interface NativeE2eeVerifiedPin {
 
 export interface NativeE2eeNodeEvidence {
   readonly nodeId: string;
-  /** Exact signed capability-statement carrier already validated for this Hub/account. */
-  readonly statementBytes: Uint8Array;
-  readonly statement: NodeE2eeCapabilityStatement;
+  /** Exact signed capability statement when local pin authorization is being considered. */
+  readonly statementBytes?: Uint8Array;
+  readonly statement?: NodeE2eeCapabilityStatement;
   readonly accountGrantAllowed: boolean;
 }
 
@@ -58,6 +59,8 @@ export type NativeE2eeTrustResolution =
       readonly reason:
         | "verified-pin-conflict"
         | "policy-rollback"
+        | "enrollment-revoked"
+        | "node-update-required"
         | "account-authorization-invalid";
     }
   | {
@@ -72,6 +75,13 @@ export interface NativeE2eeTrustResolverInput {
     "readAccountTrustedNode" | "writeAccountTrustedNode"
   >;
   readonly now?: () => number;
+  /** Test/platform seam; production uses the shared native statement verifier. */
+  readonly verifyAccountStatement?: (input: {
+    readonly bytes: Uint8Array;
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly now: number;
+  }) => NodeE2eeCapabilityStatement | null;
 }
 
 export interface ResolveNativeE2eeTrustInput {
@@ -121,12 +131,29 @@ function zero(bytes: Uint8Array): void {
  * never starts, retries, or publishes a connection itself.
  */
 export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInput) {
+  type Keyset = Awaited<ReturnType<HostedHubApi["getE2eeGrantVerificationKeys"]>>;
+  let cachedKeyset: Keyset | null = null;
+  let keysetRequest: Promise<Keyset> | null = null;
+  const readKeyset = (force = false): Promise<Keyset> => {
+    if (!force && cachedKeyset !== null) return Promise.resolve(cachedKeyset);
+    if (!force && keysetRequest !== null) return keysetRequest;
+    const request = input.api.getE2eeGrantVerificationKeys().then((value) => {
+      cachedKeyset = value;
+      return value;
+    });
+    keysetRequest = request;
+    const clear = () => {
+      if (keysetRequest === request) keysetRequest = null;
+    };
+    void request.then(clear, clear);
+    return request;
+  };
   const resolveAttempt = async (
     request: ResolveNativeE2eeTrustInput,
     expiryRetried: boolean,
   ): Promise<NativeE2eeTrustResolution> => {
-    const { statement } = request.node;
     if (request.localTrustedIntroduction) {
+      if (request.node.statement === undefined) return invalid();
       return {
         kind: "authorized",
         trustSource: "local-trusted-introduction",
@@ -135,6 +162,8 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
     }
 
     if (request.verifiedPin) {
+      const statement = request.node.statement;
+      if (statement === undefined) return invalid();
       if (!e2eeBytesEqual(request.verifiedPin.identityFingerprint, statement.identityFingerprint)) {
         return { kind: "blocked", reason: "verified-pin-conflict" };
       }
@@ -157,21 +186,24 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
     ) {
       return { kind: "recovery-required", reason: "enrollment-unavailable" };
     }
-    if (
-      request.node.nodeId !== statement.nodeId ||
-      statement.hubOrigin !== request.hubOrigin ||
-      !statement.suiteRegistry.includes(E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256) ||
-      request.node.accountGrantAllowed !== true
-    ) {
+    if (request.node.accountGrantAllowed !== true) {
       return invalid();
     }
 
-    const previous = await input.platform.readAccountTrustedNode({
-      hubOrigin: request.hubOrigin,
-      accountId: request.accountId,
-      nodeId: request.node.nodeId,
-    });
-    if (previous && statement.policyGeneration < previous.acceptedPolicyGeneration) {
+    const priorStatement = request.node.statement;
+    const priorTrust =
+      priorStatement === undefined
+        ? null
+        : await input.platform.readAccountTrustedNode({
+            hubOrigin: request.hubOrigin,
+            accountId: request.accountId,
+            nodeId: request.node.nodeId,
+          });
+    if (
+      priorTrust !== null &&
+      priorStatement !== undefined &&
+      priorStatement.policyGeneration < priorTrust.acceptedPolicyGeneration
+    ) {
       return { kind: "blocked", reason: "policy-rollback" };
     }
 
@@ -193,13 +225,20 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
     }
 
     let response: NativeAccountGrantRelayTicketResponse;
-    let keyset: Awaited<ReturnType<HostedHubApi["getE2eeGrantVerificationKeys"]>>;
+    let keyset: Keyset;
     try {
       [response, keyset] = await Promise.all([
         input.api.issueAccountGrantRelayTicket(ticketRequest),
-        input.api.getE2eeGrantVerificationKeys(),
+        readKeyset(),
       ]);
-    } catch {
+      if (response.keysetGeneration !== keyset.generation) keyset = await readKeyset(true);
+    } catch (cause) {
+      if (cause instanceof HostedHubApiError && cause.code === "revoked") {
+        return { kind: "blocked", reason: "enrollment-revoked" };
+      }
+      if (cause instanceof HostedHubApiError && cause.code === "unsupported_version") {
+        return { kind: "blocked", reason: "node-update-required" };
+      }
       return { kind: "recovery-required", reason: "account-authorization-unavailable" };
     }
 
@@ -215,8 +254,51 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
     } catch {
       return invalid();
     }
+    const now = input.now?.() ?? Date.now();
+    const accountStatement = input.verifyAccountStatement
+      ? input.verifyAccountStatement({
+          bytes: statementBytes,
+          hubOrigin: request.hubOrigin,
+          accountId: request.accountId,
+          now,
+        })
+      : (() => {
+          const verification = verifyNodeE2eeCapabilityStatement({
+            statement: statementBytes,
+            connectedHubOrigin: request.hubOrigin,
+            tier: "native",
+            localSuitePreference: [E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256],
+            now,
+            accountId: request.accountId,
+          });
+          return verification.kind === "verified" &&
+            verification.selectedSuite === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256
+            ? verification.statement
+            : null;
+        })();
+    if (
+      accountStatement === null ||
+      accountStatement.hubOrigin !== request.hubOrigin ||
+      accountStatement.nodeId !== request.node.nodeId ||
+      !accountStatement.suiteRegistry.includes(E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256)
+    ) {
+      zero(grantEnvelope);
+      zero(statementBytes);
+      return invalid();
+    }
+    const previous =
+      priorTrust ??
+      (await input.platform.readAccountTrustedNode({
+        hubOrigin: request.hubOrigin,
+        accountId: request.accountId,
+        nodeId: request.node.nodeId,
+      }));
+    if (previous && accountStatement.policyGeneration < previous.acceptedPolicyGeneration) {
+      zero(grantEnvelope);
+      zero(statementBytes);
+      return { kind: "blocked", reason: "policy-rollback" };
+    }
     const verificationKeys = decodeVerificationKeys(keyset.keys);
-    const expectedStatementDigest = e2eeSha256(request.node.statementBytes);
     if (
       verificationKeys === null ||
       response.keysetGeneration !== keyset.generation ||
@@ -224,8 +306,6 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
       response.protocolMinor !== 3 ||
       response.suiteId !== E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256 ||
       response.capability !== request.capability ||
-      !e2eeBytesEqual(statementBytes, request.node.statementBytes) ||
-      !e2eeBytesEqual(statementDigest, expectedStatementDigest) ||
       !e2eeBytesEqual(e2eeSha256(statementBytes), statementDigest) ||
       !e2eeBytesEqual(e2eeSha256(grantEnvelope), grantDigest)
     ) {
@@ -234,7 +314,6 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
       return invalid();
     }
 
-    const now = input.now?.() ?? Date.now();
     const verified = verifyHubDeviceGrant({
       envelope: grantEnvelope,
       verificationKeys,
@@ -251,13 +330,13 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
         clientPrekeyCertificateDigest: ready.prekey.certificateDigest,
         clientPrekeyCertificateExpiresAt: ready.prekey.expiresAt,
         nodeId: request.node.nodeId,
-        nodeIdentityPublicKey: statement.identityPublicKey,
-        nodeAgreementPublicKey: statement.prekeyCertificate.agreementPublicKey,
-        nodeAgreementPrekeyExpiresAt: statement.prekeyCertificate.expiresAt,
-        nodeContinuityId: statement.continuityId,
-        nodePolicyGeneration: statement.policyGeneration,
+        nodeIdentityPublicKey: accountStatement.identityPublicKey,
+        nodeAgreementPublicKey: accountStatement.prekeyCertificate.agreementPublicKey,
+        nodeAgreementPrekeyExpiresAt: accountStatement.prekeyCertificate.expiresAt,
+        nodeContinuityId: accountStatement.continuityId,
+        nodePolicyGeneration: accountStatement.policyGeneration,
         nodeCapabilityStatementDigest: statementDigest,
-        nodeCapabilityStatementExpiresAt: statement.expiresAt,
+        nodeCapabilityStatementExpiresAt: accountStatement.expiresAt,
         relayTicketId: response.ticketId,
         relayTicketExpiresAt: response.expiresAt,
         effectiveRole: response.effectiveRole,
@@ -279,19 +358,31 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
       hubOrigin: request.hubOrigin,
       accountId: request.accountId,
       nodeId: request.node.nodeId,
-      identityPublicKey: Uint8Array.from(statement.identityPublicKey),
-      identityFingerprint: Uint8Array.from(statement.identityFingerprint),
+      identityPublicKey: Uint8Array.from(accountStatement.identityPublicKey),
+      identityFingerprint: Uint8Array.from(accountStatement.identityFingerprint),
       agreementFingerprint: e2eeKeyFingerprint(
         "agreement",
-        statement.prekeyCertificate.agreementPublicKey,
+        accountStatement.prekeyCertificate.agreementPublicKey,
       ),
-      continuityId: statement.continuityId,
+      continuityId: accountStatement.continuityId,
       acceptedPolicyGeneration: Math.max(
         previous?.acceptedPolicyGeneration ?? 0,
-        statement.policyGeneration,
+        accountStatement.policyGeneration,
       ),
       firstTrustedAt: previous?.firstTrustedAt ?? now,
       lastTrustedAt: now,
+      identityChanges:
+        previous &&
+        !e2eeBytesEqual(previous.identityFingerprint, accountStatement.identityFingerprint)
+          ? [
+              ...previous.identityChanges,
+              {
+                previousIdentityFingerprint: Uint8Array.from(previous.identityFingerprint),
+                nextIdentityFingerprint: Uint8Array.from(accountStatement.identityFingerprint),
+                changedAt: now,
+              },
+            ].slice(-16)
+          : (previous?.identityChanges ?? []),
     };
     try {
       await input.platform.writeAccountTrustedNode(trusted);

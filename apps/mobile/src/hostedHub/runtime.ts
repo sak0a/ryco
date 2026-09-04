@@ -1,7 +1,10 @@
 import {
   configureHostedRuntime,
+  createNativeE2eeEnrollmentCoordinator,
+  getHostedHubApi,
   hostedHubController,
   hostedHubStore,
+  type NativeE2eeEnrollmentCoordinator,
 } from "@ryco/client-runtime/authorization";
 import {
   hasHostedRelayPendingRequests,
@@ -13,7 +16,9 @@ import { createMobileDpopSigner } from "../platform/dpopSigner";
 import { mobileE2eeTrustStore } from "../platform/e2eeTrustStore";
 import { mobileKV } from "../platform/kv";
 import { mobileNativeAuthorization } from "../platform/nativeAuthorization";
+import { mobileNativeE2eePlatform } from "../platform/nativeE2ee";
 import { mobilePasskeyCeremony } from "../platform/passkeyCeremony";
+import { getMobileHostedConnectionCoordinator } from "../connection/hostedConnectionCoordinator";
 import {
   hydrateMobileHostedSessionToken,
   mobileSessionCredentials,
@@ -24,6 +29,13 @@ import {
   resolveMobileRelayE2eeProvider,
 } from "./e2eeAttempt";
 import { resetMobileE2eeSession } from "./e2eeSession";
+import { setMobileNativeE2eeEnrollmentCoordinator } from "./e2eeEnrollment";
+import {
+  disposeMobileRelaySocketContext,
+  issueMobileRelayAttempt,
+  prepareMobileRelaySocketContext,
+  providerForMobileRelaySocketContext,
+} from "./accountE2eeAttempt";
 import { hydrateMobileHubProfile } from "./hubProfile";
 import { mobileHostedNodeLifecycle } from "./nodeLifecycle";
 import { configureAuthoritativeNodeTrustSource } from "../features/home/authoritativeNodeTrustSource";
@@ -55,7 +67,39 @@ let configured = false;
 let available = false;
 let session: Promise<void> | undefined;
 let selectionWatch: (() => void) | undefined;
+let enrollmentCoordinator: NativeE2eeEnrollmentCoordinator | null = null;
+let enrollmentRetryTimer: ReturnType<typeof setTimeout> | undefined;
+let enrollmentRetryAttempt = 0;
+let enrollmentRetryForegroundUnsubscribe: (() => void) | undefined;
 const availabilityListeners = new Set<() => void>();
+
+function clearEnrollmentRetry(): void {
+  if (enrollmentRetryTimer !== undefined) globalThis.clearTimeout(enrollmentRetryTimer);
+  enrollmentRetryTimer = undefined;
+  enrollmentRetryAttempt = 0;
+  enrollmentRetryForegroundUnsubscribe?.();
+  enrollmentRetryForegroundUnsubscribe = undefined;
+}
+
+function scheduleEnrollmentRetry(accountId: string): void {
+  if (enrollmentRetryTimer !== undefined || enrollmentRetryForegroundUnsubscribe !== undefined) {
+    return;
+  }
+  const run = (): void => {
+    enrollmentRetryTimer = undefined;
+    enrollmentRetryForegroundUnsubscribe = undefined;
+    const state = hostedHubStore.getState();
+    if (state.accountStatus !== "authenticated" || state.account?.id !== accountId) return;
+    enrollmentRetryAttempt += 1;
+    void enrollmentCoordinator?.retry(accountId).catch(() => undefined);
+  };
+  if (!mobileAppLifecycle.isForeground()) {
+    enrollmentRetryForegroundUnsubscribe = subscribeForeground(run);
+    return;
+  }
+  const delay = Math.min(30_000, 1_000 * 2 ** Math.min(enrollmentRetryAttempt, 5));
+  enrollmentRetryTimer = globalThis.setTimeout(run, delay);
+}
 
 function setAvailable(next: boolean): void {
   if (available === next) return;
@@ -144,6 +188,9 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
     hasPendingRelayRequests: hasHostedRelayPendingRequests,
     resetRelayAttemptFactory: resetHostedRelayAttemptFactory,
     relayUrl: mobileHostedRelayUrl,
+    prepareRelaySocketContext: prepareMobileRelaySocketContext,
+    issueRelayAttempt: (input) => issueMobileRelayAttempt(input),
+    disposeRelaySocketContext: disposeMobileRelaySocketContext,
     // docs/relay-e2ee-protocol.md §4: THIS IS WHERE NATIVE E2EE IS ON.
     //
     // Every relay channel this app opens is built with the §4.4 mode machine,
@@ -157,8 +204,31 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
     // the first scalar access is K1 after validated evidence, where failure is
     // FATAL-PRE and can no longer authorize plaintext.
     createRelaySocket: (input) =>
-      new MobileHostedRelaySocket({ ...input, e2ee: resolveMobileRelayE2eeProvider() }),
+      new MobileHostedRelaySocket({
+        ...input,
+        e2ee: providerForMobileRelaySocketContext(input.preparedSocketContext),
+        disposePreparedContext: () => disposeMobileRelaySocketContext(input.preparedSocketContext),
+      }),
   });
+  enrollmentCoordinator = createNativeE2eeEnrollmentCoordinator({
+    platform: mobileNativeE2eePlatform,
+    api: getHostedHubApi(),
+    hubOrigin: endpoint.origin(),
+    requestedMaximumRole: "operator",
+    requestedCapabilities: ["ryco.rpc"],
+    refreshDirectory: () => hostedHubController.refreshDirectory(),
+    invalidateHostedGeneration: () => {
+      disposeMobileRelayE2eeAttempt();
+      resetMobileE2eeSession();
+      hostedHubController.invalidateNativeE2eeAuthorization();
+      try {
+        void getMobileHostedConnectionCoordinator().releaseAll();
+      } catch {
+        // Runtime bootstrap can invalidate before the multi-node coordinator exists.
+      }
+    },
+  });
+  setMobileNativeE2eeEnrollmentCoordinator(enrollmentCoordinator);
   configured = true;
   setAvailable(true);
   watchSelectionForE2ee();
@@ -195,26 +265,54 @@ function watchSelectionForE2ee(): void {
     readonly nodeId: string | null;
     readonly generation: number;
     readonly trustRevision: number;
+    readonly enrollmentGeneration: number;
+    readonly enrollmentStatus: string;
   }
   const sameSnapshot = (left: SelectionSnapshot, right: SelectionSnapshot): boolean =>
     left.accountStatus === right.accountStatus &&
     left.accountId === right.accountId &&
     left.nodeId === right.nodeId &&
     left.generation === right.generation &&
-    left.trustRevision === right.trustRevision;
+    left.trustRevision === right.trustRevision &&
+    left.enrollmentGeneration === right.enrollmentGeneration &&
+    left.enrollmentStatus === right.enrollmentStatus;
 
   let last: SelectionSnapshot | undefined;
   const evaluate = () => {
     const state = hostedHubStore.getState();
+    const enrollment = enrollmentCoordinator?.getState();
     const next: SelectionSnapshot = {
       accountStatus: state.accountStatus,
       accountId: state.account?.id ?? null,
       nodeId: state.selectedNode?.id ?? null,
       generation: state.generation,
       trustRevision: mobileE2eeTrustStore.revision(),
+      enrollmentGeneration: enrollment?.generation ?? 0,
+      enrollmentStatus: enrollment?.status ?? "idle",
     };
     if (last !== undefined && sameSnapshot(next, last)) return;
     last = next;
+    if (state.accountStatus === "authenticated" && state.account !== null) {
+      if (
+        enrollment?.status === "idle" ||
+        (enrollment?.status === "ready" &&
+          enrollment.ready !== null &&
+          enrollment.ready.namespace.accountId !== state.account.id)
+      ) {
+        clearEnrollmentRetry();
+        void enrollmentCoordinator?.ensure(state.account.id).catch(() => undefined);
+      } else if (
+        enrollment?.status === "unavailable" &&
+        enrollment.errorCode === "enrollment_unavailable"
+      ) {
+        scheduleEnrollmentRetry(state.account.id);
+      } else if (enrollment?.status === "ready") {
+        clearEnrollmentRetry();
+      }
+    } else if (enrollment && enrollment.status !== "idle") {
+      clearEnrollmentRetry();
+      void enrollmentCoordinator?.invalidate("signed-out");
+    }
     if (state.accountStatus !== "authenticated" || state.selectedNode === null) {
       disposeMobileRelayE2eeAttempt();
       // The projection describes a channel for a selection that no longer
@@ -223,13 +321,20 @@ function watchSelectionForE2ee(): void {
       resetMobileE2eeSession();
       return;
     }
+    if (enrollmentCoordinator?.getState().status !== "ready") {
+      disposeMobileRelayE2eeAttempt();
+      resetMobileE2eeSession();
+      return;
+    }
     void prepareMobileRelayE2eeAttempt();
   };
   const unsubscribeStore = hostedHubStore.subscribe(evaluate);
   const unsubscribeTrust = mobileE2eeTrustStore.subscribe(evaluate);
+  const unsubscribeEnrollment = enrollmentCoordinator?.subscribe(evaluate) ?? (() => undefined);
   selectionWatch = () => {
     unsubscribeStore();
     unsubscribeTrust();
+    unsubscribeEnrollment();
   };
   evaluate();
 }
@@ -274,15 +379,16 @@ export function ensureMobileHostedSession(): Promise<void> {
 /** Invalidate hosted availability after a deliberate Hub profile change. */
 export function invalidateMobileHostedRuntime(): void {
   configured = false;
+  clearEnrollmentRetry();
   setAvailable(false);
   session = undefined;
   selectionWatch?.();
   selectionWatch = undefined;
-  // The warm attempt is public-only, but its lifetime gates the one-operation
-  // K1 scalar borrower. Revoke it on a Hub-profile change so a secure-store read
-  // that settles late cannot emit a hello for the previous profile.
-  disposeMobileRelayE2eeAttempt();
-  resetMobileE2eeSession();
+  void enrollmentCoordinator?.invalidate("signed-out");
+  enrollmentCoordinator = null;
+  setMobileNativeE2eeEnrollmentCoordinator(null);
+  // Enrollment invalidation synchronously revokes the hosted generation, warm
+  // attempt, and session projection through its configured callback above.
   invalidateMobileHostedRuntimeConfig();
 }
 

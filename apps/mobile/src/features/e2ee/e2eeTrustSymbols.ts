@@ -24,6 +24,7 @@ export const E2EE_TRUST_SYMBOLS = [
 /** One glyph per claim, chosen from the same value the label is. */
 export const CLAIM_SYMBOLS: Record<E2eeChannelClaim, (typeof E2EE_TRUST_SYMBOLS)[number]> = {
   verified: "checkmark.shield",
+  "account-trusted": "lock",
   "pairing-only": "exclamationmark.triangle",
   legacy: "lock.open",
   "legacy-no-custody": "lock.open",

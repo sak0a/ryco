@@ -28,6 +28,7 @@ export async function resolveAuthoritativeNativeNodeTrust(input: {
   readonly scope: NativeNodeTrustScope | null;
   readonly targets: ReadonlyArray<NativeNodeTrustTarget>;
   readonly classify: NativeNodeTrustClassifier;
+  readonly accountEnrollmentReady?: boolean;
   readonly identityConflictEnvironmentIds?: ReadonlySet<string>;
 }): Promise<ReadonlyMap<string, WorkspaceNativeTrustState>> {
   const conflicts = input.identityConflictEnvironmentIds ?? new Set<string>();
@@ -46,7 +47,11 @@ export async function resolveAuthoritativeNativeNodeTrust(input: {
         });
         return [
           target.environmentId,
-          classification.class === "latched" ? "verified" : "unverified",
+          classification.class === "latched"
+            ? "verified"
+            : input.accountEnrollmentReady
+              ? "account-trusted"
+              : "unverified",
         ] as const;
       } catch {
         return [target.environmentId, "unknown"] as const;
@@ -61,7 +66,7 @@ export function workspaceEligibleEnvironmentIds(
 ): ReadonlySet<string> {
   return new Set(
     Array.from(trustByEnvironmentId, ([environmentId, trust]) =>
-      trust === "verified" ? environmentId : null,
+      trust === "verified" || trust === "account-trusted" ? environmentId : null,
     ).filter((environmentId): environmentId is string => environmentId !== null),
   );
 }
@@ -71,7 +76,10 @@ export function needsVerificationEnvironmentIds(
 ): ReadonlySet<string> {
   return new Set(
     Array.from(trustByEnvironmentId, ([environmentId, trust]) =>
-      trust === "unverified" || trust === "unknown" || trust === "identity-conflict"
+      trust === "unverified" ||
+      trust === "account-trusted" ||
+      trust === "unknown" ||
+      trust === "identity-conflict"
         ? environmentId
         : null,
     ).filter((environmentId): environmentId is string => environmentId !== null),

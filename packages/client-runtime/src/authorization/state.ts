@@ -767,6 +767,25 @@ class HostedHubController {
   }
 
   /**
+   * Synchronously withdraw native account-grant authority without signing the account out. Platform
+   * adapters call this before asynchronous channel teardown on enrollment revocation or account-epoch
+   * change, so stale generations cannot retain read or mutation readiness.
+   */
+  invalidateNativeE2eeAuthorization(): void {
+    const state = hostedHubStore.getState();
+    if (state.accountStatus !== "authenticated") return;
+    getHostedRuntimeConfiguration().resetRelayAttemptFactory();
+    patchState({
+      generation: state.generation + 1,
+      effectiveRole: null,
+      transportStatus: "reconnecting",
+      sessionStatus: "closed",
+      sessionEstablished: false,
+      sessionRecoveredAfterUnknown: false,
+    });
+  }
+
+  /**
    * Load the account's passkeys.
    *
    * Deduplicated like the node directory: a second caller joins the in-flight

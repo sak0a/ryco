@@ -9,6 +9,7 @@ import {
   RELAY_PROTOCOL_MAJOR,
   RELAY_PROTOCOL_MINOR,
   type RelayChannelId,
+  type RelayAccountGrantContext,
   type RelayCloseReason,
   type RelayEffectiveRole,
   type RelayFrame,
@@ -146,6 +147,14 @@ export interface RelayE2eeChannelIdentity {
   readonly effectiveRole: string;
   readonly relayProtocolMajor: number;
   readonly relayProtocolMinor: number;
+  /** Exact authenticated relay-minor-3 context carried by this channel.open. */
+  readonly accountGrantContext?:
+    | {
+        readonly relayTicketId: string;
+        readonly deviceGrantDigest: Uint8Array;
+        readonly nodeCapabilityStatementDigest: Uint8Array;
+      }
+    | undefined;
 }
 
 /** The engine surface one E2EE channel drives, and no more of it. */
@@ -412,6 +421,7 @@ export class HostedRelayEngine {
   /** The relay-selected version, bounded by the version offered in `auth`. */
   #protocol: { readonly protocolMajor: number; readonly protocolMinor: number } | null = null;
   #channel: RelayChannelId | null = null;
+  #accountGrantContext: RelayAccountGrantContext | undefined;
   #accepted = false;
   #role: RelayEffectiveRole | null = null;
   #inboundSequence = 0;
@@ -799,6 +809,7 @@ export class HostedRelayEngine {
       if (this.#channel || frame.capability !== "ryco.rpc" || !frame.effectiveRole)
         return this.#fail(failure("channel_rejected"));
       this.#channel = frame.channelId;
+      this.#accountGrantContext = frame.accountGrantContext;
       this.#role = frame.effectiveRole;
       this.options.callbacks.onRole(this.#role);
       return;
@@ -844,6 +855,9 @@ export class HostedRelayEngine {
       return frame.channelId === this.#channel
         ? this.#fail(failure(frame.reason ?? "channel_rejected"))
         : this.#fail(failure("channel_rejected"));
+    if (frame.type === "e2ee.enrollment-revoked") {
+      return this.#fail(failure("revoked"));
+    }
     if (frame.type === "flow.pause" || frame.type === "flow.resume") {
       if (frame.channelId !== this.#channel) return this.#fail(failure("channel_rejected"));
       this.#outboundPaused = frame.type === "flow.pause";
@@ -873,6 +887,15 @@ export class HostedRelayEngine {
           effectiveRole: this.#role!,
           relayProtocolMajor: this.#wireVersion().protocolMajor,
           relayProtocolMinor: this.#wireVersion().protocolMinor,
+          ...(this.#accountGrantContext === undefined
+            ? {}
+            : {
+                accountGrantContext: {
+                  relayTicketId: this.#accountGrantContext[1],
+                  deviceGrantDigest: Uint8Array.from(this.#accountGrantContext[2]),
+                  nodeCapabilityStatementDigest: Uint8Array.from(this.#accountGrantContext[3]),
+                },
+              }),
         },
         admit: (messageBytes) => this.#reserveOutbound(messageBytes),
         lockMode: (mode) => this.#lockMode(mode),

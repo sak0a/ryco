@@ -79,6 +79,9 @@ vi.mock("./useHostedMode", () => ({ useHostedModeAvailable: () => hostedMock.ava
 vi.mock("../e2ee/useMobileE2eeSession", () => ({
   useMobileE2eeChannelStatus: () => hostedMock.e2eeStatus,
 }));
+vi.mock("../e2ee/useMobileNativeE2eeEnrollment", () => ({
+  useMobileNativeE2eeEnrollmentStatus: () => "ready",
+}));
 vi.mock("../home/useAuthoritativeNodeTrust", () => ({
   useAuthoritativeNodeTrust: (targets: ReadonlyArray<{ readonly environmentId: string }>) =>
     new Map(targets.map((target) => [target.environmentId, "verified"])),

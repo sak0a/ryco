@@ -110,6 +110,7 @@ export const HOSTED_STATUS_SETTLEMENT = {
   // Outcomes: connected states.
   Online: "settled",
   Encrypted: "settled",
+  "Account trusted": "settled",
   "Browser encrypted": "settled",
   Legacy: "settled",
   // Outcomes: terminal and attention states. `Not verified` and `Legacy` are
@@ -126,6 +127,8 @@ export const HOSTED_STATUS_SETTLEMENT = {
   "Checking access": "transient",
   Synchronizing: "transient",
   Securing: "transient",
+  "Securing this device": "transient",
+  "Device encryption unavailable": "settled",
   Reconnecting: "transient",
   idle: "transient",
   "requesting ticket": "transient",

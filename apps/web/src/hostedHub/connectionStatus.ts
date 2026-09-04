@@ -32,7 +32,7 @@ export * from "@ryco/client-runtime/authorization";
  */
 export type WebHostedE2eeChannelStatus = Exclude<
   HostedE2eeChannelStatus,
-  "verified" | "unverified"
+  "verified" | "account-trusted" | "unverified"
 >;
 
 /** The shared input with the §4.4 dimension narrowed to this tier's states. */

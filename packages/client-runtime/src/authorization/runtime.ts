@@ -64,10 +64,23 @@ export interface HostedRuntimeConfiguration {
   readonly hasPendingRelayRequests: () => boolean;
   readonly resetRelayAttemptFactory: () => void;
   readonly relayUrl: () => string;
+  /** Native-only public trust preparation before the atomic ticket/grant request. */
+  readonly prepareRelaySocketContext?: () => Promise<unknown>;
+  readonly issueRelayAttempt?: (input: {
+    readonly nodeId: string;
+    readonly generation: number;
+    readonly preparedSocketContext: unknown;
+  }) => Promise<{
+    readonly ticket: string;
+    readonly expiresAt: number;
+    readonly preparedSocketContext: unknown;
+  }>;
+  readonly disposeRelaySocketContext?: (context: unknown) => void;
   readonly createRelaySocket: (input: {
     readonly url: string;
     readonly ticket: string;
     readonly ticketExpiresAt: number;
+    readonly preparedSocketContext?: unknown;
     readonly callbacks: {
       readonly onTransportStatus: (status: HostedRelayTransportStatus) => void;
       readonly onSessionStatus: (status: HostedRycoSessionStatus) => void;

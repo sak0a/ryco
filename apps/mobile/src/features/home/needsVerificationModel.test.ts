@@ -28,6 +28,7 @@ describe("Needs verification group", () => {
     const nodes = [
       node("verified", true),
       node("pending", true),
+      node("account", true),
       node("unknown", false),
       node("viewer", true),
     ];
@@ -36,11 +37,18 @@ describe("Needs verification group", () => {
       trustByEnvironmentId: new Map([
         ["env-verified", "verified"],
         ["env-pending", "unverified"],
+        ["env-account", "account-trusted"],
         ["env-unknown", "unknown"],
         ["env-viewer", "identity-conflict"],
       ]),
     });
-    expect(rows.map((row) => row.nodeId).toSorted()).toEqual(["pending", "unknown", "viewer"]);
+    expect(rows.map((row) => row.nodeId).toSorted()).toEqual([
+      "account",
+      "pending",
+      "unknown",
+      "viewer",
+    ]);
+    expect(rows.find((row) => row.nodeId === "account")?.detail).toContain("Account trusted");
     expect(rows.find((row) => row.nodeId === "unknown")?.detail).toContain("Offline");
     expect(rows.find((row) => row.nodeId === "viewer")?.detail).toContain("Viewer");
     expect(rows.find((row) => row.nodeId === "viewer")?.lockedHistory).toBe(true);

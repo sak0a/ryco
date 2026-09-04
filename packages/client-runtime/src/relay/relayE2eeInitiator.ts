@@ -455,7 +455,11 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
    * selects it, rather than a flag a caller could forget to set.
    */
   function releaseGatedWithoutVerifiedPin(): boolean {
-    return attempt.credentials.tier === "native" && attempt.verifiedPin === undefined;
+    return (
+      attempt.credentials.tier === "native" &&
+      attempt.credentials.trustSource !== "account-enrolled" &&
+      attempt.verifiedPin === undefined
+    );
   }
 
   /**

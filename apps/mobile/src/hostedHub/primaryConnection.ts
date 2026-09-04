@@ -18,17 +18,22 @@ import {
 import {
   authorizeHostedRequestForState,
   HostedRelayAttemptFactory,
-  type RelayE2eeProvider,
 } from "@ryco/client-runtime/relay";
 import { createWsRpcClient } from "@ryco/client-runtime/rpc";
 
 import { WsTransport } from "../rpc/wsTransport";
 import { getMobileHostedConnectionCoordinator } from "../connection/hostedConnectionCoordinator";
-import { prepareMobileRelayE2eeAttempt, resolveMobileRelayE2eeProvider } from "./e2eeAttempt";
+import {
+  disposeMobileRelaySocketContext,
+  issueMobileRelayAttempt,
+  prepareMobileRelaySocketContext,
+  providerForMobileRelaySocketContext,
+} from "./accountE2eeAttempt";
 import { readPrimaryEnvironmentDescriptor } from "./primaryEnvironment";
 import { MobileHostedRelaySocket, mobileHostedRelayUrl } from "./relaySocket";
 import { getMobileHostedConfig } from "./runtimeConfig";
 import { writeEnvironmentServerConfig } from "../state/environmentServerConfigs";
+import { getMobileNativeE2eeEnrollmentCoordinator } from "./e2eeEnrollment";
 
 /**
  * Builds the node connection that runs **through the Hub relay**.
@@ -85,7 +90,7 @@ export function createHostedPrimaryConnection(
       ) {
         throw new Error("Hosted environment is not the current reconnect target.");
       }
-      await prepareMobileRelayE2eeAttempt();
+      const prepared = await prepareMobileRelaySocketContext();
       const after = hostedHubStore.getState();
       if (
         after.accountStatus !== "authenticated" ||
@@ -93,13 +98,16 @@ export function createHostedPrimaryConnection(
       ) {
         throw new Error("Hosted environment changed during E2EE preparation.");
       }
-      return resolveMobileRelayE2eeProvider();
+      return prepared;
     },
+    issueRelayAttempt: (input) => issueMobileRelayAttempt(input),
+    disposeSocketContext: disposeMobileRelaySocketContext,
     relayUrl: mobileHostedRelayUrl,
     createRelaySocket: (input) =>
       new MobileHostedRelaySocket({
         ...input,
-        e2ee: input.preparedSocketContext as RelayE2eeProvider | undefined,
+        e2ee: providerForMobileRelaySocketContext(input.preparedSocketContext),
+        disposePreparedContext: () => disposeMobileRelaySocketContext(input.preparedSocketContext),
       }),
     authorizeRequest: (info) => {
       const shared = hostedHubStore.getState();
@@ -143,6 +151,9 @@ export function createHostedPrimaryConnection(
       if (sharedGeneration !== null) hostedHubController.role(sharedGeneration, role);
     },
     failure: (generation, failure) => {
+      if (failure.kind === "revoked" && failure.closeReason !== "node_revoked") {
+        void getMobileNativeE2eeEnrollmentCoordinator()?.invalidate("revoked");
+      }
       coordinator.failure(descriptor.environmentId, generation, failure);
       const sharedGeneration = sharedSelectionGeneration();
       if (sharedGeneration !== null) hostedHubController.failure(sharedGeneration, failure);

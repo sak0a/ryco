@@ -18,7 +18,11 @@ import {
   builtInProviderDriverForInstanceId,
   providerDisplayLabel,
 } from "../../lib/providerDisplay";
-import { NODE_TRUST_UNVERIFIED_LABEL, type NodeTrust } from "../home/nodeTrustModel";
+import {
+  NODE_TRUST_ACCOUNT_LABEL,
+  NODE_TRUST_UNVERIFIED_LABEL,
+  type NodeTrust,
+} from "../home/nodeTrustModel";
 
 export type InboxThreadState =
   | "needs-input"
@@ -244,7 +248,12 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
         state === "offline" ? (environment?.staleDetail ?? "Offline") : statusLabel(state),
       updatedAt: entry.lifecycle.effectiveSettlementTimestamp ?? timestamp(thread),
       changeRequest: buildChangeRequestBadge(entry.worktree),
-      trustLabel: environment?.trust === "unverified" ? NODE_TRUST_UNVERIFIED_LABEL : null,
+      trustLabel:
+        environment?.trust === "unverified"
+          ? NODE_TRUST_UNVERIFIED_LABEL
+          : environment?.trust === "account-trusted"
+            ? NODE_TRUST_ACCOUNT_LABEL
+            : null,
       roleLabel: environment?.role === "viewer" ? "Viewer" : null,
       providerDriver,
       providerLabel: providerDisplayLabel(providerDriver),

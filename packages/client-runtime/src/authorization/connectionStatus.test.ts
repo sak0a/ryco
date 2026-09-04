@@ -80,6 +80,24 @@ describe("deriveHostedConnectionStatusText", () => {
     ).toBe("Checking access");
   });
 
+  it("keeps native enrollment closed behind an explicit device-security state", () => {
+    expect(
+      deriveHostedConnectionStatusText(
+        input({ transportStatus: "idle", nativeDeviceSecurityStatus: "securing" }),
+      ),
+    ).toBe("Securing this device");
+    expect(
+      deriveHostedConnectionStatusText(
+        input({ transportStatus: "idle", nativeDeviceSecurityStatus: "unavailable" }),
+      ),
+    ).toBe("Device encryption unavailable");
+    expect(
+      deriveHostedConnectionStatusIndicator(
+        input({ e2eeStatus: "verified", nativeDeviceSecurityStatus: "securing" }),
+      ),
+    ).toMatchObject({ connected: false, guarantee: "none" });
+  });
+
   it("falls back to the hyphen-expanded transport status only for uncovered states", () => {
     expect(
       deriveHostedConnectionStatusText(

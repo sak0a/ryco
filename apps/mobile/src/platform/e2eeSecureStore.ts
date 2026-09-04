@@ -76,10 +76,18 @@ export const E2EE_TRUST_DOCUMENT_KEY = "ryco.e2ee.trustDocument.v1";
  */
 export const E2EE_CLIENT_PREKEY_RECORD_KEY = "ryco.e2ee.clientPrekeyCertificate.v1";
 
+/** Installation-scoped account-enrollment id; non-secret but must die with this custody namespace. */
+export const E2EE_ACCOUNT_ENROLLMENT_ID_KEY = "ryco.e2ee.accountEnrollmentId.v1";
+
+/** Public account-grant continuity metadata, isolated from locally verified trust records. */
+export const E2EE_ACCOUNT_TRUST_DOCUMENT_KEY = "ryco.e2ee.accountTrustDocument.v1";
+
 export type E2eeSecureStoreKey =
   | typeof E2EE_AGREEMENT_SECRET_KEY
   | typeof E2EE_TRUST_DOCUMENT_KEY
-  | typeof E2EE_CLIENT_PREKEY_RECORD_KEY;
+  | typeof E2EE_CLIENT_PREKEY_RECORD_KEY
+  | typeof E2EE_ACCOUNT_ENROLLMENT_ID_KEY
+  | typeof E2EE_ACCOUNT_TRUST_DOCUMENT_KEY;
 
 /**
  * Every name in the namespace, in destruction order.
@@ -93,6 +101,8 @@ const E2EE_SECURE_STORE_KEY_SET: Readonly<Record<E2eeSecureStoreKey, null>> = {
   [E2EE_AGREEMENT_SECRET_KEY]: null,
   [E2EE_TRUST_DOCUMENT_KEY]: null,
   [E2EE_CLIENT_PREKEY_RECORD_KEY]: null,
+  [E2EE_ACCOUNT_ENROLLMENT_ID_KEY]: null,
+  [E2EE_ACCOUNT_TRUST_DOCUMENT_KEY]: null,
 };
 
 export const E2EE_SECURE_STORE_KEYS = Object.keys(

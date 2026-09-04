@@ -13,7 +13,7 @@ import { e2eeKeyFingerprint, e2eeSha256 } from "@ryco/shared/relayE2eeKeys";
 import type { NodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeTranscripts";
 import type { NativeE2eeAccountTrustedNode, NativeE2eePlatformService } from "../platform/index.ts";
 import { encodeBase64Url } from "../relay/base64url.ts";
-import type { HostedHubApi } from "./api.ts";
+import { HostedHubApiError, type HostedHubApi } from "./api.ts";
 import type { NativeE2eeReadyEnrollment } from "./nativeE2eeEnrollment.ts";
 import {
   createNativeE2eeTrustResolver,
@@ -183,7 +183,12 @@ function harness(previous: NativeE2eeAccountTrustedNode | null = null) {
       stored = record;
     }),
   } as Pick<NativeE2eePlatformService, "readAccountTrustedNode" | "writeAccountTrustedNode">;
-  const resolve = createNativeE2eeTrustResolver({ api, platform, now: () => NOW + 1 });
+  const resolve = createNativeE2eeTrustResolver({
+    api,
+    platform,
+    now: () => NOW + 1,
+    verifyAccountStatement: () => statement,
+  });
   const request: ResolveNativeE2eeTrustInput = {
     hubOrigin: HUB_ORIGIN,
     accountId: ACCOUNT_ID,
@@ -266,11 +271,46 @@ describe("native E2EE trust resolver", () => {
       acceptedPolicyGeneration: 8,
       firstTrustedAt: NOW - 1_000,
       lastTrustedAt: NOW - 500,
+      identityChanges: [],
     } satisfies NativeE2eeAccountTrustedNode;
     const { api, resolve, request } = harness(previous);
 
     await expect(resolve(request)).resolves.toEqual({ kind: "blocked", reason: "policy-rollback" });
     expect(api.issueAccountGrantRelayTicket).not.toHaveBeenCalled();
+  });
+
+  it("records a bounded public history when a fresh grant authorizes an identity replacement", async () => {
+    const oldPublic = ed25519.getPublicKey(new Uint8Array(32).fill(12));
+    const previous = {
+      hubOrigin: HUB_ORIGIN,
+      accountId: ACCOUNT_ID,
+      nodeId: NODE_ID,
+      identityPublicKey: oldPublic,
+      identityFingerprint: e2eeKeyFingerprint("node-identity", oldPublic),
+      agreementFingerprint: e2eeKeyFingerprint("agreement", NODE_AGREEMENT_PUBLIC),
+      continuityId: CONTINUITY_ID,
+      acceptedPolicyGeneration: 6,
+      firstTrustedAt: NOW - 1_000,
+      lastTrustedAt: NOW - 500,
+      identityChanges: [],
+    } satisfies NativeE2eeAccountTrustedNode;
+    const { resolve, request, stored } = harness(previous);
+
+    const result = await resolve(request);
+
+    expect(result.kind).toBe("authorized");
+    expect(stored()?.firstTrustedAt).toBe(NOW - 1_000);
+    expect(stored()?.acceptedPolicyGeneration).toBe(7);
+    expect(stored()?.identityChanges).toEqual([
+      {
+        previousIdentityFingerprint: previous.identityFingerprint,
+        nextIdentityFingerprint: statement.identityFingerprint,
+        changedAt: NOW + 1,
+      },
+    ]);
+    if (result.kind === "authorized" && result.trustSource === "account-enrolled") {
+      result.dispose();
+    }
   });
 
   it("rejects a mismatched statement digest and does not write trust", async () => {
@@ -297,5 +337,42 @@ describe("native E2EE trust resolver", () => {
     result.dispose();
     expect(result.grant.envelope.every((byte) => byte === 0)).toBe(true);
     expect(result.nodeCapabilityStatement.every((byte) => byte === 0)).toBe(true);
+  });
+
+  it("caches the authenticated public keyset across node attempts", async () => {
+    const { api, resolve, request } = harness();
+    const first = await resolve(request);
+    const second = await resolve(request);
+
+    expect(first.kind).toBe("authorized");
+    expect(second.kind).toBe("authorized");
+    expect(api.issueAccountGrantRelayTicket).toHaveBeenCalledTimes(2);
+    expect(api.getE2eeGrantVerificationKeys).toHaveBeenCalledOnce();
+    if (first.kind === "authorized" && first.trustSource === "account-enrolled") first.dispose();
+    if (second.kind === "authorized" && second.trustSource === "account-enrolled") second.dispose();
+  });
+
+  it("distinguishes a revoked enrollment from temporary authorization loss", async () => {
+    const { api, resolve, request } = harness();
+    vi.mocked(api.issueAccountGrantRelayTicket).mockRejectedValue(
+      new HostedHubApiError("revoked", 403),
+    );
+
+    await expect(resolve(request)).resolves.toEqual({
+      kind: "blocked",
+      reason: "enrollment-revoked",
+    });
+  });
+
+  it("reports an old node as update-required instead of retrying or falling back", async () => {
+    const { api, resolve, request } = harness();
+    vi.mocked(api.issueAccountGrantRelayTicket).mockRejectedValue(
+      new HostedHubApiError("unsupported_version", 409),
+    );
+
+    await expect(resolve(request)).resolves.toEqual({
+      kind: "blocked",
+      reason: "node-update-required",
+    });
   });
 });

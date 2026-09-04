@@ -8,11 +8,18 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 // `extra` is per-test data here, so the expo-constants stub reads a mutable
 // holder instead of a frozen literal (platform.test.ts pins `extra` to `{}`).
-const constantsHolder = vi.hoisted(() => ({ extra: {} as Record<string, unknown> }));
+const constantsHolder = vi.hoisted(() => ({
+  extra: {} as Record<string, unknown>,
+  version: undefined as unknown,
+  platform: { ios: {} } as { ios?: object },
+}));
 vi.mock("expo-constants", () => ({
   default: {
     get expoConfig() {
-      return { extra: constantsHolder.extra };
+      return { extra: constantsHolder.extra, version: constantsHolder.version };
+    },
+    get platform() {
+      return constantsHolder.platform;
     },
   },
 }));
@@ -45,7 +52,12 @@ import {
   resetMobileRuntimeConfigForTests,
 } from "../connection/runtimeConfig";
 import { getThreadsRuntimeConfiguration } from "../state/threadsRuntime";
-import { readMobileClientRuntimeConfig, readMobileHostedConfig } from "./config";
+import {
+  readMobileAppVersion,
+  readMobileClientRuntimeConfig,
+  readMobileHostedConfig,
+  readMobileNativePlatform,
+} from "./config";
 
 const NODE = { httpBaseUrl: "http://node.local:44342", wsBaseUrl: "ws://node.local:44342" };
 
@@ -72,6 +84,18 @@ function hostedExtra(
 
 beforeEach(() => {
   setExtra({});
+  constantsHolder.version = undefined;
+  constantsHolder.platform = { ios: {} };
+});
+
+describe("native enrollment metadata", () => {
+  it("bounds the app version and identifies the native platform", () => {
+    constantsHolder.version = `  ${"v".repeat(80)}  `;
+    expect(readMobileAppVersion()).toBe("v".repeat(64));
+    expect(readMobileNativePlatform()).toBe("ios");
+    constantsHolder.platform = {};
+    expect(readMobileNativePlatform()).toBe("android");
+  });
 });
 
 describe("mobile hosted config", () => {

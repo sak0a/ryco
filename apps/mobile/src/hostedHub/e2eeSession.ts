@@ -140,6 +140,7 @@ export type MobileE2eeTrustEvent =
 export interface MobileE2eeSessionState {
   /** What the pill is entitled to say. Folded into the shared status derivation. */
   readonly channel: HostedE2eeChannelStatus;
+  readonly trustSource: "none" | "locally-verified" | "account-enrolled";
   readonly selection: MobileE2eeSelection | null;
   /**
    * §12.1.1's verdict WITH its clause and scope, not the coarse class the §4.4
@@ -188,6 +189,7 @@ export interface MobileE2eeSessionState {
 
 const INITIAL: MobileE2eeSessionState = {
   channel: "unavailable",
+  trustSource: "none",
   selection: null,
   classification: null,
   legacyPermitted: false,
@@ -293,11 +295,13 @@ export function beginMobileE2eeChannel(input: {
   readonly markerSet: boolean | null;
   readonly pinVerified: boolean;
   readonly previouslyVerified: MobileE2eeIdentityDisplay | null;
+  readonly trustSource?: "locally-verified" | "account-enrolled";
 }): void {
   publish(
     {
       ...INITIAL,
       channel: "negotiating",
+      trustSource: input.trustSource ?? "locally-verified",
       selection: input.selection,
       classification: input.classification,
       legacyPermitted: input.legacyPermitted,
@@ -401,7 +405,44 @@ export function lockMobileE2eeChannelMode(
   publish(
     {
       ...state,
-      channel: mode === "legacy" ? "legacy" : state.pinVerified ? "verified" : "unverified",
+      channel:
+        mode === "legacy"
+          ? "legacy"
+          : state.trustSource === "account-enrolled"
+            ? "account-trusted"
+            : state.pinVerified
+              ? "verified"
+              : "unverified",
+    },
+    environmentId,
+  );
+}
+
+/** Publish public identity display material learned on an account-authorized channel. */
+export function observeMobileAccountE2eeStatement(
+  verification: NodeE2eeCapabilityVerification,
+  environmentId?: string | null,
+): void {
+  if (verification.kind !== "verified") return;
+  const state = stateFor(environmentId);
+  const selection = state.selection;
+  if (selection?.clientIdentityPublicKey === null || selection === null) return;
+  const statement = verification.statement;
+  publish(
+    {
+      ...state,
+      presented: {
+        nodeIdentityPublicKey: Uint8Array.from(statement.identityPublicKey),
+        display: deriveMobileE2eeIdentityDisplay({
+          nodeIdentityPublicKey: statement.identityPublicKey,
+          clientIdentityPublicKey: selection.clientIdentityPublicKey,
+          hubOrigin: selection.hubOrigin,
+          accountId: selection.accountId,
+        }),
+        continuityId: statement.continuityId,
+        policyGeneration: statement.policyGeneration,
+      },
+      event: null,
     },
     environmentId,
   );

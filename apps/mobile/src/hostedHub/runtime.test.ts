@@ -43,6 +43,9 @@ vi.mock("expo-sqlite/kv-store", () => ({
 vi.mock("expo-constants", () => ({ default: { expoConfig: { extra: {} } } }));
 vi.mock("../platform/config", () => ({
   readMobileHostedConfig: hoisted.readMobileHostedConfig,
+  readMobileNativePlatform: () => "ios",
+  readMobileAppVersion: () => "1.0.0",
+  readMobileDeviceLabel: () => "Test phone",
 }));
 vi.mock("../platform/dpopSigner", () => ({
   createMobileDpopSigner: hoisted.createMobileDpopSigner,
@@ -229,7 +232,7 @@ describe("hosted runtime configuration", () => {
     },
   );
 
-  it("watches structured selection snapshots without delimiter or sentinel collisions", async () => {
+  it("does not prepare an application channel before native enrollment is ready", async () => {
     hostedHubStore.setState({
       accountStatus: "signed-out",
       account: null,
@@ -253,18 +256,18 @@ describe("hosted runtime configuration", () => {
       selectedNode: node("b\u0000c"),
       generation: 1,
     } as never);
-    expect(hoisted.prepareCalls).toBe(prepareAtStart + 2);
+    expect(hoisted.prepareCalls).toBe(prepareAtStart);
 
     // A repeated notification for the same primitive snapshot is deduplicated.
     hostedHubStore.setState({ accountStatus: "authenticated" } as never);
-    expect(hoisted.prepareCalls).toBe(prepareAtStart + 2);
+    expect(hoisted.prepareCalls).toBe(prepareAtStart);
 
     hostedHubStore.setState({ generation: 2 } as never);
-    expect(hoisted.prepareCalls).toBe(prepareAtStart + 3);
+    expect(hoisted.prepareCalls).toBe(prepareAtStart);
 
     hoisted.trustRevision += 1;
     for (const listener of hoisted.trustListeners) listener();
-    expect(hoisted.prepareCalls).toBe(prepareAtStart + 4);
+    expect(hoisted.prepareCalls).toBe(prepareAtStart);
 
     hostedHubStore.setState({
       accountStatus: "signed-out",

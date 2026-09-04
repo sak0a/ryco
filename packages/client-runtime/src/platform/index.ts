@@ -219,6 +219,14 @@ export interface NativeE2eeAccountTrustedNode {
   readonly acceptedPolicyGeneration: number;
   readonly firstTrustedAt: number;
   readonly lastTrustedAt: number;
+  /** Bounded public audit trail; it is account-authorized continuity, never a verified pin. */
+  readonly identityChanges: readonly NativeE2eeAccountTrustIdentityChange[];
+}
+
+export interface NativeE2eeAccountTrustIdentityChange {
+  readonly previousIdentityFingerprint: Uint8Array;
+  readonly nextIdentityFingerprint: Uint8Array;
+  readonly changedAt: number;
 }
 
 /**

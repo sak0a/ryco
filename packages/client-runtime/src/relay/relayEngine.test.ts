@@ -337,6 +337,25 @@ describe("HostedRelayEngine", () => {
     expect(data?.protocolMinor).toBe(3);
   });
 
+  it("closes immediately when the authenticated relay revokes this enrollment", () => {
+    const handlers = callbacks();
+    const { socket } = create(handlers);
+    socket.open();
+    socket.frame({ type: "ready", ...VERSION_3, limits: RELAY_INITIAL_LIMITS });
+    socket.frame({
+      type: "e2ee.enrollment-revoked",
+      ...VERSION_3,
+      enrollmentId: `enr_${"e".repeat(22)}`,
+      enrollmentRevision: 2,
+      accountAuthEpoch: 3,
+      deviceAuthEpoch: 4,
+    });
+
+    expect(handlers.onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "revoked", retryable: false, closeReason: "revoked" }),
+    );
+  });
+
   it("advertises chunk support on fitting outbound RPC messages", () => {
     const { engine, socket } = create();
     authenticate(socket);
@@ -762,6 +781,31 @@ describe("HostedRelayEngine E2EE seams", () => {
     // §4.4: the valve opened because THE MACHINE locked a mode, not because the
     // channel was accepted.
     expect(events.onOpen).toHaveBeenCalledOnce();
+  });
+
+  it("passes the exact minor-3 account-grant context into the E2EE channel", () => {
+    const { provider, host } = stubProvider();
+    const { socket } = create(callbacks(), realTimers(), provider);
+    const grantDigest = new Uint8Array(32).fill(3);
+    const statementDigest = new Uint8Array(32).fill(4);
+    const relayTicketId = `rtk_${"t".repeat(22)}`;
+    socket.open();
+    socket.frame({ type: "ready", ...VERSION_3, limits: RELAY_INITIAL_LIMITS });
+    socket.frame({
+      type: "channel.open",
+      ...VERSION_3,
+      channelId: CHANNEL_ID,
+      capability: "ryco.rpc",
+      effectiveRole: "operator",
+      accountGrantContext: [2, relayTicketId, grantDigest, statementDigest],
+    });
+    socket.frame({ type: "channel.accept", ...VERSION_3, channelId: CHANNEL_ID });
+
+    expect(host().channel.accountGrantContext).toEqual({
+      relayTicketId,
+      deviceGrantDigest: grantDigest,
+      nodeCapabilityStatementDigest: statementDigest,
+    });
   });
 
   it("releases nothing at channel.accept until the machine locks a mode", () => {

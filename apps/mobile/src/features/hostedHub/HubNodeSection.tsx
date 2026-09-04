@@ -9,6 +9,7 @@ import {
   type HostedE2eeChannelStatus,
   type HostedHubNode,
   type HostedHubState,
+  type HostedNativeDeviceSecurityStatus,
 } from "@ryco/client-runtime/authorization";
 
 import { AppText as Text } from "../../components/AppText";
@@ -17,6 +18,7 @@ import { StatusPill, type StatusTone } from "../../components/StatusPill";
 import { acquireMobileHostedNode } from "../../hostedHub/acquireNode";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useMobileE2eeChannelStatus } from "../e2ee/useMobileE2eeSession";
+import { useMobileNativeE2eeEnrollmentStatus } from "../e2ee/useMobileNativeE2eeEnrollment";
 import { acquireBeforeNodeSecurity } from "../e2ee/acquireBeforeNodeSecurity";
 import { exactNodeRouteParams } from "../e2ee/exactNodeRouteModel";
 import { useAuthoritativeNodeTrust } from "../home/useAuthoritativeNodeTrust";
@@ -139,6 +141,7 @@ export function deriveHubNodeSectionModel(input: {
    * legacy label is mandatory on every surface, and this is one of them.
    */
   readonly e2eeStatus: HostedE2eeChannelStatus;
+  readonly nativeDeviceSecurityStatus?: HostedNativeDeviceSecurityStatus;
   /**
    * The settled presentation of the pair derived below (`settledHostedStatus`),
    * when the caller runs one. PRESENTATION ONLY: it never changes which status
@@ -159,6 +162,7 @@ export function deriveHubNodeSectionModel(input: {
     selectionStatus: state.selectionStatus,
     transportStatus: state.transportStatus,
     e2eeStatus: input.e2eeStatus,
+    nativeDeviceSecurityStatus: input.nativeDeviceSecurityStatus,
   };
   const indicator =
     input.settledStatus?.indicator ?? deriveHostedConnectionStatusIndicator(statusInput);
@@ -219,9 +223,13 @@ export function deriveHubNodeSectionModel(input: {
     )
     .map((node): HubNodeRowModel => {
       const trust = input.trustByEnvironmentId?.get(node.environmentId);
-      const verified = trust === undefined || trust === "verified" || trust === "not-required";
-      const selectable = canSelectHubNode(state, node) && verified;
-      const canVerify = node.revokedAt === null && !verified && actions.openNodeSecurity;
+      const trusted =
+        trust === undefined ||
+        trust === "verified" ||
+        trust === "account-trusted" ||
+        trust === "not-required";
+      const selectable = canSelectHubNode(state, node) && trusted;
+      const canVerify = node.revokedAt === null && !trusted && actions.openNodeSecurity;
       const trustDetail =
         trust === "identity-conflict"
           ? "Identity changed"
@@ -229,7 +237,9 @@ export function deriveHubNodeSectionModel(input: {
             ? "Verification unavailable"
             : trust === "unverified"
               ? "Not verified"
-              : null;
+              : trust === "account-trusted"
+                ? "Account trusted"
+                : null;
       return {
         nodeId: node.id,
         label: node.label,
@@ -359,6 +369,7 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
   // docs/relay-e2ee-protocol.md §12.2: the pill beside a node says what §4.4
   // locked, so a fallen-back channel reads `Legacy` here and not `Online`.
   const e2eeStatus = useMobileE2eeChannelStatus(state.selectedNode?.environmentId ?? null);
+  const nativeDeviceSecurityStatus = useMobileNativeE2eeEnrollmentStatus();
   const trustByEnvironmentId = useAuthoritativeNodeTrust(
     state.nodes.map((node) => ({ environmentId: node.environmentId, nodeId: node.id })),
   );
@@ -376,6 +387,7 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
     selectionStatus: state.selectionStatus,
     transportStatus: state.transportStatus,
     e2eeStatus,
+    nativeDeviceSecurityStatus,
   };
   const settledStatus = useSettledHostedStatus({
     indicator: deriveHostedConnectionStatusIndicator(statusInput),
@@ -387,6 +399,7 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
     state,
     available,
     e2eeStatus,
+    nativeDeviceSecurityStatus,
     settledStatus,
     actions: {
       selectNode: acquireMobileHostedNode,

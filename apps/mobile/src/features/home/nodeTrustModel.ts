@@ -18,8 +18,9 @@
  * pins the string against drift in either direction.
  */
 export const NODE_TRUST_UNVERIFIED_LABEL = "Not verified";
+export const NODE_TRUST_ACCOUNT_LABEL = "Account trusted";
 
-export type NodeTrust = "verified" | "unverified";
+export type NodeTrust = "verified" | "account-trusted" | "unverified";
 
 /**
  * The per-environment trust marker for a roster of Hub nodes.
@@ -45,12 +46,19 @@ export type NodeTrust = "verified" | "unverified";
 export function deriveNodeTrustByEnvironment(input: {
   readonly authoritativeTrustByEnvironmentId: ReadonlyMap<
     string,
-    "not-required" | "unknown" | "unverified" | "verified" | "identity-conflict"
+    "not-required" | "unknown" | "unverified" | "account-trusted" | "verified" | "identity-conflict"
   >;
 }): ReadonlyMap<string, NodeTrust> {
   const trustByEnvironmentId = new Map<string, NodeTrust>();
   for (const [environmentId, trust] of input.authoritativeTrustByEnvironmentId) {
-    trustByEnvironmentId.set(environmentId, trust === "verified" ? "verified" : "unverified");
+    trustByEnvironmentId.set(
+      environmentId,
+      trust === "verified"
+        ? "verified"
+        : trust === "account-trusted"
+          ? "account-trusted"
+          : "unverified",
+    );
   }
   return trustByEnvironmentId;
 }

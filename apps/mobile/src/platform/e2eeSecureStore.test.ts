@@ -32,6 +32,8 @@ vi.mock("expo-sqlite/kv-store", () => ({
 
 import {
   createE2eeSecureStore,
+  E2EE_ACCOUNT_ENROLLMENT_ID_KEY,
+  E2EE_ACCOUNT_TRUST_DOCUMENT_KEY,
   E2EE_AGREEMENT_SECRET_KEY,
   E2EE_INSTALL_MARKER_KEY,
   E2EE_KEYCHAIN_SERVICE,
@@ -385,6 +387,8 @@ describe("namespace destruction (§6.3, §13 re-pairing)", () => {
     // added to the union without joining it would show up here.
     expect(calls.map((call) => call.key)).toEqual([...E2EE_SECURE_STORE_KEYS]);
     expect([...E2EE_SECURE_STORE_KEYS]).toContain(E2EE_TRUST_DOCUMENT_KEY);
+    expect([...E2EE_SECURE_STORE_KEYS]).toContain(E2EE_ACCOUNT_ENROLLMENT_ID_KEY);
+    expect([...E2EE_SECURE_STORE_KEYS]).toContain(E2EE_ACCOUNT_TRUST_DOCUMENT_KEY);
     await expect(store.get(E2EE_AGREEMENT_SECRET_KEY)).resolves.toBeNull();
   });
 
