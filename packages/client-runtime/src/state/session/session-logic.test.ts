@@ -1499,6 +1499,35 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.output).toBe("first chunk\nsecond chunk");
   });
 
+  it("populates output and changed files from normalized change payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "acp-file-change",
+        kind: "tool.completed",
+        summary: "Edited file",
+        payload: {
+          itemType: "file_change",
+          data: {
+            path: "src/app.ts",
+            changes: [
+              {
+                path: "src/app.ts",
+                additions: 1,
+                deletions: 1,
+                diff: "--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1,1 +1,1 @@\n-old\n+new",
+              },
+            ],
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.output).toBe("--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1,1 +1,1 @@\n-old\n+new");
+    expect(entry?.changedFiles).toEqual(["src/app.ts"]);
+    expect(entry?.changedFileStats).toEqual([{ path: "src/app.ts", additions: 1, deletions: 1 }]);
+  });
+
   it("extracts Codex dynamicToolCall contentItems text", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

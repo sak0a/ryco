@@ -668,6 +668,16 @@ const handleSessionUpdate = ({
         });
         continue;
       }
+      if (event._tag === "ThoughtDelta") {
+        // Thought chunks interrupt the prose stream; seal the open assistant
+        // segment so later agent text starts a fresh message row.
+        yield* closeActiveAssistantSegment({
+          queue,
+          assistantSegmentRef,
+        });
+        yield* Queue.offer(queue, event);
+        continue;
+      }
       yield* Queue.offer(queue, event);
     }
   });
