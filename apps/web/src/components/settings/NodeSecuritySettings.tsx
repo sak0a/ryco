@@ -42,6 +42,7 @@ import {
   fetchNodeE2eePolicy,
   fetchNodeE2eePrekey,
   fetchNodeE2eeSessions,
+  fetchSessionState,
   previewNodeE2eePolicy,
   recoverNodeE2eePolicyGeneration,
   resetNodeE2eeFallback,
@@ -114,6 +115,7 @@ import {
   type NodeE2eeRecordActionId,
   type NodeE2eeRecordSubject,
   type NodeE2eeStrictPolicyDisposition,
+  type NodeLocalOperatorAccess,
   type NodeFactRow,
   NODE_CONTINUITY_DESCRIPTION,
   NODE_E2EE_APPROVABLE_ROLES,
@@ -418,7 +420,11 @@ interface PendingConfirmation {
 
 function PrimaryNodeSecuritySettings() {
   const mode = nodeSecurityMode(isHostedHubMode());
-  const availability = nodeOperatorDataAvailability(mode);
+  const desktopOwner = typeof window !== "undefined" && window.desktopBridge != null;
+  const [localOperatorAccess, setLocalOperatorAccess] = useState<NodeLocalOperatorAccess>(() =>
+    desktopOwner ? "owner" : "checking",
+  );
+  const availability = nodeOperatorDataAvailability(mode, localOperatorAccess);
   const strictPolicy = nodeE2eeStrictPolicyDisposition(mode);
 
   const [snapshot, setSnapshot] = useState<NodeSecuritySnapshot>(EMPTY_SNAPSHOT);
@@ -447,6 +453,26 @@ function PrimaryNodeSecuritySettings() {
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (mode !== "local" || desktopOwner) return;
+
+    let cancelled = false;
+    void fetchSessionState()
+      .then((session) => {
+        if (cancelled) return;
+        setLocalOperatorAccess(
+          session.authenticated && session.role === "owner" ? "owner" : "client",
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setLocalOperatorAccess("unavailable");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopOwner, mode]);
 
   const refresh = useCallback(async () => {
     if (!availability.available) return;
@@ -757,7 +783,7 @@ function PrimaryNodeSecuritySettings() {
       {mode === "hosted" ? <ThisConnectionSection /> : null}
 
       {!availability.available ? (
-        <SettingsSection title="This node">
+        <SettingsSection title={mode === "hosted" ? "This node" : "This session"}>
           <SettingsRow
             title={nodeConnectionStatement(mode, null).headline}
             description={availability.unavailableBody}
@@ -766,12 +792,14 @@ function PrimaryNodeSecuritySettings() {
               `refresh()` returns before it asks — so a switch drawn in the off
               position asserted `requireApprovedClientE2EE: false` about a node
               this very section had just said it cannot see. */}
-          <StrictPolicyRow
-            disposition={strictPolicy}
-            checked={null}
-            busy={busy}
-            onChange={(checked) => void startPolicyChange({ requireApprovedClientE2EE: checked })}
-          />
+          {mode === "hosted" ? (
+            <StrictPolicyRow
+              disposition={strictPolicy}
+              checked={null}
+              busy={busy}
+              onChange={(checked) => void startPolicyChange({ requireApprovedClientE2EE: checked })}
+            />
+          ) : null}
         </SettingsSection>
       ) : (
         <>

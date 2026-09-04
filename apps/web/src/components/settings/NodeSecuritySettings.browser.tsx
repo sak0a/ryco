@@ -41,6 +41,7 @@ import type {
 } from "@ryco/client-runtime/connection";
 
 const calls: string[] = [];
+let localSessionRole: "owner" | "client" = "owner";
 
 /**
  * The node's sixteen operator routes, stubbed at the module the panel imports.
@@ -54,6 +55,17 @@ vi.mock("~/environments/primary", async (importOriginal) => ({
   // Spread the real module: this panel is not its only consumer, and replacing
   // the whole surface would strand every other importer in the graph.
   ...(await importOriginal<typeof import("~/environments/primary")>()),
+  fetchSessionState: vi.fn(async () => ({
+    authenticated: true,
+    auth: {
+      policy: "loopback-browser" as const,
+      bootstrapMethods: ["one-time-token" as const],
+      sessionMethods: ["browser-session-cookie" as const],
+      sessionCookieName: "ryco_session",
+    },
+    role: localSessionRole,
+    sessionMethod: "browser-session-cookie" as const,
+  })),
   fetchHubEnrollment: vi.fn(async () => {
     calls.push("enrollment");
     return { fingerprint: "SHA256:ZZZZenrollmentZZZZ" };
@@ -261,6 +273,7 @@ let mounted: Awaited<ReturnType<typeof render>> | null = null;
 
 beforeEach(() => {
   calls.length = 0;
+  localSessionRole = "owner";
   // Call history only — the factory's implementations stay in place. Without it
   // an assertion in one test would be satisfied by a click in an earlier one.
   vi.clearAllMocks();
@@ -314,6 +327,21 @@ describe("local mode: the node's operator state, and no alarm about a relay that
     for (const phrase of ["Not encrypted", "not encrypted", "Insecure", "Unencrypted"]) {
       expect(body, phrase).not.toContain(phrase);
     }
+  });
+
+  it("does not ask owner-only routes or expose their controls to a paired client", async () => {
+    localSessionRole = "client";
+    mounted = await render(<NodeSecuritySettings />);
+
+    await expect
+      .element(page.getByText("This browser is paired as a client.", { exact: false }))
+      .toBeVisible();
+    expect(calls).toEqual([]);
+    expect(document.body.textContent).not.toContain("Authorized clients");
+    expect(document.body.textContent).not.toContain("Admission policy");
+    expect(document.body.textContent).not.toContain(
+      "Only owner sessions can manage Hub connectivity",
+    );
   });
 
   it("shows the §13.4 number with its caption and advisory, never behind a disclosure", async () => {

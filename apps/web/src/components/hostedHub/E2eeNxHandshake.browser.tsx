@@ -540,7 +540,6 @@ describe("§16.4 F7 exact NX trace in Chromium", () => {
     const entry = fixtureCase(F07, "nx-handshake-complete-trace");
     const expected = entry.expected;
     const material = F07.testKeyMaterial;
-    const identifiers = material.identifiers as Readonly<Record<string, unknown>>;
     const channelMaterial = material.channel as Readonly<Record<string, unknown>>;
     const now = entry.inputs.now as number;
     const channel = {

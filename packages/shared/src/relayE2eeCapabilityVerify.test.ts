@@ -1312,11 +1312,12 @@ describe("§5.2 statement verification", () => {
           "statement_non_canonical",
         ],
         // A two-element array whose first byte string carries a two-byte length
-        // header it does not need; the strict decode rejects it a step earlier.
+        // header it does not need; the strict decoder classifies that encoding
+        // distinctly from malformed CBOR.
         [
           "non-shortest length",
           Uint8Array.from([0x82, 0x59, 0x00, 0x05, 1, 2, 3, 4, 5, 0x40]),
-          "statement_malformed",
+          "statement_non_canonical",
         ],
         ["indefinite array", Uint8Array.from([0x9f, 0x01, 0xff]), "statement_malformed"],
         [
@@ -1361,12 +1362,12 @@ describe("§5.2 statement verification", () => {
         ),
       ).toEqual({ kind: "invalid", reason: "transcript_non_canonical" });
       // A transcript whose own outer array header is not shortest-form; the
-      // strict decode rejects it a step before the re-encode rule would.
+      // strict decode reports its non-canonical encoding directly.
       const canonical = transcriptOf();
       const nonShortest = Uint8Array.from([0x98, 0x13, ...canonical.subarray(1)]);
       expect(verdict(verify({ statement: wrap(nonShortest) }))).toEqual({
         kind: "invalid",
-        reason: "transcript_malformed",
+        reason: "transcript_non_canonical",
       });
       expect(verdict(verify({ statement: wrap(Uint8Array.from([0x9f, 0x01, 0xff])) }))).toEqual({
         kind: "invalid",

@@ -101,7 +101,7 @@ describe("relay codec", () => {
     });
     expect(unwrap(negotiateRelayVersion({ protocolMajor: 1, protocolMinor: 17 }))).toEqual({
       protocolMajor: 1,
-      protocolMinor: 2,
+      protocolMinor: 3,
     });
 
     const unsupported = negotiateRelayVersion({ protocolMajor: 2, protocolMinor: 0 });
@@ -109,7 +109,7 @@ describe("relay codec", () => {
       ok: false,
       error: {
         code: "protocol_unsupported",
-        supported: { protocolMajor: 1, minimumMinor: 0, maximumMinor: 2 },
+        supported: { protocolMajor: 1, minimumMinor: 0, maximumMinor: 3 },
       },
     });
     expect(makeProtocolUnsupportedErrorFrame()).toMatchObject({

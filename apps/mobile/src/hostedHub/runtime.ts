@@ -23,11 +23,7 @@ import {
   hydrateMobileHostedSessionToken,
   mobileSessionCredentials,
 } from "../platform/sessionCredentials";
-import {
-  disposeMobileRelayE2eeAttempt,
-  prepareMobileRelayE2eeAttempt,
-  resolveMobileRelayE2eeProvider,
-} from "./e2eeAttempt";
+import { disposeMobileRelayE2eeAttempt, prepareMobileRelayE2eeAttempt } from "./e2eeAttempt";
 import { resetMobileE2eeSession } from "./e2eeSession";
 import { setMobileNativeE2eeEnrollmentCoordinator } from "./e2eeEnrollment";
 import {
@@ -46,6 +42,11 @@ import {
   invalidateMobileHostedRuntimeConfig,
   isMobileHostedModeConfigured,
 } from "./runtimeConfig";
+import {
+  isMobileHostedModeAvailable,
+  setMobileHostedModeAvailable,
+  subscribeMobileHostedModeAvailability,
+} from "./runtimeAvailability";
 
 configureAuthoritativeNodeTrustSource({
   hubOrigin: () => getMobileHostedEndpoint()?.origin() ?? null,
@@ -64,14 +65,12 @@ configureAuthoritativeNodeTrustSource({
  */
 
 let configured = false;
-let available = false;
 let session: Promise<void> | undefined;
 let selectionWatch: (() => void) | undefined;
 let enrollmentCoordinator: NativeE2eeEnrollmentCoordinator | null = null;
 let enrollmentRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let enrollmentRetryAttempt = 0;
 let enrollmentRetryForegroundUnsubscribe: (() => void) | undefined;
-const availabilityListeners = new Set<() => void>();
 
 function clearEnrollmentRetry(): void {
   if (enrollmentRetryTimer !== undefined) globalThis.clearTimeout(enrollmentRetryTimer);
@@ -101,21 +100,7 @@ function scheduleEnrollmentRetry(accountId: string): void {
   enrollmentRetryTimer = globalThis.setTimeout(run, delay);
 }
 
-function setAvailable(next: boolean): void {
-  if (available === next) return;
-  available = next;
-  for (const listener of availabilityListeners) listener();
-}
-
-/** Whether hosted mode is both configured and backed by a usable hardware key. */
-export function isMobileHostedModeAvailable(): boolean {
-  return available;
-}
-
-export function subscribeMobileHostedModeAvailability(listener: () => void): () => void {
-  availabilityListeners.add(listener);
-  return () => availabilityListeners.delete(listener);
-}
+export { isMobileHostedModeAvailable, subscribeMobileHostedModeAvailability };
 
 /**
  * Bound timer wrappers. Unbound platform methods throw "Illegal invocation"
@@ -158,7 +143,7 @@ function subscribeForeground(listener: () => void): () => void {
  * normal state for a direct-only build.
  */
 export async function configureMobileHostedRuntime(): Promise<boolean> {
-  if (configured) return available;
+  if (configured) return isMobileHostedModeAvailable();
   if (!isMobileHostedModeConfigured()) return false;
   const endpoint = getMobileHostedEndpoint();
   const httpClient = getMobileHostedHttpClient();
@@ -172,7 +157,7 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
   } catch {
     return false;
   }
-  if (configured) return available;
+  if (configured) return isMobileHostedModeAvailable();
 
   configureHostedRuntime({
     endpoint,
@@ -230,7 +215,7 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
   });
   setMobileNativeE2eeEnrollmentCoordinator(enrollmentCoordinator);
   configured = true;
-  setAvailable(true);
+  setMobileHostedModeAvailable(true);
   watchSelectionForE2ee();
   return true;
 }
@@ -380,7 +365,7 @@ export function ensureMobileHostedSession(): Promise<void> {
 export function invalidateMobileHostedRuntime(): void {
   configured = false;
   clearEnrollmentRetry();
-  setAvailable(false);
+  setMobileHostedModeAvailable(false);
   session = undefined;
   selectionWatch?.();
   selectionWatch = undefined;

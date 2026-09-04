@@ -1224,7 +1224,7 @@ describe("relay E2EE terminal error carve-out (§10.2, §11.3)", () => {
       // Not canonical CBOR at all.
       [bytes("ff"), "malformed"],
       // The same code written with a non-minimal uint head.
-      [bytes("811801"), "malformed"],
+      [bytes("811801"), "non_canonical"],
       // An indefinite-length array of the same one element (§3.6).
       [bytes("9f01ff"), "malformed"],
       // A half-precision float where the uint belongs (§3.6).

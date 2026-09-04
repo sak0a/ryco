@@ -13,7 +13,10 @@ import {
 import { useStore } from "zustand";
 import type { EnvironmentId } from "@ryco/contracts";
 
-import { ensureMobileHostedSession } from "./runtime";
+import {
+  isMobileHostedModeAvailable,
+  subscribeMobileHostedModeAvailability,
+} from "./runtimeAvailability";
 import {
   mobileHostedConnectionsStore,
   type MobileHostedConnectionState,
@@ -34,8 +37,12 @@ setHostedRuntimeConfigurator(() => {
   void ensureMobileHostedSession();
 });
 
-export { ensureMobileHostedSession };
-export { isMobileHostedModeAvailable, subscribeMobileHostedModeAvailability } from "./runtime";
+/** Load native hosted adapters only when the configurator or a screen actually starts a session. */
+export async function ensureMobileHostedSession(): Promise<void> {
+  await (await import("./runtime")).ensureMobileHostedSession();
+}
+
+export { isMobileHostedModeAvailable, subscribeMobileHostedModeAvailability };
 
 export {
   hostedAccountStore,

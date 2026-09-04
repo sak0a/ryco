@@ -151,8 +151,33 @@ export interface NodeOperatorDataAvailability {
   readonly unavailableBody: string;
 }
 
-export function nodeOperatorDataAvailability(mode: NodeSecurityMode): NodeOperatorDataAvailability {
-  if (mode === "local") return { available: true, unavailableBody: "" };
+export type NodeLocalOperatorAccess = "checking" | "owner" | "client" | "unavailable";
+
+export function nodeOperatorDataAvailability(
+  mode: NodeSecurityMode,
+  localAccess: NodeLocalOperatorAccess = "owner",
+): NodeOperatorDataAvailability {
+  if (mode === "local") {
+    if (localAccess === "owner") return { available: true, unavailableBody: "" };
+    if (localAccess === "checking") {
+      return {
+        available: false,
+        unavailableBody: "Checking whether this session can administer the node's security state.",
+      };
+    }
+    if (localAccess === "client") {
+      return {
+        available: false,
+        unavailableBody:
+          "This browser is paired as a client. Node security administration is owner-only; open Ryco Desktop on this machine or run `ryco e2ee` on the node. This direct client connection remains available.",
+      };
+    }
+    return {
+      available: false,
+      unavailableBody:
+        "Ryco could not verify that this session may administer the node's security state. Reconnect from Ryco Desktop on this machine or run `ryco e2ee` on the node.",
+    };
+  }
   return {
     available: false,
     unavailableBody:
