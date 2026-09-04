@@ -239,7 +239,7 @@ describe("native E2EE account contracts", () => {
       nodeAgreementAlgorithm: "x25519",
       nodeAgreementPublicKey: x25519,
       nodeAgreementFingerprint: otherDigest,
-      nodeContinuityId: `cont_${"c".repeat(22)}`,
+      nodeContinuityId: `nct_${"c".repeat(22)}`,
       nodePolicyGeneration: 4,
       nodeCapabilityStatementDigest: digest,
       relayTicketId: `rtk_${"t".repeat(22)}`,

@@ -7,6 +7,13 @@ import {
   RELAY_MAX_RPC_MESSAGE_BYTES,
   RELAY_MIN_DATA_CHUNK_BYTES,
 } from "@ryco/contracts/relay";
+import {
+  HUB_DEVICE_GRANT_BASE64URL_MAX_CHARS,
+  HUB_DEVICE_GRANT_MAX_BYTES,
+  HUB_DEVICE_GRANT_MAX_VALIDITY_MS,
+  NATIVE_E2EE_MAX_CAPABILITIES,
+  NATIVE_E2EE_MAX_GRANT_KEYS,
+} from "@ryco/contracts/native-e2ee";
 
 import { RELAY_CHUNK_CAPABILITY_PRELUDE } from "./relayMessageChunks.ts";
 
@@ -141,6 +148,30 @@ export const E2EE_CAPABILITY_CARRIER_MAX_BYTES = 6_969;
 export const E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES = 8_192;
 /** Maximum UTF-8 byte length of an account identifier in any E2EE structure (§7, §8). */
 export const E2EE_ACCOUNT_ID_MAX_BYTES = 256;
+
+// ─── Account-enrolled native grants (§18) ──────────────────────────────────
+
+/** Maximum encoded `[claims, signature]` Hub device-grant envelope. */
+export const E2EE_HUB_DEVICE_GRANT_MAX_BYTES = HUB_DEVICE_GRANT_MAX_BYTES;
+/** Maximum canonical unpadded-base64url length of a complete grant. */
+export const E2EE_HUB_DEVICE_GRANT_B64URL_MAX_CHARS = HUB_DEVICE_GRANT_BASE64URL_MAX_CHARS;
+/** Maximum lifetime of a Hub device grant, in milliseconds. */
+export const E2EE_HUB_DEVICE_GRANT_MAX_VALIDITY = HUB_DEVICE_GRANT_MAX_VALIDITY_MS;
+/** Allowed early-arrival skew. There is deliberately no post-expiry skew. */
+export const E2EE_HUB_DEVICE_GRANT_CLOCK_SKEW = 30_000;
+/** Exact grant nonce size. */
+export const E2EE_HUB_DEVICE_GRANT_NONCE_BYTES = 32;
+/** Maximum number of simultaneously advertised Hub grant verification keys. */
+export const E2EE_HUB_DEVICE_GRANT_KEYSET_MAX_KEYS = NATIVE_E2EE_MAX_GRANT_KEYS;
+/** Maximum number of effective capabilities carried by one grant. */
+export const E2EE_ACCOUNT_GRANT_CAPABILITIES_MAX = NATIVE_E2EE_MAX_CAPABILITIES;
+/** Closed identifier bounds from the §18.2 prefixed-base64url registries. */
+export const E2EE_HUB_DEVICE_GRANT_ID_MAX_BYTES = 47;
+export const E2EE_HUB_GRANT_KEY_ID_MAX_BYTES = 47;
+export const E2EE_NATIVE_ENROLLMENT_ID_MAX_BYTES = 47;
+export const E2EE_RELAY_TICKET_ID_MAX_BYTES = 47;
+/** Registry id of the account-enrolled native IK suite. */
+export const E2EE_ACCOUNT_GRANT_SUITE = 0x02;
 
 /**
  * The two Hub-asserted `ready` limits every size budget below is computed from

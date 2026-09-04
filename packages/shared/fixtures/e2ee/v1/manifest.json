@@ -60,7 +60,7 @@
         "3.2.1",
         "16.3 F3"
       ],
-      "sha256": "95bc3840a12c0e057fc76bfa4ffb854b256e27a335a2f01b3e13dae0e24006de",
+      "sha256": "67f8094a5d75d6f8231e26482326285aa53fe7b7856a9ea2a4fddfc2889cd049",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 35,
@@ -83,7 +83,7 @@
         "3.2.1 S9",
         "16.3 F4"
       ],
-      "sha256": "f1b91dbee4e2cfbd7fe9893250dc0afaae3253a0bebfe55049f4d7feb1add235",
+      "sha256": "53fe80a083ab149aefc00e0c818d7f589c026eaa8452d90a2ac694f2830c951d",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 25,
@@ -345,6 +345,26 @@
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 15
+    },
+    "f19-account-device-grant.json": {
+      "family": 19,
+      "title": "Account-enrolled native Hub device grants",
+      "sections": [
+        "18.2",
+        "18.3",
+        "18.7",
+        "16.3 F19"
+      ],
+      "sha256": "e201e932db1594c04cac306f81bd76231961875d4b3f05ce37681762848a13c3",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 43,
+      "deferred": [
+        "§16.3 F19 suite-0x02 context, Noise trace, and confirmation vectors are deferred. Owned by the account-grant IK suite implementation.",
+        "§16.3 F19 relay-minor, connector-generation, statement-acknowledgement, retained-prekey, in-flight revocation, lease, durable-write, and four-mode policy vectors are deferred. Owned by the node and Hub lifecycle implementations.",
+        "§16.3 F19 Web-isolation vectors are deferred. Owned by the Web isolation implementation.",
+        "§16.4 cross-runtime equality: the Web-isolation cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
     }
   },
   "portableExecution": {
@@ -2443,6 +2463,307 @@
         "ownedBy": "the case's existing Node/Hub/platform consuming suite"
       },
       {
+        "fixtureId": "F19/valid-account-enrolled-native-device-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "valid-account-enrolled-native-device-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/maximum-width-conforming-grant-fits-the-hard-envelope-bound",
+        "file": "f19-account-device-grant.json",
+        "case": "maximum-width-conforming-grant-fits-the-hard-envelope-bound",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/exactly-2048-bytes-is-not-rejected-as-oversize",
+        "file": "f19-account-device-grant.json",
+        "case": "exactly-2048-bytes-is-not-rejected-as-oversize",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/one-byte-over-the-grant-bound-is-rejected-before-cbor",
+        "file": "f19-account-device-grant.json",
+        "case": "one-byte-over-the-grant-bound-is-rejected-before-cbor",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/malformed-grant-envelope",
+        "file": "f19-account-device-grant.json",
+        "case": "malformed-grant-envelope",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/non-canonical-grant-envelope",
+        "file": "f19-account-device-grant.json",
+        "case": "non-canonical-grant-envelope",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/unsupported-grant-version",
+        "file": "f19-account-device-grant.json",
+        "case": "unsupported-grant-version",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/unsupported-grant-suite",
+        "file": "f19-account-device-grant.json",
+        "case": "unsupported-grant-suite",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-grant-claims-element-count",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-grant-claims-element-count",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/carried-device-fingerprint-is-recomputed",
+        "file": "f19-account-device-grant.json",
+        "case": "carried-device-fingerprint-is-recomputed",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/signature-under-an-unrelated-hub-key",
+        "file": "f19-account-device-grant.json",
+        "case": "signature-under-an-unrelated-hub-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/cross-domain-signature-over-bare-claims",
+        "file": "f19-account-device-grant.json",
+        "case": "cross-domain-signature-over-bare-claims",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/unknown-hub-verification-key-id",
+        "file": "f19-account-device-grant.json",
+        "case": "unknown-hub-verification-key-id",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/duplicate-hub-verification-key-id",
+        "file": "f19-account-device-grant.json",
+        "case": "duplicate-hub-verification-key-id",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/retired-hub-verification-key",
+        "file": "f19-account-device-grant.json",
+        "case": "retired-hub-verification-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/grant-one-millisecond-beyond-early-clock-skew",
+        "file": "f19-account-device-grant.json",
+        "case": "grant-one-millisecond-beyond-early-clock-skew",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/grant-at-the-early-clock-skew-boundary",
+        "file": "f19-account-device-grant.json",
+        "case": "grant-at-the-early-clock-skew-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/grant-one-millisecond-after-expiry",
+        "file": "f19-account-device-grant.json",
+        "case": "grant-one-millisecond-after-expiry",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/grant-at-the-exact-expiry-boundary",
+        "file": "f19-account-device-grant.json",
+        "case": "grant-at-the-exact-expiry-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-origin-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-origin-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-account-id-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-account-id-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-account-epoch-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-account-epoch-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-enrollment-id-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-enrollment-id-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-enrollment-revision-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-enrollment-revision-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-device-epoch-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-device-epoch-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-device-identity-key-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-device-identity-key-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-device-agreement-key-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-device-agreement-key-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-client-certificate-digest-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-client-certificate-digest-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-id-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-id-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-identity-key-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-identity-key-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-agreement-key-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-agreement-key-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-continuity-id-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-continuity-id-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-policy-generation-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-policy-generation-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-statement-digest-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-statement-digest-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-relay-ticket-replay-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-relay-ticket-replay-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/relay-ticket-expires-before-the-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "relay-ticket-expires-before-the-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/client-certificate-expires-before-the-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "client-certificate-expires-before-the-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/node-statement-expires-before-the-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "node-statement-expires-before-the-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/node-prekey-expires-before-the-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "node-prekey-expires-before-the-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/revoked-enrollment",
+        "file": "f19-account-device-grant.json",
+        "case": "revoked-enrollment",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/local-policy-denies-account-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "local-policy-denies-account-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/effective-role-escalates-above-grant-ceiling",
+        "file": "f19-account-device-grant.json",
+        "case": "effective-role-escalates-above-grant-ceiling",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/effective-capabilities-are-not-a-distinct-subset",
+        "file": "f19-account-device-grant.json",
+        "case": "effective-capabilities-are-not-a-distinct-subset",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
         "fixtureId": "F15/cacophony/Noise_IK_25519_ChaChaPoly_SHA256",
         "file": "f15-noise-core-vectors.json",
         "case": "cacophony/Noise_IK_25519_ChaChaPoly_SHA256",
@@ -2608,6 +2929,17 @@
         "A small-order Ed25519 public key is NOT emitted as a rejected encoding: the pinned primitive's strict public-key validation accepts it, and the rejection happens at verification. Asserting a validator rejection here would have been wrong, so the case is left to the verification-path rows above.",
         "§16.4 cross-runtime equality: the P-256 cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
       ]
+    },
+    {
+      "family": 19,
+      "title": "Account-enrolled native Hub device grants",
+      "file": "f19-account-device-grant.json",
+      "deferred": [
+        "§16.3 F19 suite-0x02 context, Noise trace, and confirmation vectors are deferred. Owned by the account-grant IK suite implementation.",
+        "§16.3 F19 relay-minor, connector-generation, statement-acknowledgement, retained-prekey, in-flight revocation, lease, durable-write, and four-mode policy vectors are deferred. Owned by the node and Hub lifecycle implementations.",
+        "§16.3 F19 Web-isolation vectors are deferred. Owned by the Web isolation implementation.",
+        "§16.4 cross-runtime equality: the Web-isolation cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
     }
   ],
   "crossRuntime": {
@@ -2625,7 +2957,8 @@
         10,
         14,
         16,
-        17
+        17,
+        19
       ],
       "scopes": {
         "F1": "this whole family",
@@ -2636,7 +2969,8 @@
         "F10": "this whole family",
         "F14": "the `WebSAS` half of this family",
         "F16": "the NX cases of this family",
-        "F17": "the P-256 cases of this family"
+        "F17": "the P-256 cases of this family",
+        "F19": "the Web-isolation cases of this family"
       },
       "reason": "This repository has no browser test gate over packages/shared, so no vector in these families has yet been run anywhere but Node.",
       "ownedBy": "the web phase"
@@ -2656,7 +2990,7 @@
     "method": "READ-LIVENESS, measured in one run of each consuming suite and unioned. Every family is loaded through `packages/shared/src/relayE2eeCorpusLiveness.ts`, which hands each leaf to the suite behind an accessor that records the read; a leaf is LIVE when some suite read it. The three runs are `bun run --cwd packages/shared test` (the shared corpus suite and the F15 Noise suite) and `bun run --cwd apps/server test src` (the node suite). Re-measuring means re-running those with the recorder in place. The union is not taken on trust: every leaf a suite other than the shared one is the sole reader of is listed path by path in `E2EE_CORPUS_DELEGATED_LEAF_READS`, the shared suite rejects any such path that is not a real leaf or that it reads itself, the named suite asserts it really reads its own paths, and the per-family `liveLeaves` below is then asserted to EQUAL that union. A published figure that drifts above what the suites read fails a test.",
     "whatLiveMeans": "Read-liveness is an UPPER BOUND on assertion. A suite that reads a value and does not compare it, or reads it only to feed it back as an input, marks it live here. It is exact in the direction that matters: a leaf no suite reads cannot be asserted by one, so every INERT leaf below is proof of absent coverage, while a LIVE leaf is only evidence of present coverage.",
     "perCaseClaims": "packages/shared/src/relayE2eeCorpusLiveness.ts — E2EE_CORPUS_CASE_LIVENESS. Every committed case must carry at least one live leaf or appear in that table, which names the suite that reads it or declares it DECORATIVE with a reason and an owner. Each of the three consuming suites checks the claims naming it, in both directions.",
-    "perCaseFloor": "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 96 of the 291 committed cases have at most two live leaves and 182 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
+    "perCaseFloor": "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 137 of the 334 committed cases have at most two live leaves and 224 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
     "assertionLiveness": {
       "currentCorpus": "PARTIAL. Two families have been swept against the corpus as it stands — F4 and F17, the two whose live counts moved this round — and for those two the tight figure now EQUALS the read-liveness figure. Every other family's number in this census is read-liveness and nothing more.",
       "measuredFamilySweep": {
@@ -2683,15 +3017,15 @@
       "note": "Mutation-liveness is the tighter measure — it counts a leaf live only when changing it fails a test — and its global figure is 49.4%. It is also STALE: it describes the superseded corpus named in `measuredAgainst`, not the one committed here, so it is not the number to cite about anything below either. There is no current assertion-liveness figure; see `assertionLiveness`."
     },
     "totals": {
-      "cases": 291,
-      "expectedLeaves": 3297,
-      "liveLeaves": 2133,
+      "cases": 334,
+      "expectedLeaves": 3388,
+      "liveLeaves": 2224,
       "inertLeaves": 1164,
-      "livePercent": 64.7,
+      "livePercent": 65.6,
       "casesWithNoLiveLeaf": 17
     },
     "casesByLiveLeafCount": {
-      "note": "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 291` reads, against a one-leaf threshold, as though the other 274 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
+      "note": "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 334` reads, against a one-leaf threshold, as though the other 317 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
       "buckets": [
         {
           "liveLeaves": "0",
@@ -2699,19 +3033,19 @@
         },
         {
           "liveLeaves": "1",
-          "cases": 17
+          "cases": 19
         },
         {
           "liveLeaves": "2",
-          "cases": 62
+          "cases": 101
         },
         {
           "liveLeaves": "3-5",
-          "cases": 86
+          "cases": 87
         },
         {
           "liveLeaves": "6-10",
-          "cases": 55
+          "cases": 56
         },
         {
           "liveLeaves": "11-25",
@@ -2722,8 +3056,8 @@
           "cases": 16
         }
       ],
-      "atMostTwoLiveLeaves": 96,
-      "atMostFiveLiveLeaves": 182
+      "atMostTwoLiveLeaves": 137,
+      "atMostFiveLiveLeaves": 224
     },
     "families": [
       {
@@ -2941,6 +3275,18 @@
         "casesWithNoLiveLeaf": 0,
         "residual": "None measured: every leaf is read once the node consuming suite's run is unioned with the shared one; the §12.6 procedure is driven against the real policy store.",
         "residualOwner": "no residual"
+      },
+      {
+        "family": 19,
+        "file": "f19-account-device-grant.json",
+        "cases": 43,
+        "expectedLeaves": 91,
+        "liveLeaves": 91,
+        "inertLeaves": 0,
+        "livePercent": 100,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "None measured in the landed pure-grant slice: every expected byte and verdict is replayed through the shared verifier. The family-level deferred list names the later Noise, node/Hub lifecycle, Web-isolation, and cross-runtime work not yet carried by this file.",
+        "residualOwner": "the later F19 implementation phases named by the family deferrals"
       }
     ]
   },
@@ -2949,7 +3295,7 @@
     "ledger": "packages/shared/src/relayE2eeCorpus.test.ts — SECTION_16_3_LEDGER",
     "status": "hand-maintained-transcription",
     "proves": "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and every obligation standing for a group states its case count EXACTLY, so the group can neither lose a member nor gain one without the ledger entry moving with it. So a case that is dropped, a case that is added outside the ledger, or a deferral that is quietly deleted, fails a test. One further check crosses into content: an obligation whose every matching case is read by NO suite must carry an `unasserted` field naming what is missing and who owns it. NINE obligations are in that state and say so, checked against the measured union rather than against a declaration, and in both directions — the field must come off when a case goes live, which is how four of them came off it in this round.",
-    "doesNotProve": "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 291 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
+    "doesNotProve": "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 334 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
     "reviewObligation": "When EITHER side changes — an edit to §16.3, or an edit to the ledger — a reviewer MUST diff the ledger against §16.3 by eye, entry against paragraph, and confirm the two enumerate the same set. That review is the only thing standing between a §16.3 obligation and silent non-coverage. Every ledger entry carries a `section` field naming the §16.3 paragraph to open and a `spec` field carrying the specification's own words for the obligation, so the diff is a side-by-side read rather than an interpretation.",
     "whyNotAutomated": "Parsing §16.3's prose to derive the obligation set automatically was considered and deliberately rejected. The section is discursive English — nested bullets, prose qualifiers, single obligations spread across several sentences, some of them negative — and an extractor over it would be wrong in ways no test could surface. A green check from an unreliable extractor is strictly worse than a known limitation whose reviewer is told, in as many words, to close it.",
     "unassertedObligations": {

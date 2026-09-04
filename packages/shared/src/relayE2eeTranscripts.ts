@@ -222,6 +222,20 @@ export function decodeCanonicalE2eeCbor(bytes: Uint8Array): E2eeDecoded<unknown>
   try {
     value = decode(bytes, E2EE_STRICT_DECODE_OPTIONS);
   } catch {
+    // `cborg`'s strict reader rejects some well-formed but non-minimal heads
+    // before the re-encode check can classify them. Decode once more with only
+    // that canonicality gate relaxed so diagnostics can retain the protocol's
+    // closed `non_canonical` distinction. This second result is never returned
+    // or acted upon; it can only refine a rejection.
+    try {
+      const laxValue = decode(bytes, { ...E2EE_STRICT_DECODE_OPTIONS, strict: false });
+      const canonical = encode(laxValue, rfc8949EncodeOptions);
+      if (!e2eeBytesEqual(canonical, bytes)) {
+        return { kind: "error", reason: "non_canonical" };
+      }
+    } catch {
+      // The bytes are not even a complete value under the bounded lax profile.
+    }
     return { kind: "error", reason: "malformed" };
   }
   if (containsE2eeFloatEncoding(bytes)) return { kind: "error", reason: "float_forbidden" };

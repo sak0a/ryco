@@ -44,6 +44,10 @@
       "types": "./src/relayE2eeCapabilityVerify.ts",
       "import": "./src/relayE2eeCapabilityVerify.ts"
     },
+    "./relayE2eeHubDeviceGrant": {
+      "types": "./src/relayE2eeHubDeviceGrant.ts",
+      "import": "./src/relayE2eeHubDeviceGrant.ts"
+    },
     "./relayE2eeTranscripts": {
       "types": "./src/relayE2eeTranscripts.ts",
       "import": "./src/relayE2eeTranscripts.ts"

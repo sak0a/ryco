@@ -355,7 +355,7 @@
       "expected": {
         "canonicalDecode": {
           "kind": "error",
-          "reason": "malformed"
+          "reason": "non_canonical"
         },
         "envelopeOverTheNonCanonicalBytesDiffers": true,
         "verifiesUnderTheCanonicalSignature": false

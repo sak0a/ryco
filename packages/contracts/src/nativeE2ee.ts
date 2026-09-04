@@ -77,8 +77,8 @@ export const HubDeviceGrantId = Schema.String.check(
 export type HubDeviceGrantId = typeof HubDeviceGrantId.Type;
 
 export const NodeE2eeContinuityId = Schema.String.check(
-  Schema.isPattern(/^cont_[A-Za-z0-9_-]{22,43}$/),
-  Schema.isMaxLength(48),
+  Schema.isPattern(/^nct_[A-Za-z0-9_-]{22}$/),
+  Schema.isMaxLength(26),
 ).pipe(Schema.brand("NodeE2eeContinuityId"));
 export type NodeE2eeContinuityId = typeof NodeE2eeContinuityId.Type;
 
