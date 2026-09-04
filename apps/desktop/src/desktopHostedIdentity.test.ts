@@ -274,6 +274,40 @@ describe("Desktop hosted identity coordinator", () => {
     });
   });
 
+  it("keeps local account trust ready when account-grant enrollment is unavailable", async () => {
+    const accountId = `acct_${"a".repeat(22)}`;
+    const setup = vi.fn().mockResolvedValue({
+      nodeId: "node-local",
+      localNodeHandle: "local-node-handle",
+    });
+    const identity = coordinator({
+      api: {
+        hasSessionMaterial: true,
+        restoreSession: vi.fn().mockResolvedValue({ account: { id: accountId } }),
+        upsertE2eeDeviceEnrollment: vi
+          .fn()
+          .mockRejectedValue(new HostedHubApiError("not_found", 404)),
+        listNodes: vi.fn().mockResolvedValue([]),
+      },
+      setup,
+      nativeE2eePlatform: enrollmentPlatform(vi.fn(async () => undefined)),
+    });
+
+    const status = await identity.resume();
+
+    expect(status).toEqual({
+      status: "ready",
+      accountId,
+      nodeId: "node-local",
+      localNodeHandle: "local-node-handle",
+    });
+    expect(setup).toHaveBeenCalledWith({ accountId });
+    expect(identity.nativeE2eeEnrollmentState).toMatchObject({
+      status: "unavailable",
+      errorCode: "enrollment_unavailable",
+    });
+  });
+
   it("upgrades a concurrent background resume when the user chooses Connect", async () => {
     let releaseFirstHydrate!: () => void;
     const firstHydrate = new Promise<void>((resolve) => {

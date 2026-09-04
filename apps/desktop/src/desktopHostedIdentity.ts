@@ -393,17 +393,28 @@ export class DesktopHostedIdentityCoordinator {
     }
 
     try {
-      const [setup] = await Promise.all([
+      // Account sign-in and the colocated trusted introduction remain useful
+      // during a staged Hub rollout. Wait for both operations so a rejected
+      // enrollment cannot leave the node claim mutating in the background,
+      // but only advertise account-grant trust when enrollment itself
+      // succeeded. Remote unpinned nodes therefore remain unverified and
+      // mutation-blocked; this is a compatibility fallback, not an E2EE
+      // downgrade.
+      const [setupResult, enrollmentResult] = await Promise.allSettled([
         this.#setup({ accountId: session.account.id }),
         this.#nativeE2eeEnrollment?.ensure(session.account.id),
       ]);
+      if (setupResult.status === "rejected") throw setupResult.reason;
+      const setup = setupResult.value;
+      const accountE2eeReady =
+        this.#nativeE2eeEnrollment !== undefined && enrollmentResult.status === "fulfilled";
       const github = await this.#readGitHubState();
       return {
         status: "ready",
         accountId: session.account.id,
         nodeId: setup.nodeId,
         localNodeHandle: setup.localNodeHandle,
-        ...(this.#nativeE2eeEnrollment ? { accountE2eeReady: true as const } : {}),
+        ...(accountE2eeReady ? { accountE2eeReady: true as const } : {}),
         ...(github === undefined ? {} : { github }),
       };
     } catch {
