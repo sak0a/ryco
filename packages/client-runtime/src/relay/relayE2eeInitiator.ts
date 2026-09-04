@@ -180,7 +180,9 @@ export interface RelayE2eeInitiatorAttempt {
   readonly onWebVerificationCode?: ((code: string) => void) | undefined;
 }
 
-type WithoutAgreementSecret<T> = T extends { readonly agreementSecretKey: Uint8Array }
+type WithoutAgreementSecret<T> = T extends {
+  readonly agreementSecretKey: Uint8Array;
+}
   ? Omit<T, "agreementSecretKey">
   : never;
 
@@ -198,6 +200,11 @@ export interface RelayE2eeNativeHandshakeStartInput {
     readonly relayProtocolMinor: number;
     readonly channelOpenCapability: string;
     readonly channelOpenEffectiveRole: string;
+    readonly accountGrantContext?: {
+      readonly relayTicketId: string;
+      readonly deviceGrantDigest: Uint8Array;
+      readonly nodeCapabilityStatementDigest: Uint8Array;
+    };
   };
   readonly selectedSuite: E2eeSuiteId;
   readonly offeredSuites: readonly number[];
@@ -791,6 +798,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
           relayProtocolMinor: host.channel.relayProtocolMinor,
           channelOpenCapability: host.channel.capability,
           channelOpenEffectiveRole: host.channel.effectiveRole,
+          ...(host.channel.accountGrantContext === undefined
+            ? {}
+            : { accountGrantContext: host.channel.accountGrantContext }),
         },
         selectedSuite,
         offeredSuites: attempt.localSuitePreference,
@@ -928,6 +938,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
         relayProtocolMinor: host.channel.relayProtocolMinor,
         channelOpenCapability: host.channel.capability,
         channelOpenEffectiveRole: host.channel.effectiveRole,
+        ...(host.channel.accountGrantContext === undefined
+          ? {}
+          : { accountGrantContext: host.channel.accountGrantContext }),
       },
       advertised: advertisedMaterial(statement, anchor, attempt.verifiedPin),
       selectedSuite,

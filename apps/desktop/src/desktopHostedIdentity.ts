@@ -5,14 +5,20 @@ import type {
   DesktopHostedIdentityState,
 } from "@ryco/contracts";
 import {
+  createNativeE2eeEnrollmentCoordinator,
+  createNativeE2eeTrustResolver,
   HostedHubApi,
   HostedHubApiError,
   type HostedHubNode,
+  type NativeE2eeEnrollmentCoordinator,
+  type NativeE2eeEnrollmentState,
+  type ResolveNativeE2eeTrustInput,
 } from "@ryco/client-runtime/authorization";
 import type {
   DpopSignerService,
   HttpClientService,
   NativeAuthorizationService,
+  NativeE2eePlatformService,
   PasskeyCeremonyService,
 } from "@ryco/client-runtime/platform";
 import { createDpopProofSigner } from "@ryco/client-runtime/relay";
@@ -89,6 +95,7 @@ export type DesktopHostedIdentityStatus =
       readonly accountId: string;
       readonly nodeId: string;
       readonly localNodeHandle: string;
+      readonly accountE2eeReady?: true;
       readonly github?: NonNullable<DesktopHostedIdentityState["github"]>;
     }
   | { readonly status: "unavailable" };
@@ -123,6 +130,8 @@ export class DesktopHostedIdentityCoordinator {
   readonly #trust: DesktopE2eeTrustStore;
   readonly #setup: DesktopHostedIdentitySetup;
   readonly #relayDpopSigner: DpopSignerService | undefined;
+  readonly #nativeE2eeEnrollment: NativeE2eeEnrollmentCoordinator | undefined;
+  readonly #resolveNativeE2eeTrust: ReturnType<typeof createNativeE2eeTrustResolver> | undefined;
   #operation: Promise<DesktopHostedIdentityStatus> | undefined;
   #operationInteractive = false;
 
@@ -137,6 +146,7 @@ export class DesktopHostedIdentityCoordinator {
     readonly trust?: DesktopE2eeTrustStore;
     readonly setup?: DesktopHostedIdentitySetup;
     readonly relayDpopSigner?: DpopSignerService;
+    readonly nativeE2eePlatform?: NativeE2eePlatformService;
   }) {
     this.#origin = input.origin;
     this.#installationId = input.installationId;
@@ -147,6 +157,24 @@ export class DesktopHostedIdentityCoordinator {
     this.#records = input.records;
     this.#trust = input.trust ?? new DesktopE2eeTrustStore(input.records);
     this.#relayDpopSigner = input.relayDpopSigner;
+    this.#nativeE2eeEnrollment = input.nativeE2eePlatform
+      ? createNativeE2eeEnrollmentCoordinator({
+          platform: input.nativeE2eePlatform,
+          api: input.api,
+          hubOrigin: input.origin,
+          requestedMaximumRole: "operator",
+          requestedCapabilities: ["ryco.rpc"],
+          refreshDirectory: async () => {
+            await input.api.listNodes();
+          },
+        })
+      : undefined;
+    this.#resolveNativeE2eeTrust = input.nativeE2eePlatform
+      ? createNativeE2eeTrustResolver({
+          api: input.api,
+          platform: input.nativeE2eePlatform,
+        })
+      : undefined;
     this.#setup =
       input.setup ??
       (async ({ accountId }) => {
@@ -205,6 +233,22 @@ export class DesktopHostedIdentityCoordinator {
     await this.#operation?.catch(() => undefined);
     this.#api.clearSessionMaterial();
     await this.#credentials.clear();
+    await this.#nativeE2eeEnrollment?.invalidate("signed-out");
+  }
+
+  get nativeE2eeEnrollmentState(): NativeE2eeEnrollmentState | null {
+    return this.#nativeE2eeEnrollment?.getState() ?? null;
+  }
+
+  async resolveNativeE2eeTrust(input: ResolveNativeE2eeTrustInput) {
+    if (!this.#resolveNativeE2eeTrust) {
+      throw new Error("Desktop native account E2EE is unavailable.");
+    }
+    return this.#resolveNativeE2eeTrust(input);
+  }
+
+  async invalidateNativeE2ee(reason: "account-switch" | "revoked" | "signed-out"): Promise<void> {
+    await this.#nativeE2eeEnrollment?.invalidate(reason);
   }
 
   /** Directory projection for the native Desktop client; credentials stay in main. */
@@ -229,7 +273,11 @@ export class DesktopHostedIdentityCoordinator {
     if (url !== relayUrl.toString()) throw new Error("Desktop relay URL is invalid.");
     const token = this.#credentials.readBearerToken?.() ?? null;
     if (!token || !this.#relayDpopSigner) throw new Error("Desktop Hub session is unavailable.");
-    const proof = await this.#relayDpopSigner.sign({ method: "GET", url, token });
+    const proof = await this.#relayDpopSigner.sign({
+      method: "GET",
+      url,
+      token,
+    });
     return { Authorization: `DPoP ${token}`, DPoP: proof };
   }
 
@@ -244,7 +292,10 @@ export class DesktopHostedIdentityCoordinator {
       const identity = await this.#api.connectExternalIdentity("github", input);
       return {
         outcome: "committed",
-        github: (await this.#readGitHubState()) ?? { linkAvailable: true, identity },
+        github: (await this.#readGitHubState()) ?? {
+          linkAvailable: true,
+          identity,
+        },
         signedOut: false,
       };
     } catch (cause) {
@@ -272,7 +323,10 @@ export class DesktopHostedIdentityCoordinator {
       }
       return {
         outcome: "committed",
-        github: (await this.#readGitHubState()) ?? { linkAvailable: true, identity: null },
+        github: (await this.#readGitHubState()) ?? {
+          linkAvailable: true,
+          identity: null,
+        },
         signedOut: false,
       };
     } catch (cause) {
@@ -339,13 +393,17 @@ export class DesktopHostedIdentityCoordinator {
     }
 
     try {
-      const setup = await this.#setup({ accountId: session.account.id });
+      const [setup] = await Promise.all([
+        this.#setup({ accountId: session.account.id }),
+        this.#nativeE2eeEnrollment?.ensure(session.account.id),
+      ]);
       const github = await this.#readGitHubState();
       return {
         status: "ready",
         accountId: session.account.id,
         nodeId: setup.nodeId,
         localNodeHandle: setup.localNodeHandle,
+        ...(this.#nativeE2eeEnrollment ? { accountE2eeReady: true as const } : {}),
         ...(github === undefined ? {} : { github }),
       };
     } catch {

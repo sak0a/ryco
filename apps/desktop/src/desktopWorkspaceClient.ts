@@ -30,6 +30,7 @@ export type DesktopWorkspaceIdentityStatus =
       readonly accountId: string;
       readonly nodeId: string;
       readonly localNodeHandle: string;
+      readonly accountE2eeReady?: true;
     };
 
 export interface DesktopWorkspaceIdentityPort {
@@ -94,8 +95,9 @@ const EMPTY_WORKSPACE: UnifiedWorkspaceIndex = {
 function nativeTrustForPin(
   pin: { readonly environmentId: string } | null,
   node: HostedHubNode,
+  accountE2eeReady: boolean,
 ): WorkspaceNativeTrustState {
-  if (pin === null) return "unverified";
+  if (pin === null) return accountE2eeReady ? "account-trusted" : "unverified";
   return pin.environmentId === node.environmentId ? "verified" : "identity-conflict";
 }
 
@@ -173,7 +175,10 @@ export class DesktopWorkspaceClient {
     await this.#identity.disconnect();
     if (ready) {
       await this.#cache
-        .purgeAccount({ hubOrigin: this.#hubOrigin, accountId: ready.accountId })
+        .purgeAccount({
+          hubOrigin: this.#hubOrigin,
+          accountId: ready.accountId,
+        })
         .catch(() => undefined);
     }
     this.#identityStatus = { status: "signed-out" };
@@ -182,6 +187,27 @@ export class DesktopWorkspaceClient {
     this.#demand = createWorkspaceConnectionDemandState(UNIFIED_WORKSPACE_MAX_CONNECTIONS);
     this.#queued = [];
     return this.#publish();
+  }
+
+  /**
+   * Remove every live capability immediately when native account authorization
+   * is revoked. Transport release continues asynchronously, but callers and the
+   * renderer observe the unavailable state before another mutation can start.
+   */
+  invalidateAccess(): DesktopWorkspaceClientSnapshot {
+    const connected = this.#demand.connections
+      .filter((entry) => entry.connected)
+      .map((entry) => entry.environmentId);
+    this.#identityStatus = { status: "unavailable" };
+    this.#catalog = [];
+    this.#snapshots.clear();
+    this.#demand = createWorkspaceConnectionDemandState(UNIFIED_WORKSPACE_MAX_CONNECTIONS);
+    this.#queued = [];
+    const snapshot = this.#publish();
+    for (const environmentId of connected) {
+      void this.#connection.release(environmentId).catch(() => undefined);
+    }
+    return snapshot;
   }
 
   async refreshCatalog(): Promise<DesktopWorkspaceClientSnapshot> {
@@ -202,6 +228,7 @@ export class DesktopWorkspaceClient {
           nativeTrust = nativeTrustForPin(
             await this.#trust.read(this.#hubOrigin, identity.accountId, node.id),
             node,
+            identity.accountE2eeReady === true,
           );
         } catch {
           nativeTrust = "unknown";
@@ -215,7 +242,10 @@ export class DesktopWorkspaceClient {
           label: node.label,
           platform: { os: node.platformOs, arch: node.platformArch },
           serverVersion: node.clientVersion,
-          capabilities: { repositoryIdentity: true, nativeClientRequired: true },
+          capabilities: {
+            repositoryIdentity: true,
+            nativeClientRequired: true,
+          },
           clientTier: "native" as const,
           nativeTrust,
           requiresNativeVerification: true,
@@ -259,7 +289,10 @@ export class DesktopWorkspaceClient {
     readonly environmentId: EnvironmentId;
     readonly scope: WorkspaceConnectionScope;
     readonly leaseId?: string;
-  }): Promise<{ readonly leaseId: string; readonly snapshot: DesktopWorkspaceClientSnapshot }> {
+  }): Promise<{
+    readonly leaseId: string;
+    readonly snapshot: DesktopWorkspaceClientSnapshot;
+  }> {
     const machine = this.#catalog.find((entry) => entry.environmentId === input.environmentId);
     if (!machine?.canConnect) throw new Error("Desktop workspace machine is not connectable.");
     const leaseId = input.leaseId ?? `desktop-workspace-${++this.#leaseSequence}`;

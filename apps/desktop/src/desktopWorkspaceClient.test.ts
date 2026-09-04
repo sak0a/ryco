@@ -177,7 +177,10 @@ function fixture(
 describe("DesktopWorkspaceClient", () => {
   it("trusts only the colocated introduction and keeps remote nodes unverified", async () => {
     const nodes = [node(1), node(2)];
-    const { client } = fixture({ nodes, trustedNodeIds: new Set([nodes[0]!.id]) });
+    const { client } = fixture({
+      nodes,
+      trustedNodeIds: new Set([nodes[0]!.id]),
+    });
     const state = await client.resume();
 
     expect(state.catalog.map((entry) => [entry.environmentId, entry.nativeTrust])).toEqual([
@@ -185,6 +188,49 @@ describe("DesktopWorkspaceClient", () => {
       [nodes[1]!.environmentId, "unverified"],
     ]);
     expect(state.catalog[1]?.canReadMetadata).toBe(false);
+  });
+
+  it("makes unpinned remote nodes connectable after automatic account enrollment", async () => {
+    const nodes = [node(1), node(2)];
+    const { client } = fixture({
+      nodes,
+      trustedNodeIds: new Set([nodes[0]!.id]),
+      identityStatus: {
+        status: "ready",
+        accountId: "account-a",
+        nodeId: nodes[0]!.id,
+        localNodeHandle: "local-handle",
+        accountE2eeReady: true,
+      },
+    });
+
+    const state = await client.resume();
+
+    expect(state.catalog.map((entry) => [entry.nativeTrust, entry.canConnect])).toEqual([
+      ["verified", true],
+      ["account-trusted", true],
+    ]);
+  });
+
+  it("removes read and mutation readiness synchronously on account revocation", async () => {
+    const nodes = [node(1)];
+    const { client, releaseCalls } = fixture({ nodes });
+    await client.resume();
+    await client.retainScope({
+      environmentId: nodes[0]!.environmentId,
+      scope: { type: "provider-status" },
+    });
+
+    const invalidated = client.invalidateAccess();
+
+    expect(invalidated).toMatchObject({
+      status: "unavailable",
+      accountId: null,
+      catalog: [],
+      queuedEnvironmentIds: [],
+    });
+    expect(invalidated.workspace.machines).toEqual([]);
+    expect(releaseCalls).toContain(nodes[0]!.environmentId);
   });
 
   it("loads cached lists without connecting and connects only when a thread scope opens", async () => {
@@ -201,7 +247,10 @@ describe("DesktopWorkspaceClient", () => {
 
     await restarted.client.retainScope({
       environmentId: nodes[0]!.environmentId,
-      scope: { type: "thread-detail", threadId: ThreadId.make("colliding-thread") },
+      scope: {
+        type: "thread-detail",
+        threadId: ThreadId.make("colliding-thread"),
+      },
     });
     expect(restarted.connectCalls).toEqual([
       { environmentId: nodes[0]!.environmentId, delayMs: 0 },

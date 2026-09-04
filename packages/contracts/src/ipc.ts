@@ -372,6 +372,7 @@ export type DesktopWorkspaceNativeTrustState =
   | "unknown"
   | "unverified"
   | "verified"
+  | "account-trusted"
   | "identity-conflict";
 
 export interface DesktopWorkspaceMachineProjection {

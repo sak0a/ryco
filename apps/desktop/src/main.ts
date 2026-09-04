@@ -149,6 +149,8 @@ import {
   type DesktopHostedIdentityStatus,
 } from "./desktopHostedIdentity.ts";
 import { DesktopE2eeTrustStore } from "./desktopE2eeTrust.ts";
+import { DesktopE2eePrekeyIssuer } from "./desktopE2eePrekey.ts";
+import { createDesktopNativeE2eePlatform } from "./desktopNativeE2ee.ts";
 import { DesktopNativeE2eeHandshakeService } from "./desktopNativeE2eeHandshake.ts";
 import { createDesktopWorkspaceMetadataCache } from "./desktopWorkspaceCache.ts";
 import {
@@ -348,7 +350,9 @@ type LinuxDesktopNamedApp = Electron.App & {
 let mainWindow: BrowserWindow | null = null;
 const desktopAuthorizationBroker = new DesktopAuthorizationCallbackBroker();
 let desktopHostedIdentityCoordinator: DesktopHostedIdentityCoordinator | null = null;
-let desktopHostedIdentityStatus: DesktopHostedIdentityStatus = { status: "signed-out" };
+let desktopHostedIdentityStatus: DesktopHostedIdentityStatus = {
+  status: "signed-out",
+};
 let desktopHostedIdentityControlGeneration = "";
 let desktopNativeIdentityContext: {
   readonly origin: string;
@@ -356,6 +360,8 @@ let desktopNativeIdentityContext: {
   readonly records: ReturnType<typeof createDesktopProtectedRecordStore>;
   readonly security: DesktopNativeSecurityHelper;
   readonly trust: DesktopE2eeTrustStore;
+  readonly prekey: DesktopE2eePrekeyIssuer;
+  readonly nativeE2eePlatform: ReturnType<typeof createDesktopNativeE2eePlatform>;
 } | null = null;
 let desktopNativeE2eeHandshakeService: DesktopNativeE2eeHandshakeService | null = null;
 let desktopWorkspaceClient: DesktopWorkspaceClient | null = null;
@@ -703,12 +709,28 @@ async function ensureDesktopNativeIdentityContext(): Promise<
       protection,
     }),
   });
+  const prekey = new DesktopE2eePrekeyIssuer({
+    origin: desktopSettings.hubOrigin,
+    security,
+    records,
+  });
   const context = {
     origin: desktopSettings.hubOrigin,
     installationId,
     records,
     security,
     trust: new DesktopE2eeTrustStore(records),
+    prekey,
+    nativeE2eePlatform: createDesktopNativeE2eePlatform({
+      origin: desktopSettings.hubOrigin,
+      installationId,
+      appVersion: app.getVersion(),
+      deviceLabel: desktopHostedDeviceLabel,
+      security,
+      records,
+      prekey,
+      platform: "darwin",
+    }),
   };
   desktopNativeIdentityContext = context;
   return context;
@@ -738,6 +760,7 @@ async function ensureDesktopHostedIdentityCoordinator(): Promise<DesktopHostedId
     security: context.security,
     records: context.records,
     trust: context.trust,
+    nativeE2eePlatform: context.nativeE2eePlatform,
     relayDpopSigner: await createDesktopDpopSigner(context.security),
     control: createDesktopHubControlClient({
       baseUrl: () => backendHttpUrl,
@@ -766,7 +789,8 @@ async function ensureDesktopWorkspaceRelayManager(): Promise<DesktopWorkspaceRel
             (machine.nativeTrust === "unverified" || machine.nativeTrust === "unknown") &&
             machine.revokedAt === null &&
             !machine.removed
-          : machine?.canConnect === true && machine.nativeTrust === "verified";
+          : machine?.canConnect === true &&
+            (machine.nativeTrust === "verified" || machine.nativeTrust === "account-trusted");
         if (!machine?.nodeId || !eligible) {
           return null;
         }
@@ -777,6 +801,7 @@ async function ensureDesktopWorkspaceRelayManager(): Promise<DesktopWorkspaceRel
           nodeId: machine.nodeId,
           environmentId,
           relayUrl: relayUrl.toString(),
+          nativeTrust: machine.nativeTrust,
         };
       },
       prepareE2ee: async (target, pairingOnly) =>
@@ -784,10 +809,16 @@ async function ensureDesktopWorkspaceRelayManager(): Promise<DesktopWorkspaceRel
           accountId: target.accountId,
           nodeId: target.nodeId,
           allowPairing: pairingOnly,
+          expectedTrust: pairingOnly
+            ? "unverified"
+            : target.nativeTrust === "account-trusted"
+              ? "account-trusted"
+              : "verified",
         }),
       handshake: ensureDesktopNativeE2eeHandshakeService,
       issueTicket: (target) => coordinator.issueRelayTicket(target.nodeId),
       authorizeUpgrade: (target) => coordinator.authorizeRelayUpgrade(target.relayUrl),
+      onAccountAuthorizationRevoked: invalidateDesktopNativeE2eeAccess,
     },
     emit: (event) => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -884,10 +915,27 @@ async function ensureDesktopNativeE2eeHandshakeService(): Promise<DesktopNativeE
     security: context.security,
     records: context.records,
     trust: context.trust,
+    prekey: context.prekey,
     identityStatus: () => desktopHostedIdentityStatus,
+    accountAuthority: {
+      enrollmentState: () => desktopHostedIdentityCoordinator?.nativeE2eeEnrollmentState ?? null,
+      resolve: (input) =>
+        ensureDesktopHostedIdentityCoordinator().then((coordinator) =>
+          coordinator.resolveNativeE2eeTrust(input),
+        ),
+      revoked: invalidateDesktopNativeE2eeAccess,
+    },
   });
   desktopNativeE2eeHandshakeService = service;
   return service;
+}
+
+function invalidateDesktopNativeE2eeAccess(): void {
+  desktopHostedIdentityStatus = { status: "unavailable" };
+  desktopWorkspaceClient?.invalidateAccess();
+  desktopNativeE2eeHandshakeService?.dispose();
+  desktopWorkspaceRelayManager?.dispose();
+  void desktopHostedIdentityCoordinator?.invalidateNativeE2ee("revoked");
 }
 
 async function runDesktopHostedIdentity(
@@ -2711,7 +2759,10 @@ function registerIpcHandlers(): void {
 
   const hostedIdentityView = (): DesktopHostedIdentityState =>
     desktopHostedIdentityStatus.status === "ready" && desktopHostedIdentityStatus.github
-      ? { status: desktopHostedIdentityStatus.status, github: desktopHostedIdentityStatus.github }
+      ? {
+          status: desktopHostedIdentityStatus.status,
+          github: desktopHostedIdentityStatus.github,
+        }
       : { status: desktopHostedIdentityStatus.status };
   const hostedIdentityStepUp = (rawInput: unknown): { readonly totpCode?: string } => {
     if (rawInput === undefined || rawInput === null) return {};
@@ -2761,7 +2812,9 @@ function registerIpcHandlers(): void {
         hasSessionMaterial: desktopHostedIdentityCoordinator?.hasSessionMaterial === true,
       })
     ) {
-      const nextSettings = setDesktopHubPreference(desktopSettings, { enabled: true });
+      const nextSettings = setDesktopHubPreference(desktopSettings, {
+        enabled: true,
+      });
       writeDesktopSettings(DESKTOP_SETTINGS_PATH, nextSettings);
       desktopSettings = nextSettings;
       relaunchDesktopApp("hub-account-setup-enabling-connector");
@@ -2909,7 +2962,10 @@ function registerIpcHandlers(): void {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       throw new Error("Desktop workspace connection report is invalid.");
     }
-    const report = raw as { readonly environmentId?: unknown; readonly connected?: unknown };
+    const report = raw as {
+      readonly environmentId?: unknown;
+      readonly connected?: unknown;
+    };
     if (typeof report.connected !== "boolean") {
       throw new Error("Desktop workspace connection report is invalid.");
     }
@@ -3526,7 +3582,9 @@ app.on("open-url", (event, url) => {
       desktopAuthorizationCallbackUri(desktopAuthorizationVariant()),
     );
     if (callback !== null) {
-      const acquired = app.requestSingleInstanceLock({ desktopAuthorizationCallback: callback });
+      const acquired = app.requestSingleInstanceLock({
+        desktopAuthorizationCallback: callback,
+      });
       if (acquired) app.releaseSingleInstanceLock();
     }
     app.exit(0);
