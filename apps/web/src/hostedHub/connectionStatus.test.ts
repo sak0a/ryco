@@ -17,7 +17,8 @@ import {
  * `packages/client-runtime` owns the derivation and proves its properties over
  * all five inputs; `apps/mobile` proves its store can never emit the web row.
  * This is the mirror of that mobile proof and the fence's own test: the native
- * rows — `Encrypted` and its `e2ee` guarantee, and §13.1's release-gated
+ * rows — `Encrypted · Verified locally` and its `e2ee` guarantee, the
+ * account-enrolled row, and §13.1's release-gated
  * `Not verified` — must be unreachable from this module, because a Hub that
  * serves the JavaScript can complete a genuine handshake and draw a genuine
  * §13.5 `WebSAS` while exfiltrating plaintext (§2.4). Rendering the native
@@ -31,9 +32,11 @@ describe("the web tier's connection status boundary (§2.2, §2.4)", () => {
       "unavailable",
       "web-unsigned",
     ]);
-    // The two the fence removes are the two that mean a durable pin, which web
-    // holds none of (§6.3, §13.1).
-    const native: ReadonlyArray<HostedE2eeChannelStatus> = ["verified", "unverified"];
+    const native: ReadonlyArray<HostedE2eeChannelStatus> = [
+      "verified",
+      "account-trusted",
+      "unverified",
+    ];
     for (const status of native) {
       expect(WEB_HOSTED_E2EE_CHANNEL_STATUSES).not.toContain(status);
     }
@@ -44,7 +47,8 @@ describe("the web tier's connection status boundary (§2.2, §2.4)", () => {
     for (const input of everyHostedConnectionStatusInput()) {
       const text = deriveHostedConnectionStatusText(input);
       const { guarantee } = deriveHostedConnectionStatusIndicator(input);
-      expect(text, `text for ${JSON.stringify(input)}`).not.toBe("Encrypted");
+      expect(text, `text for ${JSON.stringify(input)}`).not.toBe("Encrypted · Verified locally");
+      expect(text, `text for ${JSON.stringify(input)}`).not.toBe("Encrypted · Account trusted");
       expect(text, `text for ${JSON.stringify(input)}`).not.toBe("Not verified");
       expect(guarantee, `guarantee for ${JSON.stringify(input)}`).not.toBe("e2ee");
       if (guarantee === "web") webRows += 1;
@@ -70,7 +74,7 @@ describe("the web tier's connection status boundary (§2.2, §2.4)", () => {
     // The web row itself compiles, so the two above fail for their member and
     // not for the shape of the call.
     expect(deriveHostedConnectionStatusText({ ...ready, e2eeStatus: "web-unsigned" })).toBe(
-      "Browser encrypted",
+      "Encrypted web",
     );
   });
 

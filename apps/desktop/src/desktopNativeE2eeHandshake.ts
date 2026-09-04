@@ -1,6 +1,12 @@
 import * as Crypto from "node:crypto";
 
 import {
+  type NativeE2eeEnrollmentState,
+  type NativeE2eeTrustResolution,
+  type ResolveNativeE2eeTrustInput,
+} from "@ryco/client-runtime/authorization";
+import {
+  type RelayE2eeInitiatorAttempt,
   type RelayE2eeNativeHandshakeStartInput,
   type RelayE2eeNativeHandshakeStartResult,
 } from "@ryco/client-runtime/relay";
@@ -17,7 +23,10 @@ import {
   e2eeKeyFingerprint,
   formatE2eeKeyFingerprint,
 } from "@ryco/shared/relayE2eeKeys";
-import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
+import {
+  E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+} from "@ryco/shared/relayE2eeWire";
 
 import { DesktopE2eePrekeyIssuer, type DesktopE2eePrekeyCertificate } from "./desktopE2eePrekey.ts";
 import { DesktopE2eeTrustStore, type DesktopVerifiedE2eePin } from "./desktopE2eeTrust.ts";
@@ -27,6 +36,7 @@ import type { DesktopNativeSecurityHelper } from "./nativeSecurityHelper.ts";
 import type { DesktopProtectedRecordStore } from "./protectedRecordStore.ts";
 
 const LOCAL_SUITE_PREFERENCE = [E2EE_SUITE_25519_CHACHAPOLY_SHA256] as const;
+const ACCOUNT_SUITE_PREFERENCE = [E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256] as const;
 const PREPARED_ATTEMPT_LIFETIME_MS = 2 * 60 * 1_000;
 const HANDSHAKE_HANDLE_LIFETIME_MS = 20_000;
 const MAX_PREPARED_ATTEMPTS = 8;
@@ -36,23 +46,36 @@ const HANDLE = /^[A-Za-z0-9_-]{43}$/;
 type DesktopE2eeHandshakeSecurity = DesktopLocalIntroductionSecurity &
   Pick<DesktopNativeSecurityHelper, "withAgreementSecretKey">;
 
+type DesktopAccountAuthorization = Extract<
+  NativeE2eeTrustResolution,
+  { readonly kind: "authorized"; readonly trustSource: "account-enrolled" }
+>;
+
+export interface DesktopNativeE2eeAccountAuthority {
+  readonly enrollmentState: () => NativeE2eeEnrollmentState | null;
+  readonly resolve: (input: ResolveNativeE2eeTrustInput) => Promise<NativeE2eeTrustResolution>;
+  readonly revoked?: () => void;
+}
+
 export type DesktopNativeE2eePreparation =
   | { readonly kind: "web-eligible" }
   | { readonly kind: "strict-unavailable" }
+  | { readonly kind: "update-required" }
   | {
       readonly kind: "native";
       readonly pairingOnly: boolean;
       readonly attemptHandle: string;
-      readonly credentials: {
-        readonly tier: "native";
-        readonly accountId: string;
-        readonly identityPublicKey: Uint8Array;
-        readonly agreementPublicKey: Uint8Array;
-        readonly prekeyTranscript: Uint8Array;
-        readonly prekeySignature: Uint8Array;
-      };
+      readonly suiteId: 1 | 2;
+      readonly credentials: Extract<
+        RelayE2eeInitiatorAttempt["credentials"],
+        { readonly tier: "native" }
+      >;
       readonly verifiedPin?: NodeE2eeVerifiedPin;
       readonly acceptedPolicyGeneration?: number;
+      readonly relayTicket?: {
+        readonly ticket: string;
+        readonly expiresAt: number;
+      };
     };
 
 interface PreparedAttempt {
@@ -60,6 +83,7 @@ interface PreparedAttempt {
   readonly nodeId: string;
   readonly pin: DesktopVerifiedE2eePin | null;
   readonly certificate: DesktopE2eePrekeyCertificate;
+  readonly accountAuthorization: DesktopAccountAuthorization | null;
   readonly expiresAt: number;
 }
 
@@ -129,20 +153,45 @@ function nativePreparation(
   attemptHandle: string,
   attempt: PreparedAttempt,
 ): Extract<DesktopNativeE2eePreparation, { readonly kind: "native" }> {
+  const account = attempt.accountAuthorization;
   return {
     kind: "native",
-    pairingOnly: attempt.pin === null,
+    pairingOnly: attempt.pin === null && account === null,
     attemptHandle,
-    credentials: {
-      tier: "native",
-      accountId: attempt.accountId,
-      identityPublicKey: attempt.certificate.identityPublicKey,
-      agreementPublicKey: attempt.certificate.agreementPublicKey,
-      prekeyTranscript: attempt.certificate.transcript,
-      prekeySignature: attempt.certificate.signature,
-    },
+    suiteId:
+      account === null
+        ? E2EE_SUITE_25519_CHACHAPOLY_SHA256
+        : E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+    credentials:
+      account === null
+        ? {
+            tier: "native",
+            accountId: attempt.accountId,
+            identityPublicKey: attempt.certificate.identityPublicKey,
+            agreementPublicKey: attempt.certificate.agreementPublicKey,
+            prekeyTranscript: attempt.certificate.transcript,
+            prekeySignature: attempt.certificate.signature,
+          }
+        : {
+            tier: "native",
+            trustSource: "account-enrolled",
+            accountId: attempt.accountId,
+            identityPublicKey: attempt.certificate.identityPublicKey,
+            agreementPublicKey: attempt.certificate.agreementPublicKey,
+            prekeyTranscript: attempt.certificate.transcript,
+            prekeySignature: attempt.certificate.signature,
+            deviceGrant: account.grant,
+          },
     ...(attempt.pin === null
-      ? {}
+      ? account === null
+        ? {}
+        : {
+            acceptedPolicyGeneration: account.grant.claims.nodePolicyGeneration,
+            relayTicket: {
+              ticket: account.ticket,
+              expiresAt: account.expiresAt,
+            },
+          }
       : {
           verifiedPin: pinForAttempt(attempt.pin),
           acceptedPolicyGeneration: attempt.pin.acceptedPolicyGeneration,
@@ -156,6 +205,7 @@ export class DesktopNativeE2eeHandshakeService {
   readonly #trust: DesktopE2eeTrustStore;
   readonly #prekey: DesktopE2eePrekeyIssuer;
   readonly #identityStatus: () => DesktopHostedIdentityStatus;
+  readonly #accountAuthority: DesktopNativeE2eeAccountAuthority | undefined;
   readonly #now: () => number;
   readonly #prepared = new Map<string, PreparedAttempt>();
   readonly #handshakes = new Map<string, HeldHandshake>();
@@ -165,6 +215,7 @@ export class DesktopNativeE2eeHandshakeService {
     readonly security: DesktopE2eeHandshakeSecurity;
     readonly records: DesktopProtectedRecordStore;
     readonly identityStatus: () => DesktopHostedIdentityStatus;
+    readonly accountAuthority?: DesktopNativeE2eeAccountAuthority;
     readonly trust?: DesktopE2eeTrustStore;
     readonly prekey?: DesktopE2eePrekeyIssuer;
     readonly now?: () => number;
@@ -182,12 +233,16 @@ export class DesktopNativeE2eeHandshakeService {
         now: this.#now,
       });
     this.#identityStatus = input.identityStatus;
+    this.#accountAuthority = input.accountAuthority;
   }
 
   #prune(): void {
     const now = this.#now();
     for (const [handle, attempt] of this.#prepared) {
-      if (attempt.expiresAt < now) this.#prepared.delete(handle);
+      if (attempt.expiresAt < now) {
+        this.#prepared.delete(handle);
+        attempt.accountAuthorization?.dispose();
+      }
     }
     for (const [handle, held] of this.#handshakes) {
       if (held.expiresAt >= now) continue;
@@ -200,19 +255,27 @@ export class DesktopNativeE2eeHandshakeService {
     readonly accountId: string;
     readonly nodeId: string;
     readonly allowPairing?: boolean;
+    readonly expectedTrust?: "verified" | "account-trusted" | "unverified";
   }): Promise<DesktopNativeE2eePreparation> {
     this.#prune();
     const [pin, marker] = await Promise.all([
       this.#trust.read(this.#origin, input.accountId, input.nodeId),
       this.#trust.hasVerifiedOrigin(this.#origin),
     ]);
-    if (pin === null && (!marker || input.allowPairing !== true)) {
-      return marker ? { kind: "strict-unavailable" } : { kind: "web-eligible" };
-    }
-
     const identity = this.#identityStatus();
     if (identity.status !== "ready" || identity.accountId !== input.accountId) {
       return { kind: "strict-unavailable" };
+    }
+    const pairingOnly = pin === null && input.allowPairing === true;
+    if (
+      (input.expectedTrust === "verified" && pin === null) ||
+      (input.expectedTrust === "account-trusted" && pin !== null) ||
+      (input.expectedTrust === "unverified" && !pairingOnly)
+    ) {
+      return { kind: "strict-unavailable" };
+    }
+    if (pin === null && !pairingOnly && !this.#accountAuthority) {
+      return marker ? { kind: "strict-unavailable" } : { kind: "web-eligible" };
     }
     const certificate = await this.#prekey.ensure(input.accountId);
     if (
@@ -229,24 +292,61 @@ export class DesktopNativeE2eeHandshakeService {
     ) {
       return fail();
     }
-    for (const [attemptHandle, prepared] of this.#prepared) {
-      if (
-        prepared.accountId === input.accountId &&
-        prepared.nodeId === input.nodeId &&
-        ((prepared.pin === null && pin === null) ||
-          (prepared.pin !== null && pin !== null && samePin(prepared.pin, pin))) &&
-        sameCertificate(prepared.certificate, certificate)
-      ) {
-        return nativePreparation(attemptHandle, prepared);
+    if (pin !== null || pairingOnly) {
+      for (const [attemptHandle, prepared] of this.#prepared) {
+        if (
+          prepared.accountAuthorization === null &&
+          prepared.accountId === input.accountId &&
+          prepared.nodeId === input.nodeId &&
+          ((prepared.pin === null && pin === null) ||
+            (prepared.pin !== null && pin !== null && samePin(prepared.pin, pin))) &&
+          sameCertificate(prepared.certificate, certificate)
+        ) {
+          return nativePreparation(attemptHandle, prepared);
+        }
       }
     }
     if (this.#prepared.size >= MAX_PREPARED_ATTEMPTS) return fail();
+    let accountAuthorization: DesktopAccountAuthorization | null = null;
+    if (pin === null && !pairingOnly) {
+      const accountAuthority = this.#accountAuthority;
+      if (accountAuthority === undefined) return { kind: "strict-unavailable" };
+      const enrollment = accountAuthority.enrollmentState();
+      if (
+        enrollment?.status !== "ready" ||
+        enrollment.ready === null ||
+        enrollment.ready.namespace.accountId !== input.accountId ||
+        enrollment.ready.namespace.hubOrigin !== this.#origin
+      ) {
+        return { kind: "strict-unavailable" };
+      }
+      const resolution = await accountAuthority.resolve({
+        hubOrigin: this.#origin,
+        accountId: input.accountId,
+        capability: "ryco.rpc",
+        node: { nodeId: input.nodeId, accountGrantAllowed: true },
+        enrollment: enrollment.ready,
+        localTrustedIntroduction: false,
+        verifiedPin: null,
+      });
+      if (resolution.kind !== "authorized" || resolution.trustSource !== "account-enrolled") {
+        if (resolution.kind === "blocked" && resolution.reason === "enrollment-revoked") {
+          accountAuthority.revoked?.();
+        }
+        if (resolution.kind === "blocked" && resolution.reason === "node-update-required") {
+          return { kind: "update-required" };
+        }
+        return { kind: "strict-unavailable" };
+      }
+      accountAuthorization = resolution;
+    }
     const attemptHandle = opaqueHandle();
     const prepared: PreparedAttempt = {
       accountId: input.accountId,
       nodeId: input.nodeId,
       pin,
       certificate,
+      accountAuthorization,
       expiresAt: this.#now() + PREPARED_ATTEMPT_LIFETIME_MS,
     };
     this.#prepared.set(attemptHandle, prepared);
@@ -262,15 +362,31 @@ export class DesktopNativeE2eeHandshakeService {
     const prepared = this.#prepared.get(attemptHandle);
     if (prepared === undefined || prepared.expiresAt < this.#now()) return fail();
     const identity = this.#identityStatus();
+    const account = prepared.accountAuthorization;
+    const expectedSuite =
+      account === null
+        ? E2EE_SUITE_25519_CHACHAPOLY_SHA256
+        : E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256;
+    const grantContext = input.channel.accountGrantContext;
     if (
       identity.status !== "ready" ||
       identity.accountId !== prepared.accountId ||
       input.channel.hubOrigin !== this.#origin ||
       input.intendedCapability !== input.channel.channelOpenCapability ||
       input.intendedRole !== input.channel.channelOpenEffectiveRole ||
-      input.selectedSuite !== E2EE_SUITE_25519_CHACHAPOLY_SHA256 ||
+      input.selectedSuite !== expectedSuite ||
       input.offeredSuites.length !== 1 ||
-      input.offeredSuites[0] !== E2EE_SUITE_25519_CHACHAPOLY_SHA256
+      input.offeredSuites[0] !== expectedSuite ||
+      (account === null && grantContext !== undefined) ||
+      (account !== null &&
+        (grantContext === undefined ||
+          !e2eeBytesEqual(input.statement, account.nodeCapabilityStatement) ||
+          grantContext.relayTicketId !== account.grant.claims.relayTicketId ||
+          !e2eeBytesEqual(grantContext.deviceGrantDigest, account.grant.grantDigest) ||
+          !e2eeBytesEqual(
+            grantContext.nodeCapabilityStatementDigest,
+            account.grant.claims.nodeCapabilityStatementDigest,
+          )))
     ) {
       return fail();
     }
@@ -285,7 +401,8 @@ export class DesktopNativeE2eeHandshakeService {
       statement: input.statement,
       connectedHubOrigin: this.#origin,
       tier: "native",
-      localSuitePreference: LOCAL_SUITE_PREFERENCE,
+      ...(account === null ? {} : { trustSource: "account-enrolled" as const }),
+      localSuitePreference: account === null ? LOCAL_SUITE_PREFERENCE : ACCOUNT_SUITE_PREFERENCE,
       now: this.#now(),
       accountId: prepared.accountId,
       ...(livePin === null
@@ -330,18 +447,37 @@ export class DesktopNativeE2eeHandshakeService {
             (entry) => entry.transcript,
           ),
           continuityId: committedPin?.recordedContinuityId ?? verification.statement.continuityId,
+          ...(account === null
+            ? {}
+            : {
+                policyGeneration: verification.statement.policyGeneration,
+                capabilityStatementDigest: account.grant.claims.nodeCapabilityStatementDigest,
+              }),
         },
         selectedSuite: input.selectedSuite,
         offeredSuites: input.offeredSuites,
-        credentials: {
-          tier: "native",
-          accountId: prepared.accountId,
-          identityPublicKey: certificate.identityPublicKey,
-          agreementPublicKey: certificate.agreementPublicKey,
-          agreementSecretKey,
-          prekeyTranscript: certificate.transcript,
-          prekeySignature: certificate.signature,
-        },
+        credentials:
+          account === null
+            ? {
+                tier: "native",
+                accountId: prepared.accountId,
+                identityPublicKey: certificate.identityPublicKey,
+                agreementPublicKey: certificate.agreementPublicKey,
+                agreementSecretKey,
+                prekeyTranscript: certificate.transcript,
+                prekeySignature: certificate.signature,
+              }
+            : {
+                tier: "native",
+                trustSource: "account-enrolled",
+                accountId: prepared.accountId,
+                identityPublicKey: certificate.identityPublicKey,
+                agreementPublicKey: certificate.agreementPublicKey,
+                agreementSecretKey,
+                prekeyTranscript: certificate.transcript,
+                prekeySignature: certificate.signature,
+                deviceGrant: account.grant,
+              },
         intendedCapability: input.intendedCapability,
         intendedRole: input.intendedRole,
       });
@@ -383,7 +519,9 @@ export class DesktopNativeE2eeHandshakeService {
 
   destroy(handle: string): void {
     if (!HANDLE.test(handle)) return;
+    const prepared = this.#prepared.get(handle);
     this.#prepared.delete(handle);
+    prepared?.accountAuthorization?.dispose();
     const held = this.#handshakes.get(handle);
     this.#handshakes.delete(handle);
     held?.client.destroy();
@@ -392,6 +530,7 @@ export class DesktopNativeE2eeHandshakeService {
   dispose(): void {
     for (const held of this.#handshakes.values()) held.client.destroy();
     this.#handshakes.clear();
+    for (const prepared of this.#prepared.values()) prepared.accountAuthorization?.dispose();
     this.#prepared.clear();
   }
 }

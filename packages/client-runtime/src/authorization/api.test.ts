@@ -237,6 +237,80 @@ describe("HostedHubApi", () => {
     expect(String(requests[1]?.input)).not.toContain("node_aaaaaaaaaaaaaaaaaaaaaa");
   });
 
+  it("keeps the legacy ticket response grant-free", async () => {
+    const api = createApi();
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response(session))
+      .mockResolvedValueOnce(
+        response({
+          ticket: "ticket-sensitive-canary",
+          expiresAt: Date.now() + 60_000,
+          protocolMajor: 1,
+          protocolMinor: 2,
+          deviceGrant: "must-not-cross-the-browser-boundary",
+        }),
+      );
+    await api.restoreSession();
+    await expect(api.issueRelayTicket("node_aaaaaaaaaaaaaaaaaaaaaa")).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+  });
+
+  it("lists, renames, and revokes account E2EE devices with cookie CSRF separation", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const revoked = {
+      ...nativeE2eeEnrollment,
+      enrollmentRevision: 2,
+      deviceAuthEpoch: 3,
+      status: "revoked",
+      updatedAt: nativeE2eeNow + 1,
+      revokedAt: nativeE2eeNow + 1,
+    } as const;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      switch (requests.length) {
+        case 1:
+          return response(session);
+        case 2:
+          return response({ protocolVersion: 1, devices: [nativeE2eeEnrollment] });
+        case 3:
+          return response({
+            protocolVersion: 1,
+            enrollment: { ...nativeE2eeEnrollment, enrollmentRevision: 2, deviceLabel: "Phone" },
+          });
+        default:
+          return response({ protocolVersion: 1, enrollment: revoked });
+      }
+    });
+    const api = createApi();
+    await api.restoreSession();
+
+    await expect(api.listE2eeDevices()).resolves.toEqual([nativeE2eeEnrollment]);
+    await expect(
+      api.renameE2eeDevice(nativeE2eeEnrollmentId, {
+        expectedEnrollmentRevision: 1,
+        deviceLabel: "Phone",
+      }),
+    ).resolves.toMatchObject({ enrollmentRevision: 2, deviceLabel: "Phone" });
+    await expect(
+      api.revokeE2eeDevice(nativeE2eeEnrollmentId, {
+        expectedEnrollmentRevision: 2,
+        reasonCode: "owner_requested",
+      }),
+    ).resolves.toMatchObject({ status: "revoked" });
+
+    expect(requests.map(({ input }) => String(input))).toEqual([
+      "/api/auth/session",
+      "/api/account/e2ee/devices",
+      `/api/account/e2ee/devices/${nativeE2eeEnrollmentId}/rename`,
+      `/api/account/e2ee/devices/${nativeE2eeEnrollmentId}/revoke`,
+    ]);
+    expect(headersOf(requests[1]?.init).get("X-Ryco-CSRF")).toBeNull();
+    expect(headersOf(requests[2]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+    expect(headersOf(requests[3]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+  });
+
   it("returns stable bounded errors without reflecting response details", async () => {
     globalThis.fetch = vi.fn(async () =>
       response({ error: "session_invalid", details: "sensitive-response-canary" }, 401),
@@ -1600,7 +1674,193 @@ const accountAndSession = {
   session: session.session,
 } as const;
 
+const nativeE2eeOpaque = "A".repeat(43);
+const nativeE2eeEnrollmentId = `enr_${"e".repeat(22)}`;
+const nativeE2eeNow = 1_788_451_200_000;
+const nativeE2eeEnrollment = {
+  enrollmentId: nativeE2eeEnrollmentId,
+  enrollmentRevision: 1,
+  accountAuthEpoch: 3,
+  deviceAuthEpoch: 2,
+  platform: "ios",
+  appVersion: "0.1.20",
+  reportedKeyBacking: "secure-enclave",
+  deviceLabel: "Ada’s iPhone",
+  identityFingerprint: nativeE2eeOpaque,
+  agreementFingerprint: nativeE2eeOpaque,
+  clientPrekeyCertificateDigest: nativeE2eeOpaque,
+  certificateExpiresAt: nativeE2eeNow + 86_400_000,
+  status: "active",
+  createdAt: nativeE2eeNow,
+  updatedAt: nativeE2eeNow,
+  lastUsedAt: null,
+  revokedAt: null,
+} as const;
+
+const nativeE2eeEnrollmentRequest = {
+  protocolVersion: 1,
+  hubOrigin: "https://hub.example.test",
+  accountId: session.account.id,
+  enrollmentId: nativeE2eeEnrollmentId,
+  identityPublicKey: "B".repeat(87),
+  identityFingerprint: nativeE2eeOpaque,
+  agreementPublicKey: nativeE2eeOpaque,
+  agreementFingerprint: nativeE2eeOpaque,
+  clientPrekeyCertificate: "C".repeat(120),
+  clientPrekeyCertificateDigest: nativeE2eeOpaque,
+  certificateExpiresAt: nativeE2eeEnrollment.certificateExpiresAt,
+  platform: "ios",
+  appVersion: "0.1.20",
+  reportedKeyBacking: "secure-enclave",
+  deviceLabel: "Ada’s iPhone",
+  requestedMaximumRole: "operator",
+  requestedCapabilities: ["ryco.rpc"],
+  enrollmentNonce: nativeE2eeOpaque,
+  idempotencyKey: nativeE2eeOpaque,
+} as const;
+
+const nativeE2eeTicketRequest = {
+  protocolVersion: 1,
+  nodeId: "node_aaaaaaaaaaaaaaaaaaaaaa",
+  capability: "ryco.rpc",
+  protocolMajor: 1,
+  protocolMinor: 3,
+  suiteId: 2,
+  enrollmentId: nativeE2eeEnrollmentId,
+  enrollmentRevision: 1,
+  clientPrekeyCertificateDigest: nativeE2eeOpaque,
+} as const;
+
+const nativeE2eeTicket = {
+  protocolVersion: 1,
+  ticket: nativeE2eeOpaque,
+  ticketId: `rtk_${"t".repeat(22)}`,
+  expiresAt: nativeE2eeNow + 60_000,
+  protocolMajor: 1,
+  protocolMinor: 3,
+  suiteId: 2,
+  deviceGrant: "G".repeat(200),
+  deviceGrantDigest: nativeE2eeOpaque,
+  nodeCapabilityStatement: "S".repeat(200),
+  nodeCapabilityStatementDigest: nativeE2eeOpaque,
+  keysetGeneration: 7,
+  capability: "ryco.rpc",
+  effectiveRole: "operator",
+} as const;
+
 describe("HostedHubApi bearer (native/DPoP) transport", () => {
+  it("uses authenticated DPoP for strict enrollment, keyset, and account-grant tickets", async () => {
+    const { calls, service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = new URL(String(input)).pathname;
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      if (pathname === "/api/native/e2ee/devices/current") {
+        return response({ protocolVersion: 1, enrollment: nativeE2eeEnrollment });
+      }
+      if (pathname === "/api/native/e2ee/grant-keys") {
+        return response({
+          protocolVersion: 1,
+          generation: 7,
+          keys: [
+            {
+              keyId: `hgk_${"k".repeat(22)}`,
+              publicKey: nativeE2eeOpaque,
+              notBefore: nativeE2eeNow - 1_000,
+              notAfter: nativeE2eeNow + 120_000,
+            },
+          ],
+        });
+      }
+      return response(nativeE2eeTicket, 201);
+    });
+    const api = createBearerApi(service, credentials);
+
+    await expect(api.upsertE2eeDeviceEnrollment(nativeE2eeEnrollmentRequest)).resolves.toEqual(
+      nativeE2eeEnrollment,
+    );
+    await expect(api.getE2eeGrantVerificationKeys()).resolves.toMatchObject({ generation: 7 });
+    await expect(api.issueAccountGrantRelayTicket(nativeE2eeTicketRequest)).resolves.toEqual(
+      nativeE2eeTicket,
+    );
+
+    expect(requests.map((request) => new URL(request.input).pathname)).toEqual([
+      "/api/native/e2ee/devices/current",
+      "/api/native/e2ee/grant-keys",
+      "/api/native/relay/tickets/account-grant",
+    ]);
+    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual(nativeE2eeEnrollmentRequest);
+    expect(JSON.parse(String(requests[2]?.init?.body))).toEqual(nativeE2eeTicketRequest);
+    for (const request of requests) {
+      const headers = headersOf(request.init);
+      expect(headers.get("Authorization")).toBe("DPoP native-token-canary");
+      expect(headers.get("DPoP")).toMatch(/:ath$/);
+      expect(headers.get("X-Ryco-CSRF")).toBeNull();
+      expect(request.init?.credentials).toBe("omit");
+    }
+    expect(calls).toHaveLength(3);
+  });
+
+  it("rejects native E2EE routes from cookie sessions before I/O", async () => {
+    const fetchSpy = vi.fn(async () => response({}));
+    globalThis.fetch = fetchSpy;
+    const api = createApi();
+
+    await expect(api.upsertE2eeDeviceEnrollment(nativeE2eeEnrollmentRequest)).rejects.toMatchObject(
+      {
+        code: "native_only_transport",
+      },
+    );
+    await expect(api.getE2eeGrantVerificationKeys()).rejects.toMatchObject({
+      code: "native_only_transport",
+    });
+    await expect(api.issueAccountGrantRelayTicket(nativeE2eeTicketRequest)).rejects.toMatchObject({
+      code: "native_only_transport",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("strictly rejects mixed or malformed native ticket and keyset responses", async () => {
+    const { service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    const api = createBearerApi(service, credentials);
+
+    globalThis.fetch = vi.fn(async () => response({ ...nativeE2eeTicket, protocolMinor: 2 }));
+    await expect(api.issueAccountGrantRelayTicket(nativeE2eeTicketRequest)).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+    globalThis.fetch = vi.fn(async () => response({ ...nativeE2eeTicket, browserTicket: true }));
+    await expect(api.issueAccountGrantRelayTicket(nativeE2eeTicketRequest)).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+    globalThis.fetch = vi.fn(async () =>
+      response({
+        protocolVersion: 1,
+        generation: 7,
+        keys: [
+          {
+            keyId: `hgk_${"k".repeat(22)}`,
+            publicKey: nativeE2eeOpaque,
+            notBefore: nativeE2eeNow,
+            notAfter: nativeE2eeNow + 10,
+          },
+          {
+            keyId: `hgk_${"k".repeat(22)}`,
+            publicKey: nativeE2eeOpaque,
+            notBefore: nativeE2eeNow,
+            notAfter: nativeE2eeNow + 10,
+          },
+        ],
+      }),
+    );
+    await expect(api.getE2eeGrantVerificationKeys()).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+  });
+
   it("fails closed when bearer credentials lack a DPoP signer or token holder", () => {
     const { service } = recordingDpopSigner();
     // Missing signer.

@@ -1,9 +1,12 @@
 import { Schema } from "effect";
 
 export const RELAY_PROTOCOL_MAJOR = 1 as const;
-export const RELAY_PROTOCOL_MINOR = 2 as const;
+export const RELAY_PROTOCOL_MINOR = 3 as const;
 export const RELAY_PROTOCOL_MINIMUM_MINOR = 0 as const;
 export const RELAY_AUTHORIZED_CHANNEL_MINOR = 2 as const;
+export const RELAY_ACCOUNT_GRANT_MINOR = 3 as const;
+export const RELAY_E2EE_CAPABILITY_STATEMENT_MAX_BYTES = 5_190;
+export const RELAY_E2EE_GRANT_KEYSET_MAX_KEYS = 4;
 
 export const RELAY_MAX_CONTROL_FRAME_BYTES = 256 * 1_024;
 export const RELAY_MAX_DATA_CHUNK_BYTES = 256 * 1_024;
@@ -98,6 +101,10 @@ export const RELAY_FRAME_TYPES = [
   "ping",
   "pong",
   "error",
+  "node.e2ee.statement",
+  "node.e2ee.statement.ack",
+  "e2ee.verifier-keys",
+  "e2ee.enrollment-revoked",
 ] as const;
 
 export const RELAY_PROTOCOL_ERROR_CODES = [
@@ -160,6 +167,38 @@ export const RelayChannelId = Schema.String.check(
 ).pipe(Schema.brand("RelayChannelId"));
 export type RelayChannelId = typeof RelayChannelId.Type;
 
+export const NativeE2eeEnrollmentId = Schema.String.check(
+  Schema.isPattern(/^enr_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(47),
+).pipe(Schema.brand("NativeE2eeEnrollmentId"));
+export type NativeE2eeEnrollmentId = typeof NativeE2eeEnrollmentId.Type;
+
+export const HubGrantVerificationKeyId = Schema.String.check(
+  Schema.isPattern(/^hgk_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(47),
+).pipe(Schema.brand("HubGrantVerificationKeyId"));
+export type HubGrantVerificationKeyId = typeof HubGrantVerificationKeyId.Type;
+
+export const RelayTicketId = Schema.String.check(
+  Schema.isPattern(/^rtk_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(47),
+).pipe(Schema.brand("RelayTicketId"));
+export type RelayTicketId = typeof RelayTicketId.Type;
+
+export const NativeE2eeEnrollmentRevision = UInt32.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+  Schema.brand("NativeE2eeEnrollmentRevision"),
+);
+export type NativeE2eeEnrollmentRevision = typeof NativeE2eeEnrollmentRevision.Type;
+
+export const E2eeAuthorizationEpoch = UInt32.pipe(Schema.brand("E2eeAuthorizationEpoch"));
+export type E2eeAuthorizationEpoch = typeof E2eeAuthorizationEpoch.Type;
+
+export const E2eeKeysetGeneration = UInt32.pipe(Schema.brand("E2eeKeysetGeneration"));
+export type E2eeKeysetGeneration = typeof E2eeKeysetGeneration.Type;
+
+export const RelayConnectorGeneration = UInt32.pipe(Schema.brand("RelayConnectorGeneration"));
+export type RelayConnectorGeneration = typeof RelayConnectorGeneration.Type;
+
 export const RelaySequence = UInt32.pipe(Schema.brand("RelaySequence"));
 export type RelaySequence = typeof RelaySequence.Type;
 
@@ -174,6 +213,17 @@ export type RelaySignatureMaterial = typeof RelaySignatureMaterial.Type;
 
 export const RelayTicketMaterial = boundedBytes(32, 64);
 export type RelayTicketMaterial = typeof RelayTicketMaterial.Type;
+
+export const RelayE2eeDigest = boundedBytes(32, 32).pipe(Schema.brand("RelayE2eeDigest"));
+export type RelayE2eeDigest = typeof RelayE2eeDigest.Type;
+
+export const RelayAccountGrantContext = Schema.Tuple([
+  Schema.Literal(2),
+  RelayTicketId,
+  RelayE2eeDigest,
+  RelayE2eeDigest,
+]);
+export type RelayAccountGrantContext = typeof RelayAccountGrantContext.Type;
 
 export const RelayLimits = Schema.Struct({
   maxControlFrameBytes: Schema.Int.check(
@@ -252,13 +302,18 @@ const minorVersionSupportsAuthorizedChannel = (input: {
   readonly protocolMinor: number;
   readonly capability?: RelayCapability | undefined;
   readonly effectiveRole?: RelayEffectiveRole | undefined;
+  readonly accountGrantContext?: RelayAccountGrantContext | undefined;
 }) => {
   const hasCapability = input.capability !== undefined;
   const hasEffectiveRole = input.effectiveRole !== undefined;
+  if (input.accountGrantContext !== undefined && input.protocolMinor < RELAY_ACCOUNT_GRANT_MINOR) {
+    return "account grant context requires protocol minor version 3 or newer";
+  }
   if (input.protocolMinor >= RELAY_AUTHORIZED_CHANNEL_MINOR) {
-    return hasCapability && hasEffectiveRole
-      ? undefined
-      : "protocol minor version 2 or newer requires channel authorization metadata";
+    if (!hasCapability || !hasEffectiveRole) {
+      return "protocol minor version 2 or newer requires channel authorization metadata";
+    }
+    return undefined;
   }
   return !hasCapability && !hasEffectiveRole
     ? undefined
@@ -299,8 +354,79 @@ export const RelayChannelOpenFrame = Schema.Struct({
   channelId: RelayChannelId,
   capability: Schema.optionalKey(RelayCapability),
   effectiveRole: Schema.optionalKey(RelayEffectiveRole),
+  accountGrantContext: Schema.optionalKey(RelayAccountGrantContext),
 }).check(Schema.makeFilter(minorVersionSupportsAuthorizedChannel));
 export type RelayChannelOpenFrame = typeof RelayChannelOpenFrame.Type;
+
+const minor3Frame = <S extends Schema.Struct.Fields>(fields: S) =>
+  Schema.Struct({ ...fields, ...ProtocolFields }).check(
+    Schema.makeFilter((frame) =>
+      (frame as { readonly protocolMinor: number }).protocolMinor >= RELAY_ACCOUNT_GRANT_MINOR
+        ? undefined
+        : "frame requires protocol minor version 3 or newer",
+    ),
+  );
+
+export const RelayNodeE2eeStatementFrame = minor3Frame({
+  type: Schema.Literal("node.e2ee.statement"),
+  connectorGeneration: RelayConnectorGeneration,
+  statement: boundedBytes(1, RELAY_E2EE_CAPABILITY_STATEMENT_MAX_BYTES),
+  statementDigest: RelayE2eeDigest,
+  expiresAt: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+  ),
+});
+export type RelayNodeE2eeStatementFrame = typeof RelayNodeE2eeStatementFrame.Type;
+
+export const RelayNodeE2eeStatementAckFrame = minor3Frame({
+  type: Schema.Literal("node.e2ee.statement.ack"),
+  connectorGeneration: RelayConnectorGeneration,
+  statementDigest: RelayE2eeDigest,
+});
+export type RelayNodeE2eeStatementAckFrame = typeof RelayNodeE2eeStatementAckFrame.Type;
+
+export const RelayHubGrantVerificationKey = Schema.Struct({
+  keyId: HubGrantVerificationKeyId,
+  publicKey: boundedBytes(32, 32),
+  notBefore: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+  ),
+  notAfter: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+  ),
+}).check(
+  Schema.makeFilter((key) =>
+    key.notAfter > key.notBefore ? undefined : "notAfter must be after notBefore",
+  ),
+);
+export type RelayHubGrantVerificationKey = typeof RelayHubGrantVerificationKey.Type;
+
+export const RelayE2eeVerifierKeysFrame = minor3Frame({
+  type: Schema.Literal("e2ee.verifier-keys"),
+  generation: E2eeKeysetGeneration,
+  keys: Schema.Array(RelayHubGrantVerificationKey).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(RELAY_E2EE_GRANT_KEYSET_MAX_KEYS),
+    Schema.makeFilter((keys) =>
+      new Set(keys.map((key) => key.keyId)).size === keys.length
+        ? undefined
+        : "grant verification key ids must be distinct",
+    ),
+  ),
+});
+export type RelayE2eeVerifierKeysFrame = typeof RelayE2eeVerifierKeysFrame.Type;
+
+export const RelayE2eeEnrollmentRevokedFrame = minor3Frame({
+  type: Schema.Literal("e2ee.enrollment-revoked"),
+  enrollmentId: NativeE2eeEnrollmentId,
+  enrollmentRevision: NativeE2eeEnrollmentRevision,
+  accountAuthEpoch: E2eeAuthorizationEpoch,
+  deviceAuthEpoch: E2eeAuthorizationEpoch,
+});
+export type RelayE2eeEnrollmentRevokedFrame = typeof RelayE2eeEnrollmentRevokedFrame.Type;
 
 export const RelayChannelAcceptFrame = Schema.Struct({
   type: Schema.Literal("channel.accept"),
@@ -432,6 +558,10 @@ export const RelayControlFrame = Schema.Union([
   RelayPingFrame,
   RelayPongFrame,
   RelayErrorFrame,
+  RelayNodeE2eeStatementFrame,
+  RelayNodeE2eeStatementAckFrame,
+  RelayE2eeVerifierKeysFrame,
+  RelayE2eeEnrollmentRevokedFrame,
 ]);
 export type RelayControlFrame = typeof RelayControlFrame.Type;
 

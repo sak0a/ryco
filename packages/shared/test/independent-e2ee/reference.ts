@@ -64,6 +64,14 @@ export function decodeIndependentCanonicalCbor(bytes: Uint8Array): IndependentCa
       }
     }
   } catch {
+    try {
+      const laxValue = decode(bytes, { ...STRICT_CBOR_OPTIONS, strict: false });
+      if (!equal(encode(laxValue, rfc8949EncodeOptions), bytes)) {
+        return { kind: "error", reason: "non_canonical" };
+      }
+    } catch {
+      // Still malformed under the bounded lax profile.
+    }
     return { kind: "error", reason: "malformed" };
   }
   try {

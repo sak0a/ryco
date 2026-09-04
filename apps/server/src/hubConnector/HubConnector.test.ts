@@ -1,3 +1,5 @@
+import { generateKeyPairSync } from "node:crypto";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -7,9 +9,11 @@ import {
   type RelayNodeAuthHandshake,
 } from "@ryco/contracts/relay";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
+import { e2eeSha256 } from "@ryco/shared/relayE2eeKeys";
 import { stripRelayChunkCapabilityPrelude } from "@ryco/shared/relayMessageChunks";
 
 import { DEFAULT_HUB_CONNECTOR_CONFIG, type HubConnectorConfig } from "../config.ts";
+import type { NodeE2eeAdvertisement } from "../hubIdentity/NodeE2eeCapabilityStatement.ts";
 import { NODE_E2EE_FAIL_CLOSED_POLICY } from "../hubIdentity/NodeE2eePolicyStore.ts";
 import { HubRelayAuthenticationError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
 import {
@@ -57,6 +61,21 @@ function encoded(frame: RelayFrame): Uint8Array {
   const result = encodeRelayFrame(frame);
   if (!result.ok) throw new Error(result.error.code);
   return result.value;
+}
+
+function ed25519PublicKey(): Uint8Array {
+  const key = generateKeyPairSync("ed25519").publicKey.export({ format: "der", type: "spki" });
+  return Uint8Array.from(key.subarray(key.byteLength - 32));
+}
+
+function e2eeAdvertisement(statementByte: number, expiresAt: number): NodeE2eeAdvertisement {
+  const statement = Uint8Array.of(statementByte);
+  return {
+    hubOrigin: "https://relay.example",
+    statement,
+    statementDigest: e2eeSha256(statement),
+    expiresAt,
+  } as NodeE2eeAdvertisement;
 }
 
 function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentityRuntimeShape {
@@ -333,6 +352,128 @@ describe("HubConnector", () => {
     expect(connector.status().state).toBe("disabled");
     expect(clock.timers.size).toBe(0);
     expect([...sockets[0]!.listeners.values()].every((set) => set.size === 0)).toBe(true);
+  });
+
+  it("publishes and gates minor-3 E2EE state by exact generation, digest, and verifier keys", async () => {
+    const clock = scheduler();
+    const socket = new FakeSocket();
+    let currentAdvertisement = e2eeAdvertisement(1, 2_000_000);
+    const revocations: RelayFrame[] = [];
+    const activeIdentity = identity();
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        createRelayAuthenticationFrame: async () => {
+          const frame = await activeIdentity.createRelayAuthenticationFrame(
+            "https://relay.example",
+            { protocolMajor: 1, protocolMinor: 3 },
+          );
+          return { ...frame, protocolMinor: 3 } as RelayNodeAuthHandshake;
+        },
+        readE2eeAdvertisement: async () => ({
+          kind: "available" as const,
+          advertisement: currentAdvertisement,
+        }),
+      }),
+      transport: { open: () => socket },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+      scheduler: clock.value,
+      onE2eeEnrollmentRevoked: (frame) => {
+        revocations.push(frame);
+      },
+    });
+    const starting = connector.start();
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 3,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+
+    const published = socket.sent
+      .map((bytes) => decodeRelayFrame(bytes))
+      .find((result) => Boolean(result.ok && result.value.type === "node.e2ee.statement"));
+    expect(published).toMatchObject({
+      ok: true,
+      value: {
+        type: "node.e2ee.statement",
+        protocolMinor: 3,
+        statement: currentAdvertisement.statement,
+        statementDigest: currentAdvertisement.statementDigest,
+      },
+    });
+    const connectorGeneration = connector.e2eeSnapshot().connectorGeneration!;
+    expect(connector.e2eeSnapshot().accountGrantReady).toBe(false);
+
+    socket.emit("message", {
+      data: encoded({
+        type: "node.e2ee.statement.ack",
+        protocolMajor: 1,
+        protocolMinor: 3,
+        connectorGeneration: connectorGeneration - 1,
+        statementDigest: currentAdvertisement.statementDigest,
+      } as unknown as RelayFrame),
+    } as MessageEvent);
+    await settle();
+    expect(connector.e2eeSnapshot().acknowledgedStatementDigest).toBeUndefined();
+
+    socket.emit("message", {
+      data: encoded({
+        type: "e2ee.verifier-keys",
+        protocolMajor: 1,
+        protocolMinor: 3,
+        generation: 1,
+        keys: [
+          {
+            keyId: `hgk_${"K".repeat(22)}`,
+            publicKey: ed25519PublicKey(),
+            notBefore: 900_000,
+            notAfter: 1_100_000,
+          },
+        ],
+      } as unknown as RelayFrame),
+    } as MessageEvent);
+    socket.emit("message", {
+      data: encoded({
+        type: "node.e2ee.statement.ack",
+        protocolMajor: 1,
+        protocolMinor: 3,
+        connectorGeneration,
+        statementDigest: currentAdvertisement.statementDigest,
+      } as unknown as RelayFrame),
+    } as MessageEvent);
+    await settle();
+    expect(connector.e2eeSnapshot().accountGrantReady).toBe(true);
+
+    currentAdvertisement = e2eeAdvertisement(2, 2_100_000);
+    await connector.refreshE2eeState();
+    expect(connector.e2eeSnapshot()).toMatchObject({
+      accountGrantReady: false,
+      acknowledgedStatementDigest: undefined,
+      currentStatementDigest: currentAdvertisement.statementDigest,
+    });
+
+    socket.emit("message", {
+      data: encoded({
+        type: "e2ee.enrollment-revoked",
+        protocolMajor: 1,
+        protocolMinor: 3,
+        enrollmentId: `enr_${"E".repeat(22)}`,
+        enrollmentRevision: 1,
+        accountAuthEpoch: 1,
+        deviceAuthEpoch: 2,
+      } as unknown as RelayFrame),
+    } as MessageEvent);
+    await settle();
+    expect(revocations).toHaveLength(1);
+    await connector.stop();
+    expect(connector.e2eeSnapshot().accountGrantReady).toBe(false);
   });
 
   it("retries a transient proof preflight with fresh material and one timer", async () => {

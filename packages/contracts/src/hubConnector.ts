@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 
 import {
+  RELAY_AUTHORIZED_CHANNEL_MINOR,
   RELAY_MAX_CHANNELS,
   RELAY_MAX_QUEUED_BYTES,
   RELAY_PROTOCOL_MAJOR,
@@ -78,7 +79,9 @@ export const HubConnectorStatus = Schema.Struct({
     if (status.state === "online") {
       if (
         status.protocolMajor !== RELAY_PROTOCOL_MAJOR ||
-        status.protocolMinor !== RELAY_PROTOCOL_MINOR
+        status.protocolMinor === undefined ||
+        status.protocolMinor < RELAY_AUTHORIZED_CHANNEL_MINOR ||
+        status.protocolMinor > RELAY_PROTOCOL_MINOR
       ) {
         return "online status requires the supported relay protocol";
       }

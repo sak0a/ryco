@@ -1,6 +1,7 @@
 import * as Crypto from "node:crypto";
 
 import type { EnvironmentId } from "@ryco/contracts";
+import type { WorkspaceNativeTrustState } from "@ryco/client-runtime/state/workspace";
 import {
   HostedRelayEngine,
   makeRelayE2eeInitiator,
@@ -9,7 +10,6 @@ import {
   type RelayE2eeProvider,
   type RelaySocket,
 } from "@ryco/client-runtime/relay";
-import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
 import WebSocket, { type RawData } from "ws";
 
 import type {
@@ -23,7 +23,11 @@ const PREPARED_LIFETIME_MS = 30_000;
 
 export type DesktopWorkspaceTransportEvent =
   | { readonly type: "open"; readonly transportId: string }
-  | { readonly type: "message"; readonly transportId: string; readonly data: Uint8Array }
+  | {
+      readonly type: "message";
+      readonly transportId: string;
+      readonly data: Uint8Array;
+    }
   | { readonly type: "error"; readonly transportId: string }
   | {
       readonly type: "close";
@@ -37,6 +41,7 @@ export interface DesktopWorkspaceRelayTarget {
   readonly nodeId: string;
   readonly environmentId: EnvironmentId;
   readonly relayUrl: string;
+  readonly nativeTrust: WorkspaceNativeTrustState;
 }
 
 export interface DesktopWorkspaceRelayAuthority {
@@ -55,13 +60,19 @@ export interface DesktopWorkspaceRelayAuthority {
   readonly authorizeUpgrade: (
     target: DesktopWorkspaceRelayTarget,
   ) => Promise<Readonly<Record<string, string>>>;
+  readonly onAccountAuthorizationRevoked?: () => void;
+}
+
+interface DesktopWorkspaceRelayConnection {
+  readonly send: (bytes: Uint8Array) => void;
+  readonly close: () => void;
 }
 
 interface PreparedTransport {
   readonly environmentId: EnvironmentId;
   readonly pairingOnly: boolean;
   readonly expiresAt: number;
-  active: DesktopWorkspaceRelaySocket | null;
+  active: DesktopWorkspaceRelayConnection | null;
 }
 
 function opaqueTransportId(): string {
@@ -95,7 +106,7 @@ function nativeAttempt(input: {
     selectionClass: "latched",
     legacyPermitted: false,
     pairingOnly: input.preparation.pairingOnly,
-    localSuitePreference: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
+    localSuitePreference: [input.preparation.suiteId],
     credentials: input.preparation.credentials,
     ...(input.preparation.verifiedPin === undefined
       ? {}
@@ -103,7 +114,9 @@ function nativeAttempt(input: {
     accountId: input.target.accountId,
     ...(input.preparation.acceptedPolicyGeneration === undefined
       ? {}
-      : { acceptedPolicyGeneration: input.preparation.acceptedPolicyGeneration }),
+      : {
+          acceptedPolicyGeneration: input.preparation.acceptedPolicyGeneration,
+        }),
     nativeHandshake: {
       start: (startInput) => input.handshake.start(input.preparation.attemptHandle, startInput),
       finish: (handle, payload) => Promise.resolve(input.handshake.finish(handle, payload)),
@@ -130,7 +143,9 @@ class DesktopWorkspaceRelaySocket {
       readonly close: (code: number, reason: string) => void;
     };
   }) {
-    const socket = new WebSocket(input.target.relayUrl, { headers: input.headers });
+    const socket = new WebSocket(input.target.relayUrl, {
+      headers: input.headers,
+    });
     socket.binaryType = "arraybuffer";
     this.#socket = socket;
     const openListeners: Array<() => void> = [];
@@ -201,21 +216,32 @@ class DesktopWorkspaceRelaySocket {
   }
 }
 
+type DesktopWorkspaceRelaySocketInput = ConstructorParameters<
+  typeof DesktopWorkspaceRelaySocket
+>[0];
+type DesktopWorkspaceRelaySocketFactory = (
+  input: DesktopWorkspaceRelaySocketInput,
+) => DesktopWorkspaceRelayConnection;
+
 /** Main-process owner for authenticated, E2EE relay sockets addressed by opaque handles. */
 export class DesktopWorkspaceRelayManager {
   readonly #authority: DesktopWorkspaceRelayAuthority;
   readonly #emit: (event: DesktopWorkspaceTransportEvent) => void;
   readonly #now: () => number;
+  readonly #socketFactory: DesktopWorkspaceRelaySocketFactory;
   readonly #transports = new Map<string, PreparedTransport>();
 
   constructor(input: {
     readonly authority: DesktopWorkspaceRelayAuthority;
     readonly emit: (event: DesktopWorkspaceTransportEvent) => void;
     readonly now?: () => number;
+    readonly socketFactory?: DesktopWorkspaceRelaySocketFactory;
   }) {
     this.#authority = input.authority;
     this.#emit = input.emit;
     this.#now = input.now ?? Date.now;
+    this.#socketFactory =
+      input.socketFactory ?? ((socketInput) => new DesktopWorkspaceRelaySocket(socketInput));
   }
 
   prepare(environmentId: EnvironmentId): string {
@@ -247,6 +273,10 @@ export class DesktopWorkspaceRelayManager {
     if (!prepared || prepared.active !== null || prepared.expiresAt <= this.#now()) {
       throw new Error("Desktop workspace transport is unavailable.");
     }
+    let preparation: Extract<DesktopNativeE2eePreparation, { readonly kind: "native" }> | undefined;
+    let handshake: DesktopNativeE2eeHandshakeService | undefined;
+    let failureCode = 4401;
+    let failureReason = "Relay unavailable";
     try {
       const target = await this.#authority.resolveTarget(
         prepared.environmentId,
@@ -255,36 +285,60 @@ export class DesktopWorkspaceRelayManager {
       if (!target || target.environmentId !== prepared.environmentId) {
         throw new Error("Desktop workspace target is unavailable.");
       }
-      const [preparation, ticket, headers, handshake] = await Promise.all([
+      const [resolvedPreparation, ticket, headers, resolvedHandshake] = await Promise.all([
         this.#authority.prepareE2ee(target, prepared.pairingOnly),
-        this.#authority.issueTicket(target),
+        target.nativeTrust === "account-trusted" && !prepared.pairingOnly
+          ? Promise.resolve(null)
+          : this.#authority.issueTicket(target),
         this.#authority.authorizeUpgrade(target),
         this.#authority.handshake(),
       ]);
-      if (preparation.kind !== "native") {
+      if (resolvedPreparation.kind !== "native") {
+        if (resolvedPreparation.kind === "update-required") {
+          failureCode = 4406;
+          failureReason = "Update required";
+        }
         throw new Error("Desktop workspace target is not natively verified.");
       }
+      preparation = resolvedPreparation;
+      handshake = resolvedHandshake;
       if (preparation.pairingOnly !== prepared.pairingOnly) {
         throw new Error("Desktop workspace target verification state changed.");
       }
+      const relayTicket = preparation.relayTicket ?? ticket;
+      if (
+        relayTicket === null ||
+        (target.nativeTrust === "account-trusted" && !prepared.pairingOnly) !==
+          (preparation.relayTicket !== undefined)
+      ) {
+        throw new Error("Desktop workspace target trust state changed.");
+      }
       const attempt = nativeAttempt({ target, preparation, handshake });
-      const active = new DesktopWorkspaceRelaySocket({
+      const active = this.#socketFactory({
         target,
-        ticket: ticket.ticket,
-        ticketExpiresAt: ticket.expiresAt,
+        ticket: relayTicket.ticket,
+        ticketExpiresAt: relayTicket.expiresAt,
         headers,
         e2ee: (host) => makeRelayE2eeInitiator({ host, attempt }),
         callbacks: {
           onTransportStatus: () => undefined,
           onSessionStatus: () => undefined,
           onRole: () => undefined,
-          onFailure: () => undefined,
+          onFailure: (failure) => {
+            if (failure.kind === "revoked" && target.nativeTrust === "account-trusted") {
+              globalThis.queueMicrotask(() => {
+                this.#authority.onAccountAuthorizationRevoked?.();
+                this.dispose();
+              });
+            }
+          },
         },
         events: {
           open: () => this.#emit({ type: "open", transportId }),
           message: (data) => this.#emit({ type: "message", transportId, data }),
           error: () => this.#emit({ type: "error", transportId }),
           close: (code, reason) => {
+            handshake?.destroy(preparation!.attemptHandle);
             this.#transports.delete(transportId);
             this.#emit({ type: "close", transportId, code, reason });
           },
@@ -292,9 +346,15 @@ export class DesktopWorkspaceRelayManager {
       });
       prepared.active = active;
     } catch {
+      if (preparation && handshake) handshake.destroy(preparation.attemptHandle);
       this.#transports.delete(transportId);
       this.#emit({ type: "error", transportId });
-      this.#emit({ type: "close", transportId, code: 4401, reason: "Relay unavailable" });
+      this.#emit({
+        type: "close",
+        transportId,
+        code: failureCode,
+        reason: failureReason,
+      });
       throw new Error("Desktop workspace relay activation failed.");
     }
   }

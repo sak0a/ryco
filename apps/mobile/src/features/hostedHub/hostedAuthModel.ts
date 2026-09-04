@@ -11,6 +11,7 @@ import {
   type HostedConnectionStatusText,
   type HostedE2eeChannelStatus,
   type HostedHubState,
+  type HostedNativeDeviceSecurityStatus,
   type HostedRpcCapability,
 } from "@ryco/client-runtime/authorization";
 
@@ -183,6 +184,7 @@ export interface HostedSignInViewInput {
    * error.
    */
   readonly e2eeStatus: HostedE2eeChannelStatus;
+  readonly nativeDeviceSecurityStatus?: HostedNativeDeviceSecurityStatus;
   /** The direct-plane escape hatch offered whenever hosted mode cannot run. */
   readonly onPairDevice: () => void;
   /** Dismiss the sheet once the hosted session is established. */
@@ -194,6 +196,7 @@ export interface HostedAccountViewInput {
   readonly hostedModeAvailable: boolean;
   /** §4.4's locked mode, for the same reason {@link HostedSignInViewInput} takes it. */
   readonly e2eeStatus: HostedE2eeChannelStatus;
+  readonly nativeDeviceSecurityStatus?: HostedNativeDeviceSecurityStatus;
   /** Open the sign-in sheet (the `Onboarding` route). */
   readonly onSignIn: () => void;
   /**
@@ -254,6 +257,7 @@ export function deriveHostedProviderSignInActions(
 function statusOf(
   state: HostedHubState,
   e2eeStatus: HostedE2eeChannelStatus,
+  nativeDeviceSecurityStatus?: HostedNativeDeviceSecurityStatus,
 ): {
   readonly text: HostedConnectionStatusText;
   readonly indicator: HostedConnectionStatusIndicator;
@@ -264,6 +268,7 @@ function statusOf(
     selectionStatus: state.selectionStatus,
     transportStatus: state.transportStatus,
     e2eeStatus,
+    nativeDeviceSecurityStatus,
   };
   return {
     text: deriveHostedConnectionStatusText(input),
@@ -316,6 +321,7 @@ function hostedClaimTone(
         textClassName: "text-warning",
       };
     case "web":
+    case "account":
       // §2.2's *Web, unsigned ephemeral* row and §2.4's web ceiling: a usable,
       // encrypted channel whose code the Hub serves, so it is neither the
       // fallback amber marks nor the row the success token means. It gets the
@@ -495,7 +501,7 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
         ),
       };
     case "authenticated": {
-      const status = statusOf(state, input.e2eeStatus);
+      const status = statusOf(state, input.e2eeStatus, input.nativeDeviceSecurityStatus);
       return {
         ...base,
         title: "Connected to your Hub",
@@ -618,7 +624,7 @@ export function deriveHostedAccountView(input: HostedAccountViewInput): HostedAc
     };
   }
 
-  const status = statusOf(state, input.e2eeStatus);
+  const status = statusOf(state, input.e2eeStatus, input.nativeDeviceSecurityStatus);
   return {
     ...base,
     signedIn: true,

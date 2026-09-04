@@ -4,11 +4,16 @@
   review with no blocking finding and has merged; its wire formats, constants, and registries
   bind every implementation. A change to any of them is a protocol change: it requires its own
   review, and it may not be made to accommodate an implementation difficulty. Implementations
-  track the merged revision.
+  track the merged revision. The §18 account-enrolled extension is implemented and covered by its
+  normative amendment and generated corpus, but broad admission/default rollout remains gated by
+  independent review, physical-device qualification, and live staged-rollout evidence.
 - **Protocol version**: 1 (`E2EE_PROTOCOL_VERSION`, §3).
-- **Layers inside**: [Ryco relay protocol 1.2](./relay-protocol.md) `data.payload`.
+- **Layers inside**: [Ryco relay protocol 1.2/1.3](./relay-protocol.md) `data.payload`.
 - **Companion documents**: [relay protocol](./relay-protocol.md),
-  [node identity primitives](./node-identity.md), [hosted Hub client](./hosted-hub-client.md).
+  [node identity primitives](./node-identity.md), [hosted Hub client](./hosted-hub-client.md),
+  [browser vectors](./relay-e2ee-web-browser-vectors.md),
+  [third-party audit scope](./relay-e2ee-noise-audit-scope.md), and
+  [rollout readiness](./relay-e2ee-rollout-readiness.md).
 
 ## 1. Status and scope
 
@@ -25,14 +30,17 @@ The E2EE layer lives entirely inside the relay `data.payload` byte string, benea
 schema and above the application RPC JSON. The relay protocol reserves exactly this evolution:
 "Keeping the payload schema opaque allows later application-level end-to-end encryption without
 changing relay routing" ([relay-protocol.md](./relay-protocol.md), Opaque data boundary).
-Accordingly, this protocol:
+Accordingly, the original locally approved IK and unsigned Web NX modes remain ordinary relay
+protocol 1.2 channels and require no relay data-plane change. The account-enrolled native extension
+of §18 negotiates relay protocol 1.3 because its authorization is bound to public ticket and
+grant digests carried by `channel.open`, and because nodes publish acknowledged capability statements
+and consume Hub verifier-key and revocation control frames. Those protocol-1.3 additions remain
+control-plane metadata: the relay still forwards `data.payload` without parsing it and never receives
+Noise keys or plaintext.
 
-- adds **no** relay frame type, close reason, limit, capability literal, or protocol version
-  change — an E2EE channel is an ordinary relay protocol 1.2 channel;
-- leaves the relay contract fixture corpus (`packages/contracts/fixtures/relay/v1`) untouched;
-  E2EE test vectors live in their own directory (§16);
-- requires **no** relay data-plane change: a conforming relay already forwards `data.payload`
-  without parsing it, so ciphertext payloads traverse the relay unchanged.
+E2EE vectors remain separate from the relay contract fixture corpus in
+`packages/shared/fixtures/e2ee/v1`. Relay 1.2 behavior and suite `0x01` bytes are compatibility
+fixtures and MUST NOT change when §18 is implemented.
 
 The reference implementation home is `packages/shared`, beside
 `packages/shared/src/relayMessageChunks.ts`, whose message-chunking pipeline this protocol slots
@@ -48,11 +56,15 @@ into (§4). `relay-protocol.md` references this document.
 - **Node** — the execution endpoint holding the durable Ed25519 node identity key.
 - **Signed native tier** — a native mobile client holding a hardware-backed device identity key;
   uses the Noise IK pattern (§3.4).
+- **Locally verified native authorization** — suite `0x01` IK admitted through Local Trusted
+  Introduction or a durable approved-client record (§13.6).
+- **Account-enrolled native authorization** — suite `0x02` IK admitted through a short-lived,
+  ticket-bound Hub grant (§18). It is encrypted and mutually key-authenticated, but the Hub
+  remains its authorization root.
 - **Unsigned web tier** — the hosted web client; ephemeral, no durable client identity; uses the
   Noise NX pattern (§3.4).
 - **Legacy** — a peer or channel operating the pre-E2EE plaintext RPC protocol.
-- **Effective `requireE2EE`** — true when either node admission policy `requireE2EE` or
-  `requireApprovedClientE2EE` is true (§12).
+- **Effective `requireE2EE`** — true for every policy mode except `compatibility` (§18.8).
 
 RFC 2119/8174 requirement language applies as declared in §3.1.
 
@@ -66,10 +78,12 @@ The following are explicitly not provided by protocol version 1:
 - **Encrypted history mirroring.** Later work with its own specification.
 - **Multi-party or group channels.** Relay channels remain 1:1 client-to-node per ticket.
 - **Post-quantum or hybrid suites.** The envelope carries a suite identifier so these can be
-  added later; multi-suite negotiation requires its own reviewed handshake revision (§8).
+  added later; adding different cryptographic primitives still requires its own reviewed handshake
+  revision (§8). Suite `0x02` changes authorization inputs, not primitives.
 - **Key escrow or recovery of session history.** Version 1 encrypts transport, not storage.
-  Losing a device means re-pairing: no mechanism restores its keys, pins, or accumulated trust
-  state, and §13.1.1 governs what such a device may do until the owner re-pairs.
+  Losing a device destroys its keys, pins, and accumulated local trust. A Hub login may enroll the
+  replacement as a new account-trusted device under §18, but never restores or silently
+  recreates locally verified trust.
 - **Hardware-bound agreement keys.** The suite field keeps the migration path open (§6).
 - **Post-compromise recovery within an open channel.** Epoch rekeying is a one-way symmetric
   ratchet, not a fresh DH; compromise of live session state can expose later epochs until the
@@ -90,8 +104,9 @@ weaker configuration.
 The Hub authenticates both relay connections, mints the single-use tickets, and authors
 `channel.open` including its `capability` and `effectiveRole` fields. Node ids and channel ids
 are Hub-minted identifiers. Nothing in the relay protocol lets a node distinguish a genuine
-client from a session the Hub originated itself; that gap is exactly what the signed native tier
-plus node-side client authorization (§13) closes. Relay ordering and size checks are enforced by
+client from a session the Hub originated itself; only the locally verified signed-native tier plus
+node-side client authorization (§13) closes that gap. The account-enrolled tier deliberately keeps
+the Hub as authorization root (§18). Relay ordering and size checks are enforced by
 the Hub, which E2EE treats as untrusted: the E2EE layer therefore provides its own replay,
 reorder, and gap detection (§9) and authenticates nominally orderly termination (§10).
 
@@ -106,6 +121,7 @@ authoritative wherever this table is summarised in user-facing text**.
 | Legacy plaintext                                                              | —       | **Not protected** — operator policy only      | **Not protected**                                | **Not protected** — the plaintext flow has no client identity proof                                                        |
 | Web, unsigned ephemeral                                                       | NX      | Protected while the served web code is honest | Protected while the served web code is honest    | **Not protected** — the Hub can originate an unsigned NX session and controls the served code                              |
 | Native signed, not yet mutually verified                                      | IK      | Protected                                     | Protected (except IK message-1 metadata — §8.10) | **Not protected** — restricted to the pairing ceremony (§13); no application payload is released under an active-Hub claim |
+| Native signed, account-enrolled                                               | IK      | Protected                                     | Protected (except IK message-1 metadata — §8.10) | **Not protected** — the Hub is the explicit authorization root and may enroll or substitute keys (§18)                     |
 | Native signed, mutually verified (verified node pin + approved client record) | IK      | Protected                                     | Protected (except IK message-1 metadata — §8.10) | **Protected for this channel**                                                                                             |
 
 - **Passive read**: a Hub or proxy that records, inspects, or leaks traffic sees only ciphertext
@@ -141,24 +157,25 @@ authoritative wherever this table is summarised in user-facing text**.
 
 ### 2.3 Node admission policies
 
-| Policy state                                                                   | Effect                                                                                                                                                                | Whole-node active-Hub protection                                        |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `requireE2EE=false`, `requireApprovedClientE2EE=false` (compatibility default) | Legacy plaintext admitted; every legacy acceptance by an E2EE-capable node is counted (§12) — as a lower bound the Hub can inflate but never suppress (§12.5, §17.15) | No                                                                      |
-| `requireE2EE=true`                                                             | Plaintext rejected; unsigned web NX still admitted                                                                                                                    | **No** — a malicious Hub can still originate an unsigned web NX session |
-| `requireApprovedClientE2EE=true`                                               | Implies effective `requireE2EE=true`; admits only approved signed native IK clients; disables web and legacy access                                                   | **Yes** — the only whole-node policy                                    |
+| Policy mode                            | Legacy | Web NX | Account-grant IK | Locally approved IK | Whole-node active-Hub protection |
+| -------------------------------------- | ------ | ------ | ---------------- | ------------------- | -------------------------------- |
+| `compatibility`                        | yes    | yes    | yes              | yes                 | no                               |
+| `require-e2ee`                         | no     | yes    | yes              | yes                 | no                               |
+| `require-native-e2ee`                  | no     | no     | yes              | yes                 | no                               |
+| `require-locally-approved-native-e2ee` | no     | no     | no               | yes                 | **yes**                          |
 
-`requireE2EE` closes the plaintext downgrade path but does not create a whole-node active-Hub
-guarantee. Only `requireApprovedClientE2EE` does, and it intentionally disables web and legacy
-access (§12).
+`require-e2ee` closes only plaintext downgrade. `require-native-e2ee` additionally excludes Web,
+but a malicious Hub can still enroll and authorize a native device. Only
+`require-locally-approved-native-e2ee` removes every Hub-originatable admission path. Section 18.8
+defines the durable enum, migration from the two legacy booleans, and live-channel withdrawal rules.
 
-**The rows above describe the node's live channels, not only its future ones.** Narrowing a
-policy is the **policy withdrawal** of §12.6: the node durably commits the change, then closes
-every channel the new policy would no longer admit — every `legacy` channel when effective
-`requireE2EE` becomes true, and additionally every unsigned NX channel when
-`requireApprovedClientE2EE` becomes true — and only then acknowledges the operator command. Without
-that sweep each row would be true only of channels opened after the flip, because §15 arms no
-per-channel idle deadline in `legacy` or in established `e2ee` and a channel therefore persists
-for as long as its peer keeps it.
+**The rows above describe the node's live channels, not only its future ones.** Narrowing a policy
+is the **policy withdrawal** of §12.6 and §18.8: the node durably commits the change, then closes
+every channel the new mode would no longer admit — legacy, then unsigned NX, then account-grant IK
+as the mode moves right — and only then acknowledges the operator command. Without that sweep each
+row would be true only of channels opened after the flip, because §15 arms no per-channel idle
+deadline in `legacy` or in established `e2ee` and a channel therefore persists for as long as its
+peer keeps it.
 
 Downgrade resistance is tiered, and the two tiers deliver materially different things. Neither
 may be described in the other's terms.
@@ -709,10 +726,11 @@ Negotiation record types:
 Suite registry (protocol version 1). The tier selects the pattern; the client selects the suite;
 the server may only accept or reject the client's selection (§8):
 
-| Suite id   | Signed native tier (IK)            | Unsigned web tier (NX)             | Definition                                                                                                        |
-| ---------- | ---------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `0x01`     | `Noise_IK_25519_ChaChaPoly_SHA256` | `Noise_NX_25519_ChaChaPoly_SHA256` | Noise Protocol Framework revision `NOISE_SPEC_REVISION`; X25519 (RFC 7748), ChaCha20-Poly1305 (RFC 8439), SHA-256 |
-| all others | reserved                           | reserved                           | Reject                                                                                                            |
+| Suite id   | Locally verified native tier (IK)  | Account-enrolled native tier (IK)  | Unsigned web tier (NX)             | Definition                                                                                                        |
+| ---------- | ---------------------------------- | ---------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `0x01`     | `Noise_IK_25519_ChaChaPoly_SHA256` | forbidden                          | `Noise_NX_25519_ChaChaPoly_SHA256` | Noise Protocol Framework revision `NOISE_SPEC_REVISION`; X25519 (RFC 7748), ChaCha20-Poly1305 (RFC 8439), SHA-256 |
+| `0x02`     | forbidden                          | `Noise_IK_25519_ChaChaPoly_SHA256` | forbidden                          | Same primitives; distinct grant payload and authorization context (§18)                                           |
+| all others | reserved                           | reserved                           | reserved                           | Ignore while intersecting an advertisement; reject if selected                                                    |
 
 Direction labels (ASCII, `E2EE_DIRECTION_LABEL_BYTES` bytes):
 
@@ -2387,10 +2405,13 @@ Preconditions:
 
 ### 8.2 Client-selected suite
 
-The client verifies the signed ordered `suiteRegistry` (§7.6), intersects it with its local
-suite policy, and deterministically selects a suite: it takes its own fixed local preference
-order and selects the first entry that appears in the advertised registry. Protocol version 1
-registries and clients support exactly the single §3.4 suite, so the selection is that suite.
+The client verifies the signed ordered `suiteRegistry` (§7.6), intersects it with its local suite
+and trust-source policy, and deterministically selects a suite: it takes its own fixed local
+preference order and selects the first eligible entry that appears in the advertised registry.
+Unknown advertised identifiers are ignored during intersection. Suite `0x01` is eligible for Web
+NX or locally verified native IK; suite `0x02` is eligible only for account-enrolled native IK under
+§18.1. Trust-source eligibility is evaluated before numeric preference, so a valid local pin always
+selects `0x01`.
 An empty intersection means the client MUST NOT send a hello (evidence is unusable; rows K2/K3
 apply as for invalid evidence, and §11.2 P15 when the channel's selection is latched). It has two
 analogues with the identical disposition: §5.2 step 8, which disposes of a protocol range
@@ -2531,8 +2552,9 @@ Both sides construct the identical Noise prologue, the canonical-CBOR array:
 ```
 
 The responder takes `contextCommitment` from the hello wrapper (§8.5); every other prologue
-element comes from its own channel state. In version 1 `e2eeVersion` and `suiteId` are fixed by
-`E2EE_PROTOCOL_VERSION` and by the single §3.4 suite, and are established by the §8.6 step 2
+element comes from its own channel state. In version 1 `e2eeVersion` is fixed by
+`E2EE_PROTOCOL_VERSION`; `suiteId` is selected from §3.4 under §8.2. Both are established by the
+§8.6 step 2
 registry check rather than adopted from the wrapper. The only **other** wrapper field consumed
 before Noise processing begins is `tier`, which selects the pattern (§8.1, §8.6 step 4);
 `e2eeVersion`, `selectedSuite`, and `offeredSuites` are validated against the responder's own
@@ -4964,6 +4986,16 @@ lineage; adopting any version whose changes are covered only by self-audit is a
 protocol-relevant decision that REQUIRES explicit recorded owner acceptance in a revision of
 this section — it MUST NOT happen as an incidental dependency bump.
 
+**Recorded owner acceptance, 2026-09-04.** The runtime pins all three packages at exactly `2.3.0`
+with lockfile integrity digests; the protocol constants retain `2.2.0` as the April 2026
+maintainer-self-audit baseline. The accepted delta is `2.2.0…2.3.0` over Ryco's production import
+closure: curves `ed25519.js`/`nist.js` and their abstract dependencies, ciphers
+`chacha.js`/`utils.js`, and hashes `sha2.js`/`hmac.js`/`hkdf.js`/`utils.js`. The owner accepted that
+delta after the byte-exact, differential, adversarial, Chromium, mobile/Hermes, build, and full
+repository gates passed. This is an explicit dependency-risk acceptance, not an independent audit
+of Noble 2.x, Ryco's first-party Noise state machine, or the §18 composition. Those independent
+review gates remain open and are tracked in the rollout-readiness document.
+
 ### 14.3 Mandated primitive behavior
 
 - **Ed25519 verification MUST be strict RFC 8032**: in `@noble/curves` terms, every
@@ -5742,11 +5774,34 @@ class, the §11 tables define it.
     channel set, so a channel missed by one of the two enumerations is visible as a count and not
     only as a surviving channel.
 
+- **F19 — Account-enrolled native authorization** (§18): one generated family containing:
+  - exact grant claims, signing input, signature, envelope, envelope digest, certificate carrier and
+    digest, suite-`0x02` context block/commitment, hello, both Noise messages, confirmation,
+    `sessionBindingHash`, and both directional epoch-zero secrets for a valid deterministic trace;
+  - minimum and maximum conforming fields, the exact 2,048-byte envelope boundary, the 3,610-byte
+    worst-case hello construction, and one-byte-over rejection before CBOR or signature work;
+  - malformed and non-canonical arrays, wrong element counts/types, excess fields, invalid identifier
+    and collection bounds, duplicate capabilities and key ids, unsupported versions/suites, unknown or
+    retired signing keys, non-canonical Ed25519 signatures, and cross-domain signature substitution;
+  - every binding changed one at a time: origin, account/device epoch, enrollment/revision, both device
+    keys and fingerprints, certificate digest, node id/keys/fingerprints/continuity/policy generation,
+    statement digest, ticket id, role, capabilities, nonce, and each time bound;
+  - suite confusion (`0x01` plus grant, `0x02` without grant, Web plus `0x02`), relay minor 2, partial
+    `channel.open` context, stale connector generation, unacknowledged statement, missing retained
+    prekey, replay on another channel/ticket, expiry, key rotation overlap, and revocation during an
+    in-flight and established channel;
+  - the four policy modes, verified-pin/local-denial precedence, exact authority intersection, and proof
+    that successful account admission performs no durable approved-client write; and
+  - Web-only negative cases proving `[0x02,0x01]` selects NX suite `0x01`, `0x02` alone emits no hello,
+    browser tickets stay grant-free, mixed responses fail, and grant canaries reach no decoder, state,
+    DOM, service-worker cache, or relay send.
+
 ### 16.4 Cross-runtime equality
 
 Every family runs under the repository's Node test gate. Families exercising web-facing
 surfaces — F1, F2, F7, F8, F10, the admitted-pattern cases of F3, the `WebSAS` half of F14, the NX
-cases of F16, and the P-256 cases of F17 — MUST also run in the web browser test suite. Before the native client ships E2EE
+cases of F16, the P-256 cases of F17, and F19's Web-isolation cases — MUST also run in the web
+browser test suite. Before the native client ships E2EE
 support, the complete corpus MUST additionally pass on physical devices on both mobile
 platforms; until then the Node run uses RN-realistic crypto adapters (§14.5), and the
 physical-device check is an explicit acceptance
@@ -6159,6 +6214,305 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     unreachable against any conforming version-1 node — element 14 always contains `"IK"` — so this
     item, like item 19, is mostly a forward-looking bound on the first revision that ships a new
     tier or pattern, and §7.6's element-14 closure names the two places such a revision changes.
+
+## 18. Account-enrolled native authorization
+
+This section is normative. It adds a login-authorized native IK mode without changing any suite
+`0x01` byte, durable local approval, Web NX behavior, or record-layer rule. Where an older sentence
+in §§1–17 says protocol version 1 has only one suite or every IK authorization uses a Branch A
+record, this section is the additive exception.
+
+### 18.1 Compatibility and trust source
+
+Suite `0x02` is `Noise_IK_25519_ChaChaPoly_SHA256` with the account-grant payload and context below.
+It is valid only for the native tier and only on a relay protocol 1.3 channel whose
+`channel.open` carries the matching public ticket and grant digests. Suite `0x01` remains the only
+suite for locally approved native IK and Web NX. Web clients MUST exclude `0x02` before suite
+selection and MUST NOT decode, store, or forward a Hub device grant.
+
+Capability statements continue carrying an array of unsigned suite identifiers. A client ignores
+unknown identifiers while intersecting that array with its local registry; it does not reject an
+otherwise valid statement merely because a future suite is present. This rule is what lets an old
+client select `0x01` from `[0x02, 0x01]`. A node still rejects any selected identifier it does not
+implement.
+
+Native selection is trust-aware, not merely numeric preference:
+
+1. Local Trusted Introduction or a matching approved/verified pin selects `0x01`.
+2. Otherwise, a current native enrollment and matching grant selects `0x02`.
+3. Otherwise, no native hello is emitted automatically. Manual verification is an explicit recovery
+   path; plaintext is not.
+
+An established channel records exactly one public trust source: `locally-verified`,
+`account-enrolled`, or `web-unsigned`. `account-enrolled` MUST NOT create, modify, promote, or repair
+a §13.6 client record or a §13.1 verified node pin. A conflicting local denial, revocation, or
+verified pin is fatal and outranks the grant.
+
+### 18.2 Constants and bounds
+
+The following constants extend §3.2:
+
+| Name                                     | Value      | Meaning                                                   |
+| ---------------------------------------- | ---------- | --------------------------------------------------------- |
+| `E2EE_HUB_DEVICE_GRANT_MAX_BYTES`        | 2,048      | Maximum complete signed grant envelope                    |
+| `E2EE_HUB_DEVICE_GRANT_B64URL_MAX_CHARS` | 2,731      | Maximum unpadded base64url encoding of that envelope      |
+| `E2EE_HUB_DEVICE_GRANT_NONCE_BYTES`      | 32         | Grant nonce length                                        |
+| `E2EE_HUB_DEVICE_GRANT_VALIDITY`         | 120,000 ms | Maximum `expiresAt - issuedAt`                            |
+| `E2EE_HUB_DEVICE_GRANT_CLOCK_SKEW`       | 30,000 ms  | Allowed early-arrival skew; expiry itself is not extended |
+| `E2EE_HUB_DEVICE_GRANT_KEYSET_MAX_KEYS`  | 4          | Maximum simultaneous current/overlap verification keys    |
+| `E2EE_HUB_DEVICE_GRANT_ID_MAX_BYTES`     | 47         | `hgr_` plus a 22–43 character base64url body              |
+| `E2EE_HUB_GRANT_KEY_ID_MAX_BYTES`        | 47         | `hgk_` plus a 22–43 character base64url body              |
+| `E2EE_NATIVE_ENROLLMENT_ID_MAX_BYTES`    | 47         | `enr_` plus a 22–43 character base64url body              |
+| `E2EE_RELAY_TICKET_ID_MAX_BYTES`         | 47         | `rtk_` plus a 22–43 character base64url body              |
+| `E2EE_ACCOUNT_GRANT_CAPABILITIES_MAX`    | 32         | Maximum distinct ordered relay capability literals        |
+| `E2EE_ACCOUNT_GRANT_SUITE`               | `0x02`     | Registry identifier from §3.4                             |
+
+Identifiers use the exact prefix shown and the ASCII regex `[A-Za-z0-9_-]` for their body. Epochs,
+revisions, and keyset generations are integers in `0…2^32-1`; an enrollment revision is at least
+one. Timestamps are non-negative epoch milliseconds no greater than `Number.MAX_SAFE_INTEGER`.
+Roles and capabilities come only from the relay contract's closed vocabularies. Capability arrays
+are nonempty, contain no duplicates, and use relay-contract order. All public-key, signature,
+fingerprint, and digest widths remain those of §3.2 and §7.1.
+
+Every bound is checked before signature or DH work. The complete envelope is rejected before CBOR
+decode when it exceeds `E2EE_HUB_DEVICE_GRANT_MAX_BYTES`.
+
+### 18.3 `HubDeviceGrant`
+
+`encodeHubDeviceGrantClaims` emits a canonical-CBOR array of exactly 35 elements:
+
+| #   | Field                           | Type          | Constraint                                               |
+| --- | ------------------------------- | ------------- | -------------------------------------------------------- |
+| 0   | domain                          | text          | `"ryco.hub-device-grant-claims.v1"`                      |
+| 1   | version                         | uint          | `1`                                                      |
+| 2   | suiteId                         | uint          | `E2EE_ACCOUNT_GRANT_SUITE`                               |
+| 3   | `issuerHubOrigin`               | text          | Canonical origin, bounded by `E2EE_HUB_ORIGIN_MAX_BYTES` |
+| 4   | `keyId`                         | text          | Hub grant-verification key identifier                    |
+| 5   | `grantId`                       | text          | Unique grant identifier                                  |
+| 6   | `accountId`                     | text          | Nonempty; bounded by `E2EE_ACCOUNT_ID_MAX_BYTES`         |
+| 7   | `accountAuthEpoch`              | uint          | Current account authorization epoch                      |
+| 8   | `enrollmentId`                  | text          | Native installation enrollment identifier                |
+| 9   | `enrollmentRevision`            | uint          | Current revision, at least one                           |
+| 10  | `deviceAuthEpoch`               | uint          | Current device authorization epoch                       |
+| 11  | `deviceIdentityAlgorithm`       | text          | `"p256"`                                                 |
+| 12  | `deviceIdentityPublicKey`       | bytes         | `P256_PUBLIC_KEY_BYTES`; point-validated                 |
+| 13  | `deviceIdentityFingerprint`     | bytes         | Recomputed `ryco.client-key.v1` fingerprint              |
+| 14  | `deviceAgreementAlgorithm`      | text          | `"x25519"`                                               |
+| 15  | `deviceAgreementPublicKey`      | bytes         | `E2EE_AGREEMENT_PUBLIC_KEY_BYTES`; validated             |
+| 16  | `deviceAgreementFingerprint`    | bytes         | Recomputed `ryco.e2ee-agreement-key.v1` fingerprint      |
+| 17  | `clientPrekeyCertificateDigest` | bytes         | SHA-256 of the exact §18.4 certificate carrier           |
+| 18  | `nodeId`                        | text          | Relay node-id format                                     |
+| 19  | `nodeIdentityAlgorithm`         | text          | `"ed25519"`                                              |
+| 20  | `nodeIdentityPublicKey`         | bytes         | `ED25519_PUBLIC_KEY_BYTES`; strictly validated           |
+| 21  | `nodeIdentityFingerprint`       | bytes         | Recomputed `ryco.node-key.v1` fingerprint                |
+| 22  | `nodeAgreementAlgorithm`        | text          | `"x25519"`                                               |
+| 23  | `nodeAgreementPublicKey`        | bytes         | Exact agreement key in the named capability statement    |
+| 24  | `nodeAgreementFingerprint`      | bytes         | Recomputed `ryco.e2ee-agreement-key.v1` fingerprint      |
+| 25  | `nodeContinuityId`              | text          | §7.1 continuity-id format                                |
+| 26  | `nodePolicyGeneration`          | uint          | Exact generation in the named capability statement       |
+| 27  | `nodeCapabilityStatementDigest` | bytes         | SHA-256 of the exact signed capability-statement bytes   |
+| 28  | `relayTicketId`                 | text          | Public identifier of the single-use relay ticket         |
+| 29  | `maximumRole`                   | text          | Closed relay-role ceiling                                |
+| 30  | `capabilities`                  | array of text | Nonempty, distinct, ordered, and bounded                 |
+| 31  | `issuedAt`                      | uint          | Epoch milliseconds                                       |
+| 32  | `notBefore`                     | uint          | Epoch milliseconds; `notBefore ≤ issuedAt ≤ expiresAt`   |
+| 33  | `expiresAt`                     | uint          | Earliest lifetime bound described below                  |
+| 34  | `nonce`                         | bytes         | `E2EE_HUB_DEVICE_GRANT_NONCE_BYTES` fresh CSPRNG bytes   |
+
+The signed envelope is the canonical-CBOR array
+`[ bstr(exact claims bytes), bstr(Ed25519 signature) ]`. The signature input is not the claims and
+not a bare digest. Both signer and verifier construct the fixed-size canonical-CBOR array:
+
+```text
+[ "ryco.hub-device-grant.v1", bstr(SHA-256(exact claims bytes)) ]
+```
+
+The verifier first enforces envelope and claims bounds, strict-decodes both arrays with §3.6
+re-encode equality, reads `keyId` only to select one entry from an authenticated immutable keyset,
+reconstructs the signing input, and performs strict RFC 8032 verification. A carried digest or
+fingerprint is never accepted on the carrier's authority. The grant digest used elsewhere is
+`SHA-256(exact signed envelope bytes)`.
+
+HTTP/JSON contracts carry the complete envelope as canonical unpadded base64url: URL-safe alphabet
+only, no whitespace or `=`, at most `E2EE_HUB_DEVICE_GRANT_B64URL_MAX_CHARS`, and decode followed by
+byte-for-byte re-encode equality. The encrypted Noise payload carries the decoded envelope bytes.
+
+`expiresAt` MUST equal or precede the relay ticket expiry, `issuedAt +
+E2EE_HUB_DEVICE_GRANT_VALIDITY`, the client prekey certificate expiry, and the node capability
+statement and agreement-prekey expiry. A verifier permits at most
+`E2EE_HUB_DEVICE_GRANT_CLOCK_SKEW` before `notBefore`, never after `expiresAt`, and never extends a
+relay ticket's own validity. The Hub key selected by `keyId` must be valid for the entire grant
+interval. Unknown, duplicate, not-yet-valid, retired, or out-of-overlap keys fail closed.
+
+### 18.4 Client certificate carrier
+
+The exact client certificate carrier is canonical CBOR:
+
+```text
+[ bstr(exact §7.4 clientPrekeyTranscript), bstr(P-256 signature) ]
+```
+
+It is bounded by `E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES + 70`, strict-decoded, and re-encoded
+before use. Its digest is SHA-256 of the complete carrier, not of the transcript alone. The grant's
+device identity/agreement keys and fingerprints, account namespace, and certificate digest MUST all
+match the validated carrier. The Noise-received client static key MUST equal its agreement key.
+
+### 18.5 Relay protocol 1.3 authorization context
+
+Relay minor 3 adds the following bounded control-plane structures; it changes no data-frame format:
+
+- `node.e2ee.statement` carries a connector generation, exact signed capability-statement bytes,
+  their SHA-256 digest, and their expiry. A node publishes after `ready` and after every identity,
+  prekey, continuity, suite, policy, expiry, or connector-generation change.
+- `node.e2ee.statement.ack` carries the same connector generation and digest. Only an exact current
+  acknowledgement enables account-grant admission.
+- `e2ee.verifier-keys` carries a monotonically increasing keyset generation and at most
+  `E2EE_HUB_DEVICE_GRANT_KEYSET_MAX_KEYS` entries of
+  `[ keyId, Ed25519 public key, notBefore, notAfter ]`. Nodes and native clients receive it only on
+  their authenticated Hub control path; a ticket-carried key is never a trust source.
+- `e2ee.enrollment-revoked` carries enrollment id/revision plus the new account and device epochs.
+  A stale epoch is ignored; a newer matching event aborts handshakes and closes leases.
+- An account-grant `channel.open` carries `accountGrantContext =
+[ 0x02, relayTicketId, bstr(deviceGrantDigest), bstr(nodeCapabilityStatementDigest) ]` in addition
+  to minor-2 capability and role. All four members are required together on minor 3 and forbidden on
+  minors 0–2. Local suite-`0x01` and Web channels omit it.
+
+The Hub returns the same ticket id, grant envelope/digest, node statement/digest, keyset generation,
+capability, and effective role to the native ticket requester over authenticated HTTPS. This adds no
+per-node request. The grant itself is never present in relay control frames.
+
+Connector generations own statement acknowledgements, keysets, revocation subscriptions, and open
+ticket contexts. Reconnect clears them before readiness. A stale generation cannot publish or consume
+any of those values. The node retains the exact acknowledged statement and matching prekey until every
+ticket/grant that names them has expired.
+
+### 18.6 Suite-`0x02` handshake bytes
+
+The §8.5 seven-element `E2EEClientHello` wrapper is unchanged. For suite `0x02`, its encrypted IK
+message-1 payload is a canonical-CBOR array of exactly six elements:
+
+| #   | Field                    | Type  | Content                                          |
+| --- | ------------------------ | ----- | ------------------------------------------------ |
+| 0   | `clientPrekeyTranscript` | bytes | Exact §7.4 transcript bytes                      |
+| 1   | `clientPrekeySignature`  | bytes | Exact P-256 signature from the §18.4 carrier     |
+| 2   | `accountId`              | text  | Exact grant/certificate account id               |
+| 3   | `intendedCapability`     | text  | Effective capability exercised on this channel   |
+| 4   | `intendedRole`           | text  | Effective role exercised on this channel         |
+| 5   | `hubDeviceGrant`         | bytes | Exact signed §18.3 envelope, at most 2,048 bytes |
+
+Suite `0x01` retains its exact five-element payload. A grant in `0x01`, a six-element payload in
+`0x01`, a five-element payload in `0x02`, or suite `0x02` with tier `web` is FATAL-PRE.
+
+Suite `0x02` uses a distinct authorization context: a canonical-CBOR array of exactly 29 elements.
+Elements 1–17 have the same meaning and construction as §8.3 elements 1–17; element 0 is the new
+domain.
+
+| #    | Field                           | Type          | Content                                |
+| ---- | ------------------------------- | ------------- | -------------------------------------- |
+| 0    | domain                          | text          | `"ryco.relay-e2ee.account-context.v1"` |
+| 1–17 | existing context fields         | —             | Exact §8.3 fields 1–17                 |
+| 18   | `deviceGrantDigest`             | bytes         | SHA-256 of the exact grant envelope    |
+| 19   | `relayTicketId`                 | text          | Exact public ticket id                 |
+| 20   | `nodeCapabilityStatementDigest` | bytes         | SHA-256 of exact advertised statement  |
+| 21   | `clientPrekeyCertificateDigest` | bytes         | SHA-256 of exact §18.4 carrier         |
+| 22   | `enrollmentId`                  | text          | Exact grant enrollment                 |
+| 23   | `enrollmentRevision`            | uint          | Exact grant revision                   |
+| 24   | `accountAuthEpoch`              | uint          | Exact grant epoch                      |
+| 25   | `deviceAuthEpoch`               | uint          | Exact grant epoch                      |
+| 26   | `grantMaximumRole`              | text          | Grant's role ceiling                   |
+| 27   | `grantCapabilities`             | array of text | Exact ordered grant capability ceiling |
+| 28   | `grantNonce`                    | bytes         | Exact grant nonce                      |
+
+The context commitment remains SHA-256 of the complete canonical block and the existing §8.4
+prologue therefore separates `0x02` by suite id as well. The ticket id is the public relay-attempt
+identifier; together with `channelId` it binds the grant to the exact channel generation. The
+client uses values from its authenticated ticket response and validated statement. The node uses
+its current connector-owned `channel.open`, acknowledged statement, retained prekey, and keyset.
+
+Worst-case wire arithmetic is closed without changing `E2EE_CLIENT_HELLO_MAX_BYTES`:
+
+```text
+suite-0x02 IK payload
+  array header                                                     1
+  client transcript bstr (≤ 1,024 plus 3-byte header)          1,027
+  P-256 signature bstr (64 plus 2-byte header)                     66
+  account id text (≤ 256 plus 3-byte header)                       259
+  capability text (`ryco.rpc`)                                      9
+  longest role text (`operator`)                                    9
+  grant bstr (≤ 2,048 plus 3-byte header)                        2,051
+                                                                  -----
+                                                                  3,422
+
+Noise IK message 1 = e(32) + encrypted s(32 + 16) +
+                     encrypted payload(3,422 + 16)               3,518
+
+seven-element hello body = array/version/tier/suite/offered(19) +
+                           nonce bstr(34) + commitment bstr(34) +
+                           Noise bstr(3 + 3,518)                  3,608
+negotiation discriminator + record type                              2
+                                                                  -----
+worst complete E2EEClientHello                                   3,610
+E2EE_CLIENT_HELLO_MAX_BYTES                                     4,096
+headroom                                                           486
+```
+
+The generator MUST prove that the largest conforming claims/envelope under the closed registries fits
+the 2,048-byte hard limit. It MUST separately reproduce the conservative hello arithmetic above with
+a synthetic 2,048-byte bounded grant carrier and test a 2,049-byte pre-decode rejection. Neither a
+grant nor a hello is fragmented to make it fit.
+
+### 18.7 Verification, authority, and revocation
+
+Before constructing message 1, the native client verifies the authenticated Hub keyset, strict grant
+encoding and signature, time window, ticket id, account/device epochs, enrollment revision, device
+keys, certificate digest, exact node statement digest and contents, node keys, continuity id, policy
+generation, capability, and role. It preserves the existing locally verified fingerprint and policy
+generation high-water checks. Failure releases no application bytes.
+
+After the existing pre-crypto bounds and rate checks and after Noise decrypts message 1, the node
+performs the same checks from its own connector and channel state. Authorization succeeds only when
+all values are equal and the effective authority is the intersection of:
+
+1. the directory and `channel.open` capability/role;
+2. the grant's capability and role ceilings;
+3. the node's current policy;
+4. any matching local restriction or denial.
+
+No input widens another. Success creates an immutable in-memory `account-enrolled` lease for that
+single channel and enrollment revision. It performs no durable approval write. Ticket/grant expiry
+prevents a new channel but does not impose a mid-session timer; channel close, a newer matching
+revocation epoch, account switch, connector-generation loss, or policy withdrawal destroys the lease
+and all read/mutation readiness synchronously.
+
+All grant failures use the existing fixed-size FATAL-PRE rejection and `channel_rejected` close. Local
+diagnostics may use only these bounded reason codes: `grant_oversize`, `grant_malformed`,
+`grant_non_canonical`, `grant_version`, `grant_unknown_key`, `grant_signature`, `grant_not_yet_valid`,
+`grant_expired`, `grant_binding`, `grant_revoked`, and `grant_policy`. They MUST NOT contain claims,
+identifiers, keys, signatures, grant/ticket bytes, or peer-controlled text. Grant verification shares
+the §15 per-origin token bucket and in-flight handshake bound; failures never produce a key oracle.
+
+### 18.8 Policy source of truth and migration
+
+The durable source of truth is the closed enum shown in §2.3. Its advertised projection is:
+
+| Policy mode                            | `requireE2EE` | `requireApprovedClientE2EE` | suites offered | admitted patterns |
+| -------------------------------------- | ------------- | --------------------------- | -------------- | ----------------- |
+| `compatibility`                        | false         | false                       | `[0x02,0x01]`  | `["IK","NX"]`     |
+| `require-e2ee`                         | true          | false                       | `[0x02,0x01]`  | `["IK","NX"]`     |
+| `require-native-e2ee`                  | true          | false                       | `[0x02,0x01]`  | `["IK"]`          |
+| `require-locally-approved-native-e2ee` | true          | true                        | `[0x01]`       | `["IK"]`          |
+
+The two booleans remain compatibility projections in the version-1 capability transcript; they are
+not independently writable after migration. A version-1 policy record migrates crash-atomically as:
+`requireApprovedClientE2EE=true` → `require-locally-approved-native-e2ee`, otherwise
+`requireE2EE=true` → `require-e2ee`, otherwise `compatibility`. No legacy record maps implicitly to
+`require-native-e2ee`.
+
+Moving rightward in §2.3's table, withdrawing suite `0x02`, advancing a revocation epoch, or narrowing
+role/capabilities is a policy/authorization withdrawal: commit durable state and its monotonic
+generation first, abort newly disallowed in-flight handshakes, close newly disallowed live channels,
+then acknowledge. Moving left affects only later channels. The strongest legacy boolean keeps its
+exact security meaning and never starts accepting account grants after migration.
 
 ## Appendix A — Analyzed alternative carrier (not part of this protocol)
 

@@ -89,6 +89,8 @@ export interface MobileHostedRelaySocketOptions {
    * the engine runs the unchanged legacy channel.
    */
   readonly e2ee?: RelayE2eeProvider | undefined;
+  /** Erases the transient account grant when this one socket attempt ends. */
+  readonly disposePreparedContext?: (() => void) | undefined;
 }
 
 const CONNECTING = 0;
@@ -166,6 +168,7 @@ export class MobileHostedRelaySocket {
   /** Set once the proof mint resolves and the platform socket exists. */
   #socket: NativeSocketLike | null = null;
   #abandoned = false;
+  #preparedContextDisposed = false;
 
   // The engine registers its listeners synchronously during construction, but
   // the platform socket cannot exist until the async proof mint resolves, so
@@ -185,6 +188,7 @@ export class MobileHostedRelaySocket {
     // wire. The engine repeats the expiry check, but this runs first so no
     // socket is created at all.
     if (options.url !== resolveRelayUrl() || options.ticketExpiresAt <= now()) {
+      this.#disposePreparedContext(options);
       throw new Error(INVALID_ATTEMPT);
     }
 
@@ -240,6 +244,7 @@ export class MobileHostedRelaySocket {
           onData: (bytes) => this.#emit({ type: "message", data: bytes }),
           onError: () => this.#emit({ type: "error" }),
           onClose: (code, reason) => {
+            this.#disposePreparedContext(options);
             this.#state = CLOSED;
             this.#emit({
               type: "close",
@@ -252,6 +257,7 @@ export class MobileHostedRelaySocket {
       });
     } catch (error) {
       this.#abandoned = true;
+      this.#disposePreparedContext(options);
       throw error;
     }
 
@@ -334,6 +340,7 @@ export class MobileHostedRelaySocket {
       // The engine drives `error` and `close` back through its own events, so
       // emit here only if it was already closed and did nothing.
       if (this.#state !== CLOSED) {
+        this.#disposePreparedContext(options);
         this.#emit({ type: "error" });
         this.#state = CLOSED;
         this.#emit({
@@ -387,6 +394,12 @@ export class MobileHostedRelaySocket {
     // be authenticated or torn down.
     this.#abandoned = true;
     this.#engine.close(code, reason);
+  }
+
+  #disposePreparedContext(options: MobileHostedRelaySocketOptions): void {
+    if (this.#preparedContextDisposed) return;
+    this.#preparedContextDisposed = true;
+    options.disposePreparedContext?.();
   }
 
   addEventListener(

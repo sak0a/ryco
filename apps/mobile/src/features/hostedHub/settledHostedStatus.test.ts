@@ -154,18 +154,23 @@ describe("settled hosted status on a rapid re-target", () => {
    */
   it("collapses the seven-label handshake walk to a single visible step before it settles", async () => {
     const recorder = createRecorder(makeTracker());
-    recorder.observe("Encrypted", "node-a env-a");
+    recorder.observe("Encrypted · Verified locally", "node-a env-a");
 
     for (const statusText of RETARGET_WALK) {
       recorder.observe(statusText, "node-b env-b");
       await vi.advanceTimersByTimeAsync(40);
     }
-    recorder.observe("Encrypted", "node-b env-b");
+    recorder.observe("Encrypted · Verified locally", "node-b env-b");
     await vi.advanceTimersByTimeAsync(THRESHOLD * 2);
 
     // The placeholder, Encrypted(A), one demote frame, Encrypted(B) — the walk
     // itself contributes exactly one visible frame instead of seven.
-    expect(recorder.frames).toEqual(["idle", "Encrypted", "idle", "Encrypted"]);
+    expect(recorder.frames).toEqual([
+      "idle",
+      "Encrypted · Verified locally",
+      "idle",
+      "Encrypted · Verified locally",
+    ]);
   });
 
   /**
@@ -175,8 +180,8 @@ describe("settled hosted status on a rapid re-target", () => {
    */
   it("drops a guarantee-bearing label the instant a transient arrives for a new selection", async () => {
     const current = makeTracker();
-    current.update(observation("Encrypted", "node-a env-a"));
-    expect(current.read().statusText).toBe("Encrypted");
+    current.update(observation("Encrypted · Verified locally", "node-a env-a"));
+    expect(current.read().statusText).toBe("Encrypted · Verified locally");
 
     current.update(observation("idle", "node-b env-b"));
     expect(current.read().statusText).toBe("idle");
@@ -194,7 +199,7 @@ describe("settled hosted status on a rapid re-target", () => {
    */
   it("drops a guarantee-bearing label immediately even when the selection is unchanged", () => {
     const current = makeTracker();
-    current.update(observation("Encrypted", "node-a env-a"));
+    current.update(observation("Encrypted · Verified locally", "node-a env-a"));
     current.update(observation("Securing", "node-a env-a"));
     expect(current.read().statusText).toBe("Securing");
   });
@@ -207,9 +212,9 @@ describe("settled hosted status and mandatory claims", () => {
    * one way a presentation fix could turn into a protocol violation.
    */
   it("displays Not verified and Legacy at once, even mid-transition", () => {
-    for (const mandatory of ["Not verified", "Legacy"] as const) {
+    for (const mandatory of ["Not verified", "Legacy connection"] as const) {
       const current = createSettledHostedStatusTracker({ thresholdMs: THRESHOLD });
-      current.update(observation("Encrypted", "node-a env-a"));
+      current.update(observation("Encrypted · Verified locally", "node-a env-a"));
       current.update(observation("connecting", "node-b env-b"));
       current.update(observation("authenticating", "node-b env-b"));
       expect(current.read().statusText).toBe("connecting");
@@ -230,10 +235,10 @@ describe("settled hosted status and mandatory claims", () => {
     recorder.observe("connecting", "node-a env-a");
     recorder.observe("authenticating", "node-a env-a");
     await vi.advanceTimersByTimeAsync(THRESHOLD - 50);
-    recorder.observe("Encrypted", "node-a env-a");
+    recorder.observe("Encrypted · Verified locally", "node-a env-a");
     await vi.advanceTimersByTimeAsync(THRESHOLD * 2);
 
-    expect(recorder.frames).toEqual(["idle", "connecting", "Encrypted"]);
+    expect(recorder.frames).toEqual(["idle", "connecting", "Encrypted · Verified locally"]);
   });
 });
 
@@ -337,7 +342,7 @@ describe("settled hosted status plumbing", () => {
    */
   it("settles the indicator and the status text as one pair", async () => {
     const current = makeTracker();
-    current.update(observation("Encrypted", "node-a env-a"));
+    current.update(observation("Encrypted · Verified locally", "node-a env-a"));
     current.update(observation("connecting", "node-b env-b"));
     current.update(observation("authenticating", "node-b env-b"));
     await vi.advanceTimersByTimeAsync(THRESHOLD);

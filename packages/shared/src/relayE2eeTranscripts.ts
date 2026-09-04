@@ -1,3 +1,7 @@
+import {
+  HubDeviceGrantClaims as HubDeviceGrantClaimsSchema,
+  type HubDeviceGrantClaims,
+} from "@ryco/contracts/native-e2ee";
 import { RelayCapability, RelayChannelId, RelayEffectiveRole } from "@ryco/contracts/relay";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { Tokenizer, Type, decode, encode, rfc8949EncodeOptions } from "cborg";
@@ -30,11 +34,17 @@ import {
   invalidRelayE2eeInput,
   validateE2eeAgreementPublicKey,
   validateE2eeClientIdentityPublicKey,
+  validateE2eeClientSignature,
   validateE2eeNodeIdentityPublicKey,
   validateE2eeNodeSignature,
   verifyE2eeSignature,
 } from "./relayE2eeKeys.ts";
-import { isE2eeSuiteId, type E2eeSuiteId } from "./relayE2eeWire.ts";
+import {
+  E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+  isE2eeSuiteId,
+  type E2eeSuiteId,
+} from "./relayE2eeWire.ts";
 
 // Transcripts, certificates, and the authorization context of the Ryco relay
 // E2EE protocol — docs/relay-e2ee-protocol.md §7.2.1 (capability signing
@@ -98,6 +108,8 @@ export const E2EE_NODE_CAPABILITY_TRANSCRIPT_DOMAIN = "ryco.node-e2ee-capability
 export const E2EE_NODE_CAPABILITY_DIGEST_DOMAIN = "ryco.node-e2ee-capability-digest.v1" as const;
 /** Authorization context block (§8.3). */
 export const E2EE_CONTEXT_DOMAIN = "ryco.relay-e2ee.context.v1" as const;
+/** Account-enrolled native authorization context block (§18.6). */
+export const E2EE_ACCOUNT_CONTEXT_DOMAIN = "ryco.relay-e2ee.account-context.v1" as const;
 /** Noise prologue array (§8.4). */
 export const E2EE_PROLOGUE_DOMAIN = "ryco.relay-e2ee.prologue.v1" as const;
 /**
@@ -222,6 +234,20 @@ export function decodeCanonicalE2eeCbor(bytes: Uint8Array): E2eeDecoded<unknown>
   try {
     value = decode(bytes, E2EE_STRICT_DECODE_OPTIONS);
   } catch {
+    // `cborg`'s strict reader rejects some well-formed but non-minimal heads
+    // before the re-encode check can classify them. Decode once more with only
+    // that canonicality gate relaxed so diagnostics can retain the protocol's
+    // closed `non_canonical` distinction. This second result is never returned
+    // or acted upon; it can only refine a rejection.
+    try {
+      const laxValue = decode(bytes, { ...E2EE_STRICT_DECODE_OPTIONS, strict: false });
+      const canonical = encode(laxValue, rfc8949EncodeOptions);
+      if (!e2eeBytesEqual(canonical, bytes)) {
+        return { kind: "error", reason: "non_canonical" };
+      }
+    } catch {
+      // The bytes are not even a complete value under the bounded lax profile.
+    }
     return { kind: "error", reason: "malformed" };
   }
   if (containsE2eeFloatEncoding(bytes)) return { kind: "error", reason: "float_forbidden" };
@@ -269,6 +295,7 @@ const utf8 = new TextEncoder();
 const decodeRelayCapability = Schema.decodeUnknownExit(RelayCapability);
 const decodeRelayEffectiveRole = Schema.decodeUnknownExit(RelayEffectiveRole);
 const decodeRelayChannelId = Schema.decodeUnknownExit(RelayChannelId);
+const decodeHubDeviceGrantClaims = Schema.decodeUnknownExit(HubDeviceGrantClaimsSchema);
 
 function assertIdentifier(value: string, pattern: RegExp): string {
   if (typeof value !== "string" || !pattern.test(value)) invalidRelayE2eeInput();
@@ -1530,7 +1557,10 @@ export interface E2eeAuthorizationContextInput {
  * identity: it detects disagreement about which lineage the channel belongs to
  * and relaxes no guard (§7.5).
  */
-export function encodeE2eeAuthorizationContext(input: E2eeAuthorizationContextInput): Uint8Array {
+function e2eeAuthorizationContextElements(
+  input: E2eeAuthorizationContextInput,
+  domain: typeof E2EE_CONTEXT_DOMAIN | typeof E2EE_ACCOUNT_CONTEXT_DOMAIN,
+): readonly unknown[] {
   const hubOrigin = canonicalizeE2eeHubOrigin(input.hubOrigin);
   const channelId = assertRelayChannelIdLiteral(input.channelId);
   const relayProtocolMajor = assertProtocolVersion(input.relayProtocolMajor);
@@ -1571,8 +1601,8 @@ export function encodeE2eeAuthorizationContext(input: E2eeAuthorizationContextIn
         ]
       : [];
 
-  return encodeCanonicalE2eeCbor([
-    E2EE_CONTEXT_DOMAIN,
+  return [
+    domain,
     hubOrigin,
     channelId,
     relayProtocolMajor,
@@ -1590,6 +1620,96 @@ export function encodeE2eeAuthorizationContext(input: E2eeAuthorizationContextIn
     nodeCertificateFingerprints,
     clientCertificateFingerprints,
     nodeContinuityId,
+  ];
+}
+
+export function encodeE2eeAuthorizationContext(input: E2eeAuthorizationContextInput): Uint8Array {
+  if (input.suiteId !== E2EE_SUITE_25519_CHACHAPOLY_SHA256) invalidRelayE2eeInput();
+  return encodeCanonicalE2eeCbor(e2eeAuthorizationContextElements(input, E2EE_CONTEXT_DOMAIN));
+}
+
+export type E2eeAccountGrantAuthorizationContextInput = Omit<
+  E2eeAuthorizationContextInput,
+  "client" | "suiteId"
+> & {
+  readonly suiteId: typeof E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256;
+  readonly client: Extract<E2eeAuthorizationContextClient, { readonly tier: "native" }>;
+  /** A grant already strict-decoded and signature/binding-verified by the caller. */
+  readonly grant: HubDeviceGrantClaims;
+  /** SHA-256 of the exact signed grant envelope. */
+  readonly deviceGrantDigest: Uint8Array;
+};
+
+/**
+ * The separately domain-separated 29-element suite-0x02 authorization context
+ * (§18.6). The first 18 elements have the exact §8.3 construction, while the
+ * final 11 bind the single-use grant, ticket, enrollment epochs, statement,
+ * certificate, and authority ceiling. Every overlapping field is compared
+ * here before bytes are emitted, so a caller cannot commit to two identities.
+ */
+export function encodeE2eeAccountGrantAuthorizationContext(
+  input: E2eeAccountGrantAuthorizationContextInput,
+): Uint8Array {
+  if (
+    input.suiteId !== E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256 ||
+    input.relayProtocolMajor !== 1 ||
+    input.relayProtocolMinor < 3
+  ) {
+    invalidRelayE2eeInput();
+  }
+  const decodedGrant = decodeHubDeviceGrantClaims(input.grant);
+  if (Exit.isFailure(decodedGrant)) invalidRelayE2eeInput();
+  const grant = decodedGrant.value;
+  const nodeAgreementFingerprint = assertFingerprint(input.nodeAgreementFingerprint);
+  const deviceGrantDigest = assertFingerprint(input.deviceGrantDigest);
+  if (
+    grant.suiteId !== input.suiteId ||
+    grant.issuerHubOrigin !== input.hubOrigin ||
+    grant.nodeId !== input.nodeId ||
+    grant.accountId !== input.client.accountId ||
+    grant.nodeContinuityId !== input.nodeContinuityId ||
+    !e2eeBytesEqual(grant.nodeIdentityFingerprint, input.nodeIdentityFingerprint) ||
+    !e2eeBytesEqual(grant.nodeAgreementFingerprint, nodeAgreementFingerprint) ||
+    !e2eeBytesEqual(grant.deviceIdentityFingerprint, input.client.identityFingerprint) ||
+    !e2eeBytesEqual(grant.deviceAgreementFingerprint, input.client.agreementFingerprint)
+  ) {
+    invalidRelayE2eeInput();
+  }
+  const base = e2eeAuthorizationContextElements(input, E2EE_ACCOUNT_CONTEXT_DOMAIN);
+  return encodeCanonicalE2eeCbor([
+    ...base,
+    deviceGrantDigest,
+    grant.relayTicketId,
+    grant.nodeCapabilityStatementDigest,
+    grant.clientPrekeyCertificateDigest,
+    grant.enrollmentId,
+    grant.enrollmentRevision,
+    grant.accountAuthEpoch,
+    grant.deviceAuthEpoch,
+    grant.maximumRole,
+    [...grant.capabilities],
+    grant.nonce,
+  ]);
+}
+
+/**
+ * The exact §18.4 client-certificate carrier. Its digest, rather than the
+ * transcript alone, is bound by a Hub device grant.
+ */
+export function encodeClientE2eePrekeyCertificateCarrier(
+  transcript: Uint8Array,
+  signature: Uint8Array,
+): Uint8Array {
+  if (
+    !(transcript instanceof Uint8Array) ||
+    transcript.byteLength === 0 ||
+    transcript.byteLength > E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES
+  ) {
+    invalidRelayE2eeInput();
+  }
+  return encodeCanonicalE2eeCbor([
+    Uint8Array.from(transcript),
+    validateE2eeClientSignature(signature),
   ]);
 }
 

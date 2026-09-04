@@ -109,10 +109,12 @@ export const DEFAULT_SETTLED_HOSTED_STATUS_THRESHOLD_MS = 500;
 export const HOSTED_STATUS_SETTLEMENT = {
   // Outcomes: connected states.
   Online: "settled",
-  Encrypted: "settled",
-  "Browser encrypted": "settled",
-  Legacy: "settled",
-  // Outcomes: terminal and attention states. `Not verified` and `Legacy` are
+  "Encrypted · Verified locally": "settled",
+  "Encrypted · Account trusted": "settled",
+  "Encrypted web": "settled",
+  "Legacy connection": "settled",
+  // Outcomes: terminal and attention states. `Not verified` and the legacy
+  // connection label are
   // mandatory labels (§13.1, §12.2) and are settled so they are never delayed.
   Offline: "settled",
   Stale: "settled",
@@ -126,6 +128,8 @@ export const HOSTED_STATUS_SETTLEMENT = {
   "Checking access": "transient",
   Synchronizing: "transient",
   Securing: "transient",
+  "Securing this device": "transient",
+  "Device encryption unavailable": "settled",
   Reconnecting: "transient",
   idle: "transient",
   "requesting ticket": "transient",

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
+import {
+  ACCOUNT_E2EE_DEVICES_PATH,
+  NATIVE_ACCOUNT_GRANT_RELAY_TICKET_PATH,
+  NATIVE_E2EE_CURRENT_DEVICE_PATH,
+  NATIVE_E2EE_GRANT_KEYS_PATH,
+} from "@ryco/contracts/native-e2ee";
 
-import { classifyServiceWorkerRequest } from "./serviceWorkerPolicy";
+import {
+  classifyServiceWorkerRequest,
+  HOSTED_E2EE_NETWORK_ONLY_PATHS,
+} from "./serviceWorkerPolicy";
 
 const origin = "https://ryco.example";
 const precacheUrls = new Set([
@@ -57,5 +66,21 @@ describe("hosted PWA service-worker request policy", () => {
 
   it("checks dynamic exclusions before navigation fallback", () => {
     expect(classify({ url: `${origin}/api/auth/session`, mode: "navigate" })).toBe("network-only");
+  });
+
+  it("keeps native enrollment, grant, ticket, and device-management routes out of caches", () => {
+    expect(HOSTED_E2EE_NETWORK_ONLY_PATHS).toEqual([
+      NATIVE_E2EE_CURRENT_DEVICE_PATH,
+      NATIVE_E2EE_GRANT_KEYS_PATH,
+      NATIVE_ACCOUNT_GRANT_RELAY_TICKET_PATH,
+      ACCOUNT_E2EE_DEVICES_PATH,
+    ]);
+    for (const path of [
+      ...HOSTED_E2EE_NETWORK_ONLY_PATHS,
+      `${ACCOUNT_E2EE_DEVICES_PATH}/enr_example/rename`,
+      `${ACCOUNT_E2EE_DEVICES_PATH}/enr_example/revoke`,
+    ]) {
+      expect(classify({ url: `${origin}${path}`, mode: "navigate" }), path).toBe("network-only");
+    }
   });
 });

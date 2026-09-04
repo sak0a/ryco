@@ -68,6 +68,18 @@ export function readMobileDeviceLabel(): string {
     .join("");
 }
 
+/** Bounded public app version included in the native enrollment record. */
+export function readMobileAppVersion(): string {
+  return Array.from(trimmed(Constants.expoConfig?.version) ?? "0.0.0")
+    .slice(0, 64)
+    .join("");
+}
+
+/** Native platform for the public enrollment record, without loading react-native at module scope. */
+export function readMobileNativePlatform(): "ios" | "android" {
+  return Constants.platform?.ios === undefined ? "android" : "ios";
+}
+
 export function isMobileDevelopmentBuild(): boolean {
   return allowsInsecureHostedOrigin(readExtra());
 }

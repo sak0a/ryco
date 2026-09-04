@@ -63,7 +63,9 @@ export function reconcileWorkspaceMachine(
   const trustedForTier =
     input.clientTier === "hosted-web"
       ? !nativePolicyLocked
-      : !input.requiresNativeVerification || input.nativeTrust === "verified";
+      : !input.requiresNativeVerification ||
+        input.nativeTrust === "verified" ||
+        input.nativeTrust === "account-trusted";
   const canReadMetadata = !revoked && !removed && trustedForTier && !identityConflict;
   const canConnect = canReadMetadata && input.online;
   const canMutate = canConnect && input.effectiveRole !== null && input.effectiveRole !== "viewer";

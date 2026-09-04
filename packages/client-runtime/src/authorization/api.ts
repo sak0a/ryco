@@ -26,6 +26,28 @@ import {
   type NativeHandoffStartRequest as NativeHandoffStartRequestType,
   type NativeHandoffStartResponse as NativeHandoffStartResponseType,
 } from "@ryco/contracts/native-handoff";
+import {
+  ACCOUNT_E2EE_DEVICE_PATH_PREFIX,
+  ACCOUNT_E2EE_DEVICES_PATH,
+  AccountE2eeDeviceListResponse,
+  AccountE2eeDeviceMutationResponse,
+  AccountE2eeDeviceRenameRequest,
+  AccountE2eeDeviceRevokeRequest,
+  HubGrantVerificationKeysetResponse,
+  NATIVE_ACCOUNT_GRANT_RELAY_TICKET_PATH,
+  NATIVE_E2EE_CURRENT_DEVICE_PATH,
+  NATIVE_E2EE_GRANT_KEYS_PATH,
+  NativeAccountGrantRelayTicketRequest,
+  NativeAccountGrantRelayTicketResponse,
+  NativeE2eeEnrollmentId,
+  NativeE2eeEnrollmentUpsertRequest,
+  NativeE2eeEnrollmentUpsertResponse,
+  type AccountE2eeDeviceSummary,
+  type HubGrantVerificationKeysetResponse as HubGrantVerificationKeysetResponseType,
+  type NativeAccountGrantRelayTicketRequest as NativeAccountGrantRelayTicketRequestType,
+  type NativeAccountGrantRelayTicketResponse as NativeAccountGrantRelayTicketResponseType,
+  type NativeE2eeEnrollmentUpsertRequest as NativeE2eeEnrollmentUpsertRequestType,
+} from "@ryco/contracts/native-e2ee";
 import * as HostedIdentity from "@ryco/contracts/hosted-identity";
 import { Schema } from "effect";
 import { assertE2eeAccountId } from "@ryco/shared/relayE2eeTranscripts";
@@ -2572,6 +2594,7 @@ export class HostedHubApi {
       ...(signal ? { signal } : {}),
     });
     if (
+      Object.keys(result).length !== 4 ||
       typeof result.ticket !== "string" ||
       !Number.isSafeInteger(result.expiresAt) ||
       result.protocolMajor !== 1 ||
@@ -2585,6 +2608,104 @@ export class HostedHubApi {
       protocolMajor: 1,
       protocolMinor: 2,
     } as HostedRelayTicket;
+  }
+
+  /** Register or renew this native installation. Grant material is never returned here. */
+  async upsertE2eeDeviceEnrollment(
+    request: NativeE2eeEnrollmentUpsertRequestType,
+    signal?: AbortSignal,
+  ): Promise<AccountE2eeDeviceSummary> {
+    this.#requireBearerTransport();
+    const body = decodeContract(NativeE2eeEnrollmentUpsertRequest, request, "invalid_request");
+    if (body.hubOrigin !== this.#endpoint.origin()) {
+      throw new HostedHubApiError("invalid_request", 400);
+    }
+    return decodeContract(
+      NativeE2eeEnrollmentUpsertResponse,
+      await this.#request(NATIVE_E2EE_CURRENT_DEVICE_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    ).enrollment;
+  }
+
+  /** Authenticated native keyset; a key carried only by a ticket is never accepted. */
+  async getE2eeGrantVerificationKeys(
+    signal?: AbortSignal,
+  ): Promise<HubGrantVerificationKeysetResponseType> {
+    this.#requireBearerTransport();
+    return decodeContract(
+      HubGrantVerificationKeysetResponse,
+      await this.#request(NATIVE_E2EE_GRANT_KEYS_PATH, signal ? { signal } : {}),
+      "invalid_response",
+    );
+  }
+
+  /** Issue one suite-0x02 ticket/grant pair for one bounded native relay attempt. */
+  async issueAccountGrantRelayTicket(
+    request: NativeAccountGrantRelayTicketRequestType,
+    signal?: AbortSignal,
+  ): Promise<NativeAccountGrantRelayTicketResponseType> {
+    this.#requireBearerTransport();
+    const body = decodeContract(NativeAccountGrantRelayTicketRequest, request, "invalid_request");
+    return decodeContract(
+      NativeAccountGrantRelayTicketResponse,
+      await this.#request(NATIVE_ACCOUNT_GRANT_RELAY_TICKET_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  /** Public account-security directory. Works with cookie+CSRF or native DPoP sessions. */
+  async listE2eeDevices(signal?: AbortSignal): Promise<ReadonlyArray<AccountE2eeDeviceSummary>> {
+    return decodeContract(
+      AccountE2eeDeviceListResponse,
+      await this.#request(ACCOUNT_E2EE_DEVICES_PATH, signal ? { signal } : {}),
+      "invalid_response",
+    ).devices;
+  }
+
+  async renameE2eeDevice(
+    enrollmentId: string,
+    request: typeof AccountE2eeDeviceRenameRequest.Type,
+    signal?: AbortSignal,
+  ): Promise<AccountE2eeDeviceSummary> {
+    const id = decodeContract(NativeE2eeEnrollmentId, enrollmentId, "invalid_request");
+    const body = decodeContract(AccountE2eeDeviceRenameRequest, request, "invalid_request");
+    return decodeContract(
+      AccountE2eeDeviceMutationResponse,
+      await this.#request(`${ACCOUNT_E2EE_DEVICE_PATH_PREFIX}/${encodeURIComponent(id)}/rename`, {
+        method: "POST",
+        body,
+        csrf: true,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    ).enrollment;
+  }
+
+  async revokeE2eeDevice(
+    enrollmentId: string,
+    request: typeof AccountE2eeDeviceRevokeRequest.Type,
+    signal?: AbortSignal,
+  ): Promise<AccountE2eeDeviceSummary> {
+    const id = decodeContract(NativeE2eeEnrollmentId, enrollmentId, "invalid_request");
+    const body = decodeContract(AccountE2eeDeviceRevokeRequest, request, "invalid_request");
+    return decodeContract(
+      AccountE2eeDeviceMutationResponse,
+      await this.#request(`${ACCOUNT_E2EE_DEVICE_PATH_PREFIX}/${encodeURIComponent(id)}/revoke`, {
+        method: "POST",
+        body,
+        csrf: true,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    ).enrollment;
   }
 
   /**

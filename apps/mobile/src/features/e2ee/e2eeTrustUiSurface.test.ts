@@ -269,9 +269,9 @@ describe("the §4.4 provider is actually injected", () => {
     // turns it on, and it is asserted here so a refactor that drops the field
     // silently turns native E2EE back off.
     const runtime = read(join(SRC, "hostedHub", "runtime.ts"));
-    expect(runtime).toContain("resolveMobileRelayE2eeProvider()");
+    expect(runtime).toContain("providerForMobileRelaySocketContext(input.preparedSocketContext)");
     expect(runtime).toMatch(
-      /createRelaySocket:[\s\S]{0,200}e2ee: resolveMobileRelayE2eeProvider\(\)/u,
+      /createRelaySocket:[\s\S]{0,250}e2ee: providerForMobileRelaySocketContext\(input\.preparedSocketContext\)/u,
     );
     const attempt = read(join(SRC, "hostedHub", "e2eeAttempt.ts"));
     expect(attempt).toContain("makeMobileRelayE2eeProvider");

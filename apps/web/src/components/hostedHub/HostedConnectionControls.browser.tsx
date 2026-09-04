@@ -498,12 +498,12 @@ describe("hosted connection controls", () => {
 
     const representatives = hostedConnectionStatusRepresentatives();
     // 18 before the §4.4 channel dimension, and the three states that dimension
-    // alone can reach: `Browser encrypted`, `Legacy`, and `Securing`. The exact
+    // alone can reach: `Encrypted web`, `Legacy connection`, and `Securing`. The exact
     // count is asserted, not a floor, because the whole failure this sweep
     // exists to catch is a status the shipped app can produce and no render
     // suite ever draws.
     expect(representatives.size).toBe(21);
-    for (const text of ["Browser encrypted", "Legacy", "Securing"] as const) {
+    for (const text of ["Encrypted web", "Legacy connection", "Securing"] as const) {
       expect([...representatives.keys()], `${text} is reachable in the shipped app`).toContain(
         text,
       );

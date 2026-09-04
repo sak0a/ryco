@@ -1,4 +1,5 @@
 import {
+  RELAY_AUTHORIZED_CHANNEL_MINOR,
   RELAY_AUTHENTICATION_DEADLINE_MS,
   RELAY_MAX_CONTROL_FRAME_BYTES,
   RELAY_MAX_DATA_CHUNK_BYTES,
@@ -8,6 +9,7 @@ import {
   RELAY_PROTOCOL_MAJOR,
   RELAY_PROTOCOL_MINOR,
   type RelayChannelId,
+  type RelayAccountGrantContext,
   type RelayCloseReason,
   type RelayEffectiveRole,
   type RelayFrame,
@@ -145,6 +147,14 @@ export interface RelayE2eeChannelIdentity {
   readonly effectiveRole: string;
   readonly relayProtocolMajor: number;
   readonly relayProtocolMinor: number;
+  /** Exact authenticated relay-minor-3 context carried by this channel.open. */
+  readonly accountGrantContext?:
+    | {
+        readonly relayTicketId: string;
+        readonly deviceGrantDigest: Uint8Array;
+        readonly nodeCapabilityStatementDigest: Uint8Array;
+      }
+    | undefined;
 }
 
 /** The engine surface one E2EE channel drives, and no more of it. */
@@ -408,7 +418,10 @@ export function relayE2eeUnresolvedAttemptFailure(): HostedRelayFailure {
 export class HostedRelayEngine {
   readonly options: RelayEngineOptions;
   #limits: RelayLimits | null = null;
+  /** The relay-selected version, bounded by the version offered in `auth`. */
+  #protocol: { readonly protocolMajor: number; readonly protocolMinor: number } | null = null;
   #channel: RelayChannelId | null = null;
+  #accountGrantContext: RelayAccountGrantContext | undefined;
   #accepted = false;
   #role: RelayEffectiveRole | null = null;
   #inboundSequence = 0;
@@ -697,7 +710,7 @@ export class HostedRelayEngine {
     if (this.#channel)
       this.#frame({
         type: "channel.close",
-        ...VERSION,
+        ...this.#wireVersion(),
         channelId: this.#channel,
       });
     this.#finish(code, reason);
@@ -715,24 +728,33 @@ export class HostedRelayEngine {
 
   #open(): void {
     if (this.#closed || !this.#auth) return;
+    const auth = this.#auth;
+    // Spend the frame before calling the socket: test transports and loopback
+    // relays may synchronously re-enter this engine with `ready` or another
+    // `open`. Neither may observe reusable ticket-bearing bytes.
+    this.#auth = null;
     this.options.callbacks.onTransportStatus("authenticating");
-    try {
-      this.options.socket.send(this.#auth);
-    } finally {
-      this.#auth.fill(0);
-      this.#auth = null;
-    }
     this.#authTimer = this.options.timers.setTimeout(
       () => this.#fail(failure("authentication_timeout")),
       RELAY_AUTHENTICATION_DEADLINE_MS,
     );
+    try {
+      this.options.socket.send(auth);
+    } catch {
+      this.#fail(failure("network"));
+    } finally {
+      auth.fill(0);
+    }
   }
 
   #receive(bytes: Uint8Array): void {
     if (bytes.byteLength > RELAY_MAX_DATA_FRAME_BYTES)
       return this.#fail(failure("frame_too_large"));
     const owned = Uint8Array.from(bytes);
-    const decoded = decodeRelayFrame(owned, this.#limits ? { expectedVersion: VERSION } : {});
+    const decoded = decodeRelayFrame(
+      owned,
+      this.#protocol === null ? {} : { expectedVersion: this.#protocol },
+    );
     owned.fill(0);
     if (!decoded.ok) return this.#fail(failure("protocol_invalid"));
     const frame = decoded.value;
@@ -745,7 +767,7 @@ export class HostedRelayEngine {
     if (frame.type === "ping")
       return this.#frame({
         type: "pong",
-        ...VERSION,
+        ...this.#wireVersion(),
         nonce: Uint8Array.from(frame.nonce),
       });
     if (frame.type === "error") {
@@ -764,10 +786,19 @@ export class HostedRelayEngine {
       });
     }
     if (!this.#limits) {
-      if (frame.type !== "ready" || frame.protocolMajor !== 1 || frame.protocolMinor !== 2)
+      if (
+        frame.type !== "ready" ||
+        frame.protocolMajor !== RELAY_PROTOCOL_MAJOR ||
+        frame.protocolMinor < RELAY_AUTHORIZED_CHANNEL_MINOR ||
+        frame.protocolMinor > RELAY_PROTOCOL_MINOR
+      )
         return this.#fail(
           failure(frame.type === "ready" ? "protocol_unsupported" : "protocol_invalid"),
         );
+      this.#protocol = {
+        protocolMajor: frame.protocolMajor,
+        protocolMinor: frame.protocolMinor,
+      };
       this.#limits = frame.limits;
       if (this.#authTimer) this.options.timers.clearTimeout(this.#authTimer);
       this.#authTimer = null;
@@ -778,6 +809,7 @@ export class HostedRelayEngine {
       if (this.#channel || frame.capability !== "ryco.rpc" || !frame.effectiveRole)
         return this.#fail(failure("channel_rejected"));
       this.#channel = frame.channelId;
+      this.#accountGrantContext = frame.accountGrantContext;
       this.#role = frame.effectiveRole;
       this.options.callbacks.onRole(this.#role);
       return;
@@ -823,6 +855,9 @@ export class HostedRelayEngine {
       return frame.channelId === this.#channel
         ? this.#fail(failure(frame.reason ?? "channel_rejected"))
         : this.#fail(failure("channel_rejected"));
+    if (frame.type === "e2ee.enrollment-revoked") {
+      return this.#fail(failure("revoked"));
+    }
     if (frame.type === "flow.pause" || frame.type === "flow.resume") {
       if (frame.channelId !== this.#channel) return this.#fail(failure("channel_rejected"));
       this.#outboundPaused = frame.type === "flow.pause";
@@ -850,8 +885,17 @@ export class HostedRelayEngine {
           // capability; the role is whatever that frame presented.
           capability: "ryco.rpc",
           effectiveRole: this.#role!,
-          relayProtocolMajor: VERSION.protocolMajor,
-          relayProtocolMinor: VERSION.protocolMinor,
+          relayProtocolMajor: this.#wireVersion().protocolMajor,
+          relayProtocolMinor: this.#wireVersion().protocolMinor,
+          ...(this.#accountGrantContext === undefined
+            ? {}
+            : {
+                accountGrantContext: {
+                  relayTicketId: this.#accountGrantContext[1],
+                  deviceGrantDigest: Uint8Array.from(this.#accountGrantContext[2]),
+                  nodeCapabilityStatementDigest: Uint8Array.from(this.#accountGrantContext[3]),
+                },
+              }),
         },
         admit: (messageBytes) => this.#reserveOutbound(messageBytes),
         lockMode: (mode) => this.#lockMode(mode),
@@ -992,7 +1036,7 @@ export class HostedRelayEngine {
     if (this.#channel && value.closeReason) {
       this.#frame({
         type: "channel.close",
-        ...VERSION,
+        ...this.#wireVersion(),
         channelId: this.#channel,
         reason: value.closeReason,
       });
@@ -1106,12 +1150,12 @@ export class HostedRelayEngine {
     const ownedBytes = this.#inboundOwnedBytes();
     if (!this.#inboundPaused && ownedBytes >= Math.floor(this.#limits.maxQueuedBytes * 0.75)) {
       this.#inboundPaused = true;
-      this.#frame({ type: "flow.pause", ...VERSION, channelId: this.#channel });
+      this.#frame({ type: "flow.pause", ...this.#wireVersion(), channelId: this.#channel });
     } else if (this.#inboundPaused && ownedBytes <= Math.floor(this.#limits.maxQueuedBytes * 0.5)) {
       this.#inboundPaused = false;
       this.#frame({
         type: "flow.resume",
-        ...VERSION,
+        ...this.#wireVersion(),
         channelId: this.#channel,
       });
     }
@@ -1222,7 +1266,7 @@ export class HostedRelayEngine {
       this.#outboundSequence += 1;
       this.#frame({
         type: "data",
-        ...VERSION,
+        ...this.#wireVersion(),
         channelId: this.#channel,
         sequence: sequence as never,
         payload: next.bytes,
@@ -1251,6 +1295,11 @@ export class HostedRelayEngine {
     } finally {
       encoded.value.fill(0);
     }
+  }
+
+  /** Current offer before `ready`, exact relay selection afterwards. */
+  #wireVersion(): { readonly protocolMajor: number; readonly protocolMinor: number } {
+    return this.#protocol ?? VERSION;
   }
 
   #fail(value: HostedRelayFailure): void {

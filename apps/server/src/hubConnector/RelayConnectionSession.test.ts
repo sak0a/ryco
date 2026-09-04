@@ -187,6 +187,22 @@ function identity(): HubIdentityRuntimeShape {
   };
 }
 
+function identityAtMinor(protocolMinor: 2 | 3): HubIdentityRuntimeShape {
+  return {
+    ...identity(),
+    createRelayAuthenticationFrame: async () =>
+      ({
+        type: "auth",
+        peer: "node",
+        protocolMajor: 1,
+        protocolMinor,
+        nodeId: `node_${"A".repeat(22)}`,
+        nonce: new Uint8Array(32).fill(1),
+        signature: new Uint8Array(64).fill(2),
+      }) as RelayNodeAuthHandshake,
+  };
+}
+
 describe("RelayConnectionSession", () => {
   it("maps canonical replacement, draining, revocation, and version errors", () => {
     const frame = (code: RelayErrorFrame["code"]): RelayErrorFrame =>
@@ -241,6 +257,63 @@ describe("RelayConnectionSession", () => {
     expect(routed[0]).toMatchObject({ type: "ping" });
     expect(routed[0]?.type === "ping" && routed[0].nonce).toEqual(new Uint8Array(8).fill(7));
     expect(terminal).toHaveLength(0);
+  });
+
+  it("negotiates minor 2 when a minor-3 node meets an older Hub", async () => {
+    const socket = new FakeSocket();
+    const routed: RelayFrame[] = [];
+    const session = new RelayConnectionSession({
+      identity: identityAtMinor(3),
+      transport: { open: () => socket },
+      hubOrigin: "https://relay.example",
+      onFrame: (frame) => routed.push(frame),
+      onTerminal: () => undefined,
+    });
+    const authenticating = session.authenticate();
+    await Promise.resolve();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await expect(authenticating).resolves.toMatchObject({ protocolMinor: 2 });
+
+    socket.emit("message", {
+      data: encoded({
+        type: "ping",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        nonce: new Uint8Array(8),
+      }),
+    } as MessageEvent);
+    expect(routed).toHaveLength(1);
+  });
+
+  it("refuses a ready minor newer than the node's signed offer", async () => {
+    const socket = new FakeSocket();
+    const session = new RelayConnectionSession({
+      identity: identityAtMinor(2),
+      transport: { open: () => socket },
+      hubOrigin: "https://relay.example",
+      onFrame: () => undefined,
+      onTerminal: () => undefined,
+    });
+    const authenticating = session.authenticate();
+    await Promise.resolve();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 3,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await expect(authenticating).rejects.toMatchObject({ kind: "version_incompatible" });
   });
 
   it("preserves opaque data bytes after wiping the transport buffer", async () => {

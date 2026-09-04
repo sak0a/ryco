@@ -7,6 +7,7 @@ import {
   classifyPostStripPayload,
   encodeE2eeCapabilityCarrier,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
 } from "@ryco/shared/relayE2eeWire";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -205,6 +206,19 @@ describe("§8.3/§12.1.1/§13.1 what the web attempt carries and what it must no
     // §13.2's ceremony pins an identity; this tier has nowhere to keep one.
     expect(attempt.pairingOnly).toBe(false);
     expect(attempt.localSuitePreference).toEqual([E2EE_SUITE_25519_CHACHAPOLY_SHA256]);
+    expect(attempt.localSuitePreference).not.toContain(
+      E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+    );
+  });
+
+  it("cannot serialize native account-grant authorization from the Web tier", () => {
+    const attempt = webRelayE2eeAttempt(SELECTION);
+    const serialized = JSON.stringify({
+      credentials: attempt.credentials,
+      localSuitePreference: attempt.localSuitePreference,
+    });
+    expect(serialized).not.toMatch(/account|grant|identityPublicKey|agreementPublicKey/iu);
+    expect(serialized).not.toContain(String(E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256));
   });
 
   it("permits legacy, because §12.1.1's strict mode is an opt-in web cannot record", () => {

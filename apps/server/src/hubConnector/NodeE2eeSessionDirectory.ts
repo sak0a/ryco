@@ -1,3 +1,5 @@
+import type { RelayE2eeEnrollmentRevokedFrame } from "@ryco/contracts/relay";
+import type { E2eeAccountGrantAuthoritySnapshot } from "@ryco/shared/relayE2eeHandshake";
 import type { E2eeTier } from "@ryco/shared/relayE2eeTranscripts";
 import type { E2eeSuiteId } from "@ryco/shared/relayE2eeWire";
 
@@ -62,13 +64,23 @@ export interface NodeE2eeSessionDirectory {
     readonly suite: E2eeSuiteId;
     readonly establishedAt: number;
     readonly verificationCode?: string | undefined;
+    readonly accountGrantAuthority?: E2eeAccountGrantAuthoritySnapshot | undefined;
+    readonly terminate?: (() => void | Promise<void>) | undefined;
   }) => () => void;
   /** Established sessions in establishment order. A snapshot; never live state. */
   readonly list: () => readonly NodeE2eeSessionSummary[];
+  /** Close every account-enrolled session made stale by an authenticated Hub revocation. */
+  readonly revokeEnrollment: (frame: RelayE2eeEnrollmentRevokedFrame) => Promise<number>;
 }
 
 export function makeNodeE2eeSessionDirectory(): NodeE2eeSessionDirectory {
-  const sessions = new Map<number, NodeE2eeSessionSummary>();
+  const sessions = new Map<
+    number,
+    NodeE2eeSessionSummary & {
+      readonly accountGrantAuthority?: E2eeAccountGrantAuthoritySnapshot | undefined;
+      readonly terminate?: (() => void | Promise<void>) | undefined;
+    }
+  >();
   let nextIndex = 1;
 
   return {
@@ -81,11 +93,35 @@ export function makeNodeE2eeSessionDirectory(): NodeE2eeSessionDirectory {
         suite: input.suite,
         establishedAt: input.establishedAt,
         verificationCode: input.verificationCode,
+        accountGrantAuthority: input.accountGrantAuthority,
+        terminate: input.terminate,
       });
       return () => {
         sessions.delete(sessionIndex);
       };
     },
-    list: () => [...sessions.values()],
+    list: () =>
+      [...sessions.values()].map(
+        ({ accountGrantAuthority: _authority, terminate: _terminate, ...summary }) => summary,
+      ),
+    revokeEnrollment: async (frame) => {
+      const revoked = [...sessions.entries()].filter(([, session]) => {
+        const authority = session.accountGrantAuthority;
+        return (
+          authority !== undefined &&
+          authority.enrollmentId === frame.enrollmentId &&
+          (authority.accountAuthEpoch < frame.accountAuthEpoch ||
+            authority.deviceAuthEpoch < frame.deviceAuthEpoch ||
+            authority.enrollmentRevision <= frame.enrollmentRevision)
+        );
+      });
+      await Promise.all(
+        revoked.map(async ([sessionIndex, session]) => {
+          sessions.delete(sessionIndex);
+          await session.terminate?.();
+        }),
+      );
+      return revoked.length;
+    },
   };
 }

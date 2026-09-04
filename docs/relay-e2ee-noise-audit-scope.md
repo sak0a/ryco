@@ -1,8 +1,9 @@
 # Relay E2EE Noise state machine — third-party audit scope
 
-This document scopes a security audit of one module: the first-party Noise handshake state
-machine of the Ryco relay E2EE protocol. It exists so that commissioning the audit is a short
-email rather than a research project.
+This document scopes a security audit with one cryptographic core and one bounded integration
+delta: the first-party Noise handshake state machine of the Ryco relay E2EE protocol, plus the
+suite-`0x02` account-grant path that invokes it. It exists so that commissioning the audit is a
+short email rather than a research project.
 
 The audit is not optional polish. [§14.1 of the protocol](./relay-e2ee-protocol.md) makes a
 scoped third-party audit of this module a **precondition for flipping the `requireE2EE` default**
@@ -54,10 +55,27 @@ to, not a gap:
   MUST reproduce them exactly.
 - **No clock, no channel state, no logging, no I/O, no network, no persistence.**
 
-**Context, not scope.** These siblings are worth reading to understand the module's callers, but
-they are not the audit target: `relayE2eeConstants.ts` (§3.2 constants), `relayE2eeWire.ts`
-(envelope codec, record framing, AAD/nonce), `relayE2eeTranscripts.ts` (the §8.4 prologue and the
-§7 certificate transcripts), `relayE2eeKeys.ts`, `relayE2eeVerificationDisplay.ts`.
+**Context for the core review.** These siblings are worth reading to understand the module's
+callers, but are not part of the core state-machine target: `relayE2eeConstants.ts` (§3.2
+constants), `relayE2eeWire.ts` (envelope codec, record framing, AAD/nonce),
+`relayE2eeTranscripts.ts` (the §8.4 prologue and the §7 certificate transcripts),
+`relayE2eeKeys.ts`, and `relayE2eeVerificationDisplay.ts`.
+
+**Account-enrolled extension delta — in scope for the current engagement:**
+
+| Path / bounded portion                                                                                                               | Review target                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/shared/src/relayE2eeHubDeviceGrant.ts`                                                                                     | The exact 35-element canonical claims array, signed envelope, strict decode/re-encode checks, bounds, signatures, time and binding validation.                                                             |
+| Suite-`0x02` portions of `relayE2eeTranscripts.ts` and `relayE2eeHandshake.ts`                                                       | The six-element IK payload, 29-element authorization context, distinct domains, exact ticket/grant/statement/certificate bindings, and suite/tier separation.                                              |
+| Suite-`0x02` use of `relayE2eeWire.ts` and `relayE2eeSession.ts`                                                                     | Confirmation that account enrollment changes no envelope, nonce, AAD, counter, rekey, close, or erasure rule after the handshake.                                                                          |
+| `packages/client-runtime/src/authorization/nativeE2eeTrustResolver.ts` and the account-grant branch of `relay/relayE2eeInitiator.ts` | Trust-source precedence, client-side verification before hello, requested-authority intersection, downgrade refusal, and no plaintext release.                                                             |
+| `apps/server/src/hubConnector/NodeAccountGrantVerifier.ts` and the account-grant branch of `NodeE2eeChannelSession.ts`               | Authenticated connector-state inputs, server-side re-verification, authorization callback ordering, immutable lease creation, revocation/generation fencing, and absence of durable local approval writes. |
+| `packages/contracts/src/nativeE2ee.ts` and relay 1.3 account-grant schemas                                                           | Closed vocabularies and pre-cryptographic size/range bounds used by both endpoints.                                                                                                                        |
+
+Everything else in the Hub account API, directory UI, native key-store adapters, and relay routing
+service is integration context rather than source-review scope. Findings that show one of those
+boundaries can violate a reviewed assumption are still actionable and should identify the missing
+assumption explicitly.
 
 ## 2. Why a first-party implementation exists
 
@@ -128,8 +146,10 @@ own ordering and size checks as untrusted.
 model (§2.6), as are traffic analysis of the §2.5 metadata, an operator-proof web client (§2.4),
 cryptographic attribution of an abrupt close, and post-compromise recovery within an open channel.
 
-**Explicitly out of scope: the primitives.** They are independently audited, and re-auditing them is
-not what this engagement buys. §14.2 states the lineage exactly:
+**Explicitly out of scope: a full primitive re-audit.** The primitive lineages have independent
+audits, while the current 2.x pins additionally have only the maintainer self-audit described
+below. Re-auditing every primitive implementation is not what this engagement buys; validating the
+way Ryco invokes its production import closure remains in scope. §14.2 states the lineage exactly:
 
 | Package          | Independent audit                          | Scope relevant here                                                                                                      |
 | ---------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
@@ -139,13 +159,28 @@ not what this engagement buys. §14.2 states the lineage exactly:
 | `@noble/ciphers` | Cure53, September 2024 (baseline `1.0.0`)  | Full scope, explicitly including ChaCha20 and Poly1305 — exactly the suite AEAD.                                         |
 | `@noble/hashes`  | Cure53, January 2022 (baseline `1.0.0`)    | Everything except BLAKE3, SHA-3 addons, SHA-1, and Argon2 — SHA-256, HMAC, and HKDF are in scope.                        |
 
-Pinned versions in this repository are `@noble/curves@1.9.7`, `@noble/ciphers@1.3.0`, and
-`@noble/hashes@1.8.0` — each within the independently audited major lineage and not older than its
-baseline, as §14.2's pin-audited-lineage rule requires. Two caveats, stated plainly rather than
-buried: P-256 is a thin configuration over the audited abstract Weierstrass code but the top-level
-NIST-curve module was never named in an independent audit scope, and the 2.x lines carry only a
-maintainer self-audit. Neither affects this module — it uses X25519, ChaCha20-Poly1305, SHA-256,
-and HKDF only, and touches no P-256 and no CBOR.
+The runtime pins `@noble/curves@2.3.0`, `@noble/ciphers@2.3.0`, and
+`@noble/hashes@2.3.0`, each with a lockfile integrity digest. The protocol baseline remains the
+maintainers' all-files self-audit at `2.2.0` (April 2026). The accepted runtime delta is exactly
+`2.2.0…2.3.0` for the production import closure: curves `ed25519.js`/`nist.js` and their abstract
+dependencies; ciphers `chacha.js`/`utils.js`; and hashes `sha2.js`/`hmac.js`/`hkdf.js`/`utils.js`.
+That delta contains broad upstream refactoring, hardening, performance, type-checking, and
+tree-shaking work rather than a narrowly audited patch. On 2026-09-04 the owner explicitly accepted
+using those exact `2.3.0` pins after Ryco's byte-exact vectors, differential replay, adversarial
+suite, Chromium corpus, Hermes/mobile tests, and full repository backstop passed. This acceptance
+does **not** turn the upstream maintainer self-audit into an independent audit of Noble 2.x, Ryco's
+Noise state machine, or the suite-`0x02` composition.
+
+Two additional caveats remain explicit: P-256 is a thin configuration over independently audited
+abstract Weierstrass code, but the top-level NIST-curve module was never named in an independent
+audit scope; and the account-enrolled delta uses P-256 and canonical CBOR even though the core Noise
+module itself does not. Those are reasons to include the bounded extension above, not reasons to
+describe it as already audited.
+
+Exact upstream comparisons for reviewer intake:
+[curves 2.2.0…2.3.0](https://github.com/paulmillr/noble-curves/compare/2.2.0...2.3.0),
+[ciphers 2.2.0…2.3.0](https://github.com/paulmillr/noble-ciphers/compare/2.2.0...2.3.0), and
+[hashes 2.2.0…2.3.0](https://github.com/paulmillr/noble-hashes/compare/2.2.0...2.3.0).
 
 Also accepted, not findings: JavaScript cannot guarantee constant-time execution under JIT and GC
 (§17.2), and zeroization in a managed runtime bounds but cannot eliminate residual copies (§17.3).
@@ -213,17 +248,37 @@ Timing and memory-residue observations are welcome as context; they are known an
    agreement private key. That exposure is documented and accepted; silently widening it would not
    be.
 
+7. **Grant and certificate canonicality.** Can any alternate CBOR, base64url, ECDSA, Ed25519,
+   point, integer, array, or duplicate representation verify while hashing to a different bound
+   value? Are the complete signed envelope and exact six-element Noise payload bounded before
+   signature or DH work? Does every carried digest get recomputed from exact bytes rather than
+   trusted from the carrier?
+8. **Authorization intersection and callback ordering.** Do the ticket, grant, node statement,
+   certificate, Noise static, account/enrollment epochs, role, capability, continuity id, policy
+   generation, and connector generation all name one attempt? Can a callback race, stale snapshot,
+   or partial intersection widen authority? Is an account-enrolled success confined to one
+   in-memory lease with no durable §13.6 approval or verified-pin write?
+9. **Downgrade, revocation, and record integration.** Can suite `0x02` enter Web or relay minor
+   0–2, can an unknown/new suite suppress a valid stronger local choice, or can a Hub grant outrank
+   a local pin/denial? Do account switch, epoch advancement, connector-generation loss, policy
+   withdrawal, and live revocation synchronously remove read/mutation readiness and close the
+   lease? After establishment, is the suite-`0x01` record layer reused without a second nonce
+   space, altered AAD, or account-specific rekey exception?
+
 ## 6. Evidence available to the auditor
 
-| Evidence                                    | Status                                                                        |
-| ------------------------------------------- | ----------------------------------------------------------------------------- |
-| The specification                           | Landed: `docs/relay-e2ee-protocol.md`, normative, ~6,200 lines                |
-| Colocated unit and golden-transcript suite  | Landed: `packages/shared/src/relayE2eeNoise.test.ts`, 46 cases                |
-| Official Noise vectors (§16.3 family F15)   | Landed: `packages/shared/fixtures/e2ee/v1/f15-noise-core-vectors.json`        |
-| Cross-implementation vectors                | Landed: F15 plus Snow replay of Ryco F6/F7; see below                         |
-| Property-based state-machine suite          | Landed: `packages/shared/src/relayE2eeNoiseProperties.test.ts`, 24 properties |
-| Adversarial suite                           | Landed: `packages/shared/src/relayE2eeAttackerRelay.test.ts`, 128 cases       |
-| — of which run on the hostile-relay harness | 16 (section K); the other 112 hand-carry delivery one record at a time        |
+| Evidence                                    | Status                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| The specification                           | Landed: `docs/relay-e2ee-protocol.md`, normative, ~6,200 lines                                                |
+| Colocated unit and golden-transcript suite  | Landed: `packages/shared/src/relayE2eeNoise.test.ts`, 46 cases                                                |
+| Official Noise vectors (§16.3 family F15)   | Landed: `packages/shared/fixtures/e2ee/v1/f15-noise-core-vectors.json`                                        |
+| Cross-implementation vectors                | Landed: F15 plus Snow replay of Ryco F6/F7; see below                                                         |
+| Property-based state-machine suite          | Landed: `packages/shared/src/relayE2eeNoiseProperties.test.ts`, 24 properties                                 |
+| Adversarial suite                           | Landed: `packages/shared/src/relayE2eeAttackerRelay.test.ts`, 128 cases                                       |
+| — of which run on the hostile-relay harness | 16 (section K); the other 112 hand-carry delivery one record at a time                                        |
+| Account-enrolled generated vectors          | Landed: §16 family F19, including positive `0x02`, rejection, bounds, and Web-isolation cases                 |
+| Cross-version and policy evidence           | Landed: relay 1.2/1.3 fixtures, old/new interop, policy migration, revocation, reconnect, and rotation suites |
+| Chromium corpus                             | Landed and wired: F1/F2/F3/F7/F8/F10/F14/F16/F17/F19 browser scopes pass                                      |
 
 That table is deliberately honest: an auditor should know which evidence exists today and the
 limits of each item. Every row is landed, and none of them is a deliverable the auditor is being
@@ -399,7 +454,7 @@ bun run --cwd packages/shared test # the module's own suite
 bun typecheck
 ```
 
-Use the Bun version pinned in `package.json` (`engines.bun`, currently `^1.3.14`). Never invoke
+Use the Bun version pinned in `package.json` (`packageManager`, currently `bun@1.4.0`). Never invoke
 `bun test`, which runs Bun's own runner instead of the configured Vitest setup and will not execute
 these suites.
 
@@ -417,7 +472,8 @@ every rule this module implements has one.
 
 ## 8. Readiness
 
-**The module is stable and the audit can be commissioned.** The state machine was written before the
+**The package is prepared; no independent audit has been commissioned or completed in this
+workspace.** The state machine was written before the
 implementation phases that exercise it, and it has now been driven from both directions: the node
 responder (`apps/server/src/hubConnector/NodeE2eeChannelSession.ts`) and the client initiator
 (`packages/client-runtime/src/relay/relayE2eeInitiator.ts`) both complete real IK handshakes against
@@ -439,6 +495,9 @@ and by code reading for the chaining key, the cipher key, and the static copy; a
 nonce-progression obligation is discharged over the encoding here and over byte-exact transcripts
 in F15 and F6/F7.
 
-What the audit gates, precisely: §14.1 makes it a precondition for flipping the `requireE2EE` default
-(§12.3), and nothing else. Every tier below that default ships without it. §17.1 carries the
-unaudited state machine as the protocol's largest open risk until the audit closes.
+What the audit gates, precisely: §14.1 makes it a precondition for flipping the `requireE2EE`
+default (§12.3), and the account-enrolled rollout additionally keeps broad suite-`0x02` enablement
+behind the extension review above. Automated evidence is not an external audit. Broad default
+enablement remains blocked until an independent reviewer closes high-severity findings and the
+affected evidence is rerun. Current gate status is recorded in
+[`relay-e2ee-rollout-readiness.md`](./relay-e2ee-rollout-readiness.md).

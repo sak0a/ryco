@@ -1,5 +1,6 @@
 import type { EnvironmentId, RelayEffectiveRole } from "@ryco/contracts";
 import type * as HostedIdentity from "@ryco/contracts/hosted-identity";
+import type * as NativeE2ee from "@ryco/contracts/native-e2ee";
 
 import { HostedHubApiError, type HostedAccountStepUp, type HostedHubFailureReason } from "./api.ts";
 import { activateHostedNode, deactivateHostedNode, suspendHostedNode } from "./environment.ts";
@@ -11,6 +12,7 @@ import type {
   HostedAccountRefused,
   HostedAccountSecurity,
   HostedAccountStatus,
+  HostedAccountE2eeDevice,
   HostedAddPasskeyOutcome,
   HostedAddPasskeyResult,
   HostedBrowserStatus,
@@ -91,6 +93,7 @@ const initialState: HostedHubState = {
 };
 
 export type HostedPasskeyDirectoryStatus = "idle" | "loading" | "ready" | "stale";
+export type HostedE2eeDeviceDirectoryStatus = "idle" | "loading" | "ready" | "stale";
 export type HostedAccountSecurityStatus = "idle" | "loading" | "ready" | "stale";
 export type HostedExternalIdentityConfigurationStatus = "idle" | "loading" | "ready" | "stale";
 
@@ -98,6 +101,8 @@ export type HostedAccountActionStatus =
   | "idle"
   | "adding-passkey"
   | "revoking-passkey"
+  | "renaming-e2ee-device"
+  | "revoking-e2ee-device"
   | "regenerating-recovery-codes"
   | "setting-password"
   | "removing-password"
@@ -127,6 +132,8 @@ export interface HostedAccountState {
   readonly externalIdentityConfigurationStatus: HostedExternalIdentityConfigurationStatus;
   readonly passkeys: ReadonlyArray<HostedHubPasskey>;
   readonly passkeysStatus: HostedPasskeyDirectoryStatus;
+  readonly e2eeDevices?: ReadonlyArray<HostedAccountE2eeDevice>;
+  readonly e2eeDevicesStatus?: HostedE2eeDeviceDirectoryStatus;
   readonly security: HostedAccountSecurity | null;
   readonly securityStatus: HostedAccountSecurityStatus;
   readonly actionStatus: HostedAccountActionStatus;
@@ -159,6 +166,8 @@ const initialAccountState: HostedAccountState = {
   externalIdentityConfigurationStatus: "idle",
   passkeys: [],
   passkeysStatus: "idle",
+  e2eeDevices: [],
+  e2eeDevicesStatus: "idle",
   security: null,
   securityStatus: "idle",
   actionStatus: "idle",
@@ -428,6 +437,8 @@ class HostedHubController {
   #recoveryCodesLeaseSettleQueued = false;
   #passkeysOperation: AbortController | null = null;
   #passkeysPromise: Promise<void> | null = null;
+  #e2eeDevicesOperation: AbortController | null = null;
+  #e2eeDevicesPromise: Promise<void> | null = null;
   #securityOperation: AbortController | null = null;
   #securityPromise: Promise<void> | null = null;
   #externalIdentityConfigurationOperation: AbortController | null = null;
@@ -756,6 +767,25 @@ class HostedHubController {
   }
 
   /**
+   * Synchronously withdraw native account-grant authority without signing the account out. Platform
+   * adapters call this before asynchronous channel teardown on enrollment revocation or account-epoch
+   * change, so stale generations cannot retain read or mutation readiness.
+   */
+  invalidateNativeE2eeAuthorization(): void {
+    const state = hostedHubStore.getState();
+    if (state.accountStatus !== "authenticated") return;
+    getHostedRuntimeConfiguration().resetRelayAttemptFactory();
+    patchState({
+      generation: state.generation + 1,
+      effectiveRole: null,
+      transportStatus: "reconnecting",
+      sessionStatus: "closed",
+      sessionEstablished: false,
+      sessionRecoveredAfterUnknown: false,
+    });
+  }
+
+  /**
    * Load the account's passkeys.
    *
    * Deduplicated like the node directory: a second caller joins the in-flight
@@ -834,6 +864,60 @@ class HostedHubController {
    */
   #discardStalePasskeys(): void {
     patchAccountState({ passkeys: [], passkeysStatus: "idle" });
+  }
+
+  /** Load the account's native E2EE device directory behind the active session fence. */
+  refreshE2eeDevices(options?: { readonly force?: boolean }): Promise<void> {
+    const force = options?.force === true;
+    if (this.#e2eeDevicesPromise && !force) return this.#e2eeDevicesPromise;
+    const state = hostedHubStore.getState();
+    if (state.accountStatus !== "authenticated") return Promise.resolve();
+    if (force) {
+      this.#e2eeDevicesOperation?.abort();
+      this.#e2eeDevicesPromise = null;
+    }
+    const operation = new AbortController();
+    this.#e2eeDevicesOperation = operation;
+    const promise = this.#refreshE2eeDevices(operation, state.session?.id ?? null).finally(() => {
+      if (this.#e2eeDevicesOperation === operation) this.#e2eeDevicesOperation = null;
+      if (this.#e2eeDevicesPromise === promise) this.#e2eeDevicesPromise = null;
+    });
+    this.#e2eeDevicesPromise = promise;
+    if ((hostedAccountStore.getState().e2eeDevices?.length ?? 0) === 0) {
+      patchAccountState({ e2eeDevicesStatus: "loading" });
+    }
+    return promise;
+  }
+
+  async #refreshE2eeDevices(operation: AbortController, sessionId: string | null): Promise<void> {
+    try {
+      const e2eeDevices = await getHostedHubApi().listE2eeDevices(operation.signal);
+      if (operation.signal.aborted) return;
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
+        this.#discardStaleE2eeDevices();
+        return;
+      }
+      patchAccountState({
+        e2eeDevices,
+        e2eeDevicesStatus: "ready",
+        ...NO_ACCOUNT_ERROR,
+      });
+    } catch (error) {
+      if (operation.signal.aborted) return;
+      if (isSessionFailure(error)) {
+        await this.#expireSessionHandled(error);
+        return;
+      }
+      if (!this.#isCurrentAccountSession(operation.signal, sessionId)) {
+        this.#discardStaleE2eeDevices();
+        return;
+      }
+      patchAccountState({ e2eeDevicesStatus: "stale", ...accountErrorPatch(error) });
+    }
+  }
+
+  #discardStaleE2eeDevices(): void {
+    patchAccountState({ e2eeDevices: [], e2eeDevicesStatus: "idle" });
   }
 
   refreshExternalIdentityConfiguration(options?: { readonly force?: boolean }): Promise<void> {
@@ -1082,6 +1166,34 @@ class HostedHubController {
     });
     if (outcome.status !== "committed") return outcome;
     await this.refreshPasskeys({ force: true });
+    return outcome;
+  }
+
+  /** Rename one enrolled native E2EE device and confirm the authoritative directory. */
+  async renameE2eeDevice(
+    enrollmentId: string,
+    input: NativeE2ee.AccountE2eeDeviceRenameRequest,
+  ): Promise<HostedAccountOutcome> {
+    const outcome = await this.#accountAction("renaming-e2ee-device", async (signal) => {
+      await getHostedHubApi().renameE2eeDevice(enrollmentId, input, signal);
+      return () => undefined;
+    });
+    if (outcome.status !== "committed") return outcome;
+    await this.refreshE2eeDevices({ force: true });
+    return outcome;
+  }
+
+  /** Revoke one enrolled native E2EE device and confirm the authoritative directory. */
+  async revokeE2eeDevice(
+    enrollmentId: string,
+    input: NativeE2ee.AccountE2eeDeviceRevokeRequest,
+  ): Promise<HostedAccountOutcome> {
+    const outcome = await this.#accountAction("revoking-e2ee-device", async (signal) => {
+      await getHostedHubApi().revokeE2eeDevice(enrollmentId, input, signal);
+      return () => undefined;
+    });
+    if (outcome.status !== "committed") return outcome;
+    await this.refreshE2eeDevices({ force: true });
     return outcome;
   }
 
@@ -1394,6 +1506,9 @@ class HostedHubController {
     this.#passkeysOperation?.abort();
     this.#passkeysOperation = null;
     this.#passkeysPromise = null;
+    this.#e2eeDevicesOperation?.abort();
+    this.#e2eeDevicesOperation = null;
+    this.#e2eeDevicesPromise = null;
     this.#securityOperation?.abort();
     this.#securityOperation = null;
     this.#securityPromise = null;

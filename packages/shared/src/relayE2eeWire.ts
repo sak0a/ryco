@@ -68,17 +68,25 @@ export type E2eeDecodeResult<Value, Reason extends string> =
 // "all others / reserved" row becomes a type error rather than a silent pass.
 
 /**
- * Suite registry, protocol version 1 (§3.4). `0x01` is
+ * Suite registry, protocol version 1 (§3.4, §18.6). `0x01` is
  * `Noise_IK_25519_ChaChaPoly_SHA256` on the signed native tier and
  * `Noise_NX_25519_ChaChaPoly_SHA256` on the unsigned web tier — one id, the
- * tier selects the pattern. All other ids are reserved and rejected.
+ * tier selects the pattern. `0x02` uses the same IK primitives but is admitted
+ * only for a native account-enrolled credential carrying a Hub device grant.
+ * All other ids are reserved and rejected.
  */
 export const E2EE_SUITE_25519_CHACHAPOLY_SHA256 = 0x01;
+export const E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256 = 0x02;
 
-export type E2eeSuiteId = typeof E2EE_SUITE_25519_CHACHAPOLY_SHA256;
+export type E2eeSuiteId =
+  | typeof E2EE_SUITE_25519_CHACHAPOLY_SHA256
+  | typeof E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256;
 
 export function isE2eeSuiteId(value: number): value is E2eeSuiteId {
-  return value === E2EE_SUITE_25519_CHACHAPOLY_SHA256;
+  return (
+    value === E2EE_SUITE_25519_CHACHAPOLY_SHA256 ||
+    value === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256
+  );
 }
 
 /** Direction label (§3.4), client → node. ASCII `"c2n"`. */

@@ -7,6 +7,7 @@ import {
   HubEnrollmentCeremonyDetail,
   HubEnrollmentStartResult,
   HubIdentitySummary,
+  NodeE2eeAdmissionPolicy,
   OrchestrationReadModel,
   ProjectId,
   type ClientOrchestrationCommand,
@@ -1705,6 +1706,13 @@ const e2eeRequireE2eeFlag = Flag.boolean("require-e2ee").pipe(
   Flag.optional,
 );
 
+const e2eePolicyModeFlag = Flag.choice("mode", NodeE2eeAdmissionPolicy.literals).pipe(
+  Flag.withDescription(
+    "Admission mode: compatibility, require-e2ee, require-native-e2ee, or require-locally-approved-native-e2ee.",
+  ),
+  Flag.optional,
+);
+
 const e2eeRequireApprovedClientFlag = Flag.boolean("require-approved-client-e2ee").pipe(
   Flag.withDescription(
     "Admit only approved native client keys (§12.4). Disables web access entirely.",
@@ -1913,6 +1921,7 @@ const formatE2eeSessions = (view: E2eeSessionListView, json: boolean): string =>
 const formatE2eePolicy = (policy: E2eePolicyView, json: boolean): string => {
   if (json) return emitJson(policy);
   return [
+    `Mode: ${policy.mode}`,
     `requireE2EE: ${policy.requireE2EE}`,
     `requireApprovedClientE2EE: ${policy.requireApprovedClientE2EE}`,
     `Effective requireE2EE: ${policy.effectiveRequireE2EE}`,
@@ -2450,6 +2459,7 @@ const e2eePolicyShowCommand = Command.make("show", {
 
 const e2eePolicySetCommand = Command.make("set", {
   ...authLocationFlags,
+  mode: e2eePolicyModeFlag,
   requireE2EE: e2eeRequireE2eeFlag,
   requireApprovedClientE2EE: e2eeRequireApprovedClientFlag,
   suite: e2eeSuiteFlag,
@@ -2460,6 +2470,7 @@ const e2eePolicySetCommand = Command.make("set", {
   ),
   Command.withHandler((flags) => {
     const proposal = {
+      ...(Option.isSome(flags.mode) ? { mode: flags.mode.value } : {}),
       ...(Option.isSome(flags.requireE2EE) ? { requireE2EE: flags.requireE2EE.value } : {}),
       ...(Option.isSome(flags.requireApprovedClientE2EE)
         ? { requireApprovedClientE2EE: flags.requireApprovedClientE2EE.value }
@@ -2467,7 +2478,8 @@ const e2eePolicySetCommand = Command.make("set", {
       ...(Option.isSome(flags.suite) ? { suiteRegistry: flags.suite.value } : {}),
     };
     const requestingStrict =
-      Option.isSome(flags.requireApprovedClientE2EE) && flags.requireApprovedClientE2EE.value;
+      (Option.isSome(flags.mode) && flags.mode.value === "require-locally-approved-native-e2ee") ||
+      (Option.isSome(flags.requireApprovedClientE2EE) && flags.requireApprovedClientE2EE.value);
     return runHubCommand(
       flags,
       (origin, token) =>

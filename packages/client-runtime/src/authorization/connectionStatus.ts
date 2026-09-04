@@ -30,7 +30,21 @@ export interface HostedConnectionStatusInput {
    * encrypted.
    */
   readonly e2eeStatus?: HostedE2eeChannelStatus;
+  /** Native account enrollment gate. Omitted by Web and direct clients. */
+  readonly nativeDeviceSecurityStatus?: HostedNativeDeviceSecurityStatus;
 }
+
+export type HostedNativeDeviceSecurityStatus = "ready" | "securing" | "unavailable" | "revoked";
+
+export const HOSTED_NATIVE_DEVICE_SECURITY_STATUSES = Object.keys({
+  ready: true,
+  securing: true,
+  unavailable: true,
+  revoked: true,
+} satisfies Record<
+  HostedNativeDeviceSecurityStatus,
+  true
+>) as ReadonlyArray<HostedNativeDeviceSecurityStatus>;
 
 /**
  * §4.4's channel modes plus what §13.1's release gate makes of them, as the
@@ -50,6 +64,8 @@ export type HostedE2eeChannelStatus =
   | "negotiating"
   /** §4.4 `e2ee` on a selection that resolved to a verified pin (§13.1, §2.2). */
   | "verified"
+  /** §18 account-grant IK: encrypted and authorized by the signed-in Hub account. */
+  | "account-trusted"
   /** §4.4 `e2ee` with no verified pin: the §13.2 ceremony, and nothing more. */
   | "unverified"
   /**
@@ -75,6 +91,7 @@ export const HOSTED_E2EE_CHANNEL_STATUSES = Object.keys({
   unavailable: true,
   negotiating: true,
   verified: true,
+  "account-trusted": true,
   unverified: true,
   "web-unsigned": true,
   legacy: true,
@@ -147,11 +164,14 @@ export type HostedConnectionStatusText =
   | "Revoked"
   | "Incompatible"
   | "Online"
-  | "Encrypted"
-  | "Browser encrypted"
-  | "Legacy"
+  | "Encrypted · Verified locally"
+  | "Encrypted · Account trusted"
+  | "Encrypted web"
+  | "Legacy connection"
   | "Not verified"
   | "Securing"
+  | "Securing this device"
+  | "Device encryption unavailable"
   | "Reconnecting"
   | "idle"
   | "requesting ticket"
@@ -198,14 +218,14 @@ const HOSTED_TRANSPORT_STATUS_TEXTS: Record<
 const HOSTED_E2EE_READY_TEXTS: Record<HostedE2eeChannelStatus, HostedConnectionStatusText> = {
   unavailable: "Online",
   negotiating: "Securing",
-  verified: "Encrypted",
+  verified: "Encrypted · Verified locally",
+  "account-trusted": "Encrypted · Account trusted",
   unverified: "Not verified",
-  // §2.2's web NX row, and deliberately NOT the native word. The qualifier
-  // leads, so the collapsed chip reads `Browser` rather than a prefix of
-  // `Encrypted`: on this tier the encryption is performed by code the Hub
-  // served, and §2.2/§2.3 forbid presenting that as the signed tier's claim.
-  "web-unsigned": "Browser encrypted",
-  legacy: "Legacy",
+  // §2.2's web NX row, carrying an explicit tier qualifier rather than the
+  // locally verified or account-trusted native claim: on this tier encryption
+  // is performed by code the Hub served.
+  "web-unsigned": "Encrypted web",
+  legacy: "Legacy connection",
 };
 
 /**
@@ -235,13 +255,19 @@ export function deriveHostedConnectionStatusText(
                 ? "Revoked"
                 : selectionStatus === "incompatible"
                   ? "Incompatible"
-                  : transportStatus === "online" && sessionStatus === "ready"
-                    ? HOSTED_E2EE_READY_TEXTS[e2eeStatus]
-                    : transportStatus === "reconnecting"
-                      ? "Reconnecting"
-                      : selectionStatus === "offline"
-                        ? "Offline"
-                        : HOSTED_TRANSPORT_STATUS_TEXTS[transportStatus];
+                  : input.nativeDeviceSecurityStatus === "revoked"
+                    ? "Revoked"
+                    : input.nativeDeviceSecurityStatus === "securing"
+                      ? "Securing this device"
+                      : input.nativeDeviceSecurityStatus === "unavailable"
+                        ? "Device encryption unavailable"
+                        : transportStatus === "online" && sessionStatus === "ready"
+                          ? HOSTED_E2EE_READY_TEXTS[e2eeStatus]
+                          : transportStatus === "reconnecting"
+                            ? "Reconnecting"
+                            : selectionStatus === "offline"
+                              ? "Offline"
+                              : HOSTED_TRANSPORT_STATUS_TEXTS[transportStatus];
 }
 
 /**
@@ -291,7 +317,7 @@ export interface HostedConnectionStatusIndicator {
  * the verified one; a mapper keyed on `connected` alone can, which is why the
  * member exists rather than the web row reusing `none`.
  */
-export type HostedConnectionGuarantee = "none" | "legacy" | "web" | "e2ee";
+export type HostedConnectionGuarantee = "none" | "legacy" | "web" | "account" | "e2ee";
 
 /**
  * The collapsed presentation of every bounded status, as an exhaustive map.
@@ -328,24 +354,39 @@ export const HOSTED_CONNECTION_STATUS_INDICATORS = {
   Online: { shortLabel: "Online", connected: true, guarantee: "none" },
   // The one entry that may claim §2.2's bottom row, and the only one produced
   // by `HostedE2eeChannelStatus.verified`.
-  Encrypted: { shortLabel: "Encrypted", connected: true, guarantee: "e2ee" },
+  "Encrypted · Verified locally": {
+    shortLabel: "Verified",
+    connected: true,
+    guarantee: "e2ee",
+  },
+  "Encrypted · Account trusted": {
+    shortLabel: "Acct trusted",
+    connected: true,
+    guarantee: "account",
+  },
   // §2.2's web NX row: a usable session, encrypted against a passive Hub while
   // the served code is honest, and NOT the row above. The collapsed label is
-  // neither a prefix of `Encrypted` — a chip is read at a glance, and
-  // `Encrypted…` at a glance is the native claim — nor the tier noun the full
-  // text leads with. `Browser` was both the leading token this map exists to
-  // abolish and, on a chip, a neutral word in the same register as `Online` and
-  // `Opening`: it names a client type, not a protection level, and this is the
-  // one row whose message IS its caveat. `Unsigned web` carries §2.2's own
-  // qualifier for the row, which is the part the owner has to read.
-  "Browser encrypted": { shortLabel: "Unsigned web", connected: true, guarantee: "web" },
+  // intentionally not the native verified chip. `Web E2EE` keeps the tier and
+  // protection level together; the detailed trust notice explains the
+  // served-code ceiling.
+  "Encrypted web": { shortLabel: "Web E2EE", connected: true, guarantee: "web" },
   // §12.2: a channel that fell back is labeled legacy in EVERY user-facing
   // surface. It is a usable connection and says so; it makes no E2EE claim.
-  Legacy: { shortLabel: "Legacy", connected: true, guarantee: "legacy" },
+  "Legacy connection": { shortLabel: "Legacy", connected: true, guarantee: "legacy" },
   // §13.1's release gate: an `e2ee` channel with no verified pin carries the
   // pairing ceremony and no application payload, so it is not a usable session.
   "Not verified": { shortLabel: "Not verified", connected: false, guarantee: "none" },
   Securing: { shortLabel: "Securing", connected: false, guarantee: "none" },
+  "Securing this device": {
+    shortLabel: "Device setup",
+    connected: false,
+    guarantee: "none",
+  },
+  "Device encryption unavailable": {
+    shortLabel: "No E2EE key",
+    connected: false,
+    guarantee: "none",
+  },
   Reconnecting: { shortLabel: "Reconnecting", connected: false, guarantee: "none" },
   idle: { shortLabel: "Idle", connected: false, guarantee: "none" },
   "requesting ticket": { shortLabel: "Preparing", connected: false, guarantee: "none" },

@@ -70,8 +70,8 @@ function everyDisclosure(): ReadonlyArray<{ readonly where: string; readonly tex
   ];
 }
 
-/** The two channel states this tier is fenced out of (`connectionStatus.ts`). */
-const NATIVE_ONLY_STATUSES = ["verified", "unverified"] as const;
+/** Native channel states this tier is fenced out of (`connectionStatus.ts`). */
+const NATIVE_ONLY_STATUSES = ["verified", "account-trusted", "unverified"] as const;
 
 describe("the hosted relay trust disclosure is a function of the channel state", () => {
   it("has copy for every channel state this tier can be in, and only those", () => {

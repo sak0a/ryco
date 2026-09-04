@@ -23,6 +23,7 @@ import {
   ExternalIdentityDisconnectRequest,
   ExternalIdentityDisconnectResponse,
   HOSTED_IDENTITY_PROTOCOL_VERSION,
+  HubAccountId,
   HubBrowserSessionResponse,
   HubNormalizedEmail,
   HubSpaceId,
@@ -698,6 +699,12 @@ describe("hosted username, email, and space authority", () => {
     ]) {
       expect(() => strictDecode(HubNormalizedEmail, email)).toThrow();
     }
+  });
+
+  it("exports the bounded account id used by native E2EE contracts", () => {
+    expect(strictDecode(HubAccountId, accountId)).toBe(accountId);
+    expect(() => strictDecode(HubAccountId, `acct_${"a".repeat(21)}`)).toThrow();
+    expect(() => strictDecode(HubAccountId, "acct_not+base64url")).toThrow();
   });
 
   it("brands bounded space ids and rejects malformed ids", () => {

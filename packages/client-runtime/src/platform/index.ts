@@ -1,4 +1,5 @@
 import { Context, Layer, Tracer } from "effect";
+import type * as NativeE2eeContract from "@ryco/contracts/native-e2ee";
 
 import type { KnownEnvironmentConnectionTarget } from "../knownEnvironment.ts";
 import type { KnownEnvironmentSource } from "../knownEnvironment.ts";
@@ -182,6 +183,75 @@ export interface DpopSignerService {
 export class DpopSigner extends Context.Service<DpopSigner, DpopSignerService>()(
   "@ryco/client-runtime/platform/DpopSigner",
 ) {}
+
+export interface NativeE2eeIdentityDescriptor {
+  /** X9.63 uncompressed P-256 public key. The private key never crosses this seam. */
+  readonly publicKey: Uint8Array;
+  readonly fingerprint: Uint8Array;
+  readonly backing: NativeE2eeContract.NativeE2eeUsableKeyBacking;
+}
+
+export interface NativeE2eePrekeyDescriptor {
+  readonly agreementPublicKey: Uint8Array;
+  readonly agreementFingerprint: Uint8Array;
+  readonly transcript: Uint8Array;
+  readonly signature: Uint8Array;
+  /** Exact public §7.4 certificate carrier. */
+  readonly certificate: Uint8Array;
+  readonly certificateDigest: Uint8Array;
+  readonly expiresAt: number;
+}
+
+export interface NativeE2eeEnrollmentNamespace {
+  readonly hubOrigin: string;
+  readonly accountId: string;
+}
+
+/** Public continuity metadata learned through a valid account grant; never a verified pin. */
+export interface NativeE2eeAccountTrustedNode {
+  readonly hubOrigin: string;
+  readonly accountId: string;
+  readonly nodeId: string;
+  readonly identityPublicKey: Uint8Array;
+  readonly identityFingerprint: Uint8Array;
+  readonly agreementFingerprint: Uint8Array;
+  readonly continuityId: string;
+  readonly acceptedPolicyGeneration: number;
+  readonly firstTrustedAt: number;
+  readonly lastTrustedAt: number;
+  /** Bounded public audit trail; it is account-authorized continuity, never a verified pin. */
+  readonly identityChanges: readonly NativeE2eeAccountTrustIdentityChange[];
+}
+
+export interface NativeE2eeAccountTrustIdentityChange {
+  readonly previousIdentityFingerprint: Uint8Array;
+  readonly nextIdentityFingerprint: Uint8Array;
+  readonly changedAt: number;
+}
+
+/**
+ * Native-only custody for automatic account enrollment. Browser adapters must not implement this.
+ * Every secret borrow is bounded to one callback and must be zeroized by the platform on settlement.
+ */
+export interface NativeE2eePlatformService {
+  readonly platform: NativeE2eeContract.NativeE2eePlatform;
+  readonly appVersion: string;
+  readonly deviceLabel: () => string;
+  readonly randomBytes: (length: number) => Promise<Uint8Array>;
+  readonly ensureIdentity: () => Promise<NativeE2eeIdentityDescriptor>;
+  readonly ensureClientPrekey: (
+    namespace: NativeE2eeEnrollmentNamespace,
+  ) => Promise<NativeE2eePrekeyDescriptor>;
+  readonly getOrCreateEnrollmentId: () => Promise<string>;
+  readonly clearEnrollment: (namespace: NativeE2eeEnrollmentNamespace) => Promise<void>;
+  readonly withAgreementSecret: <A>(use: (secretKey: Uint8Array) => Promise<A> | A) => Promise<A>;
+  readonly readAccountTrustedNode: (scope: {
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly nodeId: string;
+  }) => Promise<NativeE2eeAccountTrustedNode | null>;
+  readonly writeAccountTrustedNode: (record: NativeE2eeAccountTrustedNode) => Promise<void>;
+}
 
 export type NativeAuthorizationBrowserResult =
   | { readonly type: "success"; readonly url: string }

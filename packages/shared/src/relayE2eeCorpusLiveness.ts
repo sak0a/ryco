@@ -87,6 +87,82 @@
 export type E2eeCorpusReader = "shared" | "node" | "noise";
 
 /**
+ * The browser half of §16.4, kept beside the corpus liveness declarations.
+ *
+ * Browser tests cannot contribute to the Node process's accessor census: they
+ * run in a separate Chromium worker. Treating them as a fourth reader would
+ * therefore publish invented union counts. This is the parallel, executable
+ * declaration instead. `E2eeCrossRuntimeCoverage.browser.tsx` imports every
+ * listed fixture and consumes this table in Chromium; the shared manifest test
+ * independently requires its family/scope map to be byte-for-byte equal to the
+ * generated manifest. A browser file disappearing, a family no longer loading,
+ * or a scope drifting therefore fails a gate without corrupting the Node-only
+ * leaf census below.
+ */
+export const E2EE_BROWSER_CROSS_RUNTIME_COVERAGE = [
+  {
+    family: 1,
+    fixtureFile: "f01-payload-discrimination.json",
+    scope: "this whole family",
+    consumers: ["E2eeCodecParity.browser.tsx"],
+  },
+  {
+    family: 2,
+    fixtureFile: "f02-carrier-compatibility.json",
+    scope: "this whole family",
+    consumers: ["E2eeCodecParity.browser.tsx"],
+  },
+  {
+    family: 3,
+    fixtureFile: "f03-capability-statement.json",
+    scope: "the admitted-pattern cases of this family",
+    consumers: ["E2eeNxHandshake.browser.tsx"],
+  },
+  {
+    family: 7,
+    fixtureFile: "f07-nx-handshake.json",
+    scope: "this whole family",
+    consumers: ["E2eeNxHandshake.browser.tsx", "E2eeMaliciousRelay.browser.tsx"],
+  },
+  {
+    family: 8,
+    fixtureFile: "f08-record-protection.json",
+    scope: "this whole family",
+    consumers: ["E2eeRecordProtection.browser.tsx"],
+  },
+  {
+    family: 10,
+    fixtureFile: "f10-mode-machine.json",
+    scope: "this whole family",
+    consumers: ["E2eeModeMachine.browser.tsx", "E2eeNxHandshake.browser.tsx"],
+  },
+  {
+    family: 14,
+    fixtureFile: "f14-verification-display.json",
+    scope: "the `WebSAS` half of this family",
+    consumers: ["E2eeNxHandshake.browser.tsx"],
+  },
+  {
+    family: 16,
+    fixtureFile: "f16-authorization-context.json",
+    scope: "the NX cases of this family",
+    consumers: ["E2eeCodecParity.browser.tsx"],
+  },
+  {
+    family: 17,
+    fixtureFile: "f17-key-material-validation.json",
+    scope: "the P-256 cases of this family",
+    consumers: ["E2eeCodecParity.browser.tsx"],
+  },
+  {
+    family: 19,
+    fixtureFile: "f19-account-device-grant.json",
+    scope: "the Web-isolation cases of this family",
+    consumers: ["E2eeAccountGrantIsolation.browser.tsx"],
+  },
+] as const;
+
+/**
  * A committed case whose liveness the SHARED suite cannot establish, together
  * with what does establish it.
  *

@@ -17,10 +17,14 @@ import {
 } from "@ryco/shared/relayE2eeClose";
 import {
   E2eeNodeHandshake,
+  type E2eeAccountGrantAuthoritySnapshot,
+  type E2eeAccountGrantNodeVerificationInput,
+  type E2eeAdmittedAuthoritySnapshot,
   type E2eeClientAuthorizationKey,
   type E2eeHandshakeChannel,
   type E2eeModeTransition,
   type E2eeNodeModeTransitionSelection,
+  e2eeAuthorizationWithdrawn,
 } from "@ryco/shared/relayE2eeHandshake";
 import {
   E2eeRecordSession,
@@ -59,6 +63,7 @@ import {
 import type { RelayChannelAdmission, RelayChannelAdmitHandle } from "./RelayChannelRegistry.ts";
 import type { RelayChannelSendHandle } from "./RelayChannelRegistry.ts";
 import { defaultRelayScheduler, type RelaySessionScheduler } from "./RelayConnectionSession.ts";
+import type { NodeAccountGrantVerificationResult } from "./NodeAccountGrantVerifier.ts";
 
 // The node half of the relay E2EE layer, on the real relay path —
 // docs/relay-e2ee-protocol.md §4.3 (discrimination), §4.4 (the node mode
@@ -241,6 +246,10 @@ export interface NodeE2eeChannelSessionSources {
   readonly registerPolicyChannel: () => NodeE2eeChannelRegistration;
   /** §13.6: the Branch A reads and this channel's handle on that sweep. */
   readonly authorization: NodeE2eeChannelAuthorization;
+  /** Suite 0x02's authenticated Hub grant boundary; synchronous and write-free. */
+  readonly verifyAccountGrant?:
+    | ((input: E2eeAccountGrantNodeVerificationInput) => NodeAccountGrantVerificationResult)
+    | undefined;
   /** §6.4: borrow the secret half of the prekey THIS CHANNEL advertised. */
   readonly withPrekeySecret: <A>(
     prekeyId: string,
@@ -266,6 +275,7 @@ export interface NodeE2eeChannelSessionSources {
         readonly suite: E2eeSuiteId;
         readonly establishedAt: number;
         readonly verificationCode: string | undefined;
+        readonly accountGrantAuthority: E2eeAccountGrantAuthoritySnapshot | undefined;
       }) => () => void)
     | undefined;
   readonly onDiagnostic?: (diagnostic: NodeE2eeChannelDiagnostic) => void;
@@ -317,6 +327,8 @@ export interface NodeE2eeChannelSession {
    * phase, so there is nothing to wait for and the caller may try again.
    */
   readonly beginClose: () => Promise<void>;
+  /** Authenticated Hub revocation: withdraw authority immediately and close as Q9. */
+  readonly revokeAccountGrant: () => Promise<void>;
   /** The channel ended: §10.4's verdict, §9.5's erasure, and sweep retirement. */
   readonly dispose: (options?: { readonly incompleteReassembly?: boolean }) => void;
   /** §10.4, for the node-local diagnostic and for tests. */
@@ -341,6 +353,7 @@ export function makeNodeE2eeChannelSession(
 
   const policyRegistration = sources.registerPolicyChannel();
   let authorizationRelease: (() => void) | undefined;
+  let accountLocalAuthority: E2eeAdmittedAuthoritySnapshot | undefined;
   /** §13.5: the operator-directory entry for this session, retired with it. */
   let sessionDirectoryRelease: (() => void) | undefined;
   /**
@@ -759,14 +772,16 @@ export function makeNodeE2eeChannelSession(
       },
     });
     if (admitted.kind === "refused") return { kind: "refused", reason: "policy_withdrawn" };
-    // NX carries no Branch A record and therefore no snapshot: no withdrawal can
-    // name an NX channel, and §12.4's node policy governs its admission instead.
-    if (selection.admittedAuthority === undefined) {
+    // An account grant needs no local record. When one already exists, however,
+    // it is a deny/narrow ceiling and joins the same withdrawal sweep as suite
+    // 0x01 without changing this session's account-enrolled trust source.
+    const admittedAuthority = selection.admittedAuthority ?? accountLocalAuthority;
+    if (admittedAuthority === undefined) {
       markEstablished = admitted.established;
       return { kind: "entered" };
     }
     const registration = sources.authorization.registerInFlightHandshake({
-      admittedAuthority: selection.admittedAuthority,
+      admittedAuthority,
       // §11.2 P12's second clause — the generic surface, never a `policy` code,
       // which exists only post-key.
       abort: () => {
@@ -900,6 +915,12 @@ export function makeNodeE2eeChannelSession(
             admitAttempt: () => sources.rateLimiter.admit(sources.channel.hubOrigin),
             lookupClientAuthorization: (key) =>
               sources.authorization.lookupClientAuthorization(key),
+            verifyAccountGrant: (input) => {
+              const result = sources.verifyAccountGrant?.(input);
+              if (result?.accepted !== true) return false;
+              accountLocalAuthority = result.localAuthority;
+              return true;
+            },
             // §13.2 step 3, at step 6 and before anything is emitted: the §15
             // caps and the §13.6 window reservation, entirely in memory.
             //
@@ -1003,6 +1024,7 @@ export function makeNodeE2eeChannelSession(
               suite: accept.suite,
               establishedAt: at,
               verificationCode,
+              accountGrantAuthority: accept.accountGrantAuthority,
             });
           }
           return { kind: "entered" };
@@ -1124,6 +1146,15 @@ export function makeNodeE2eeChannelSession(
   async function authenticateFinish(at: number): Promise<NodeE2eeInboundDisposition | undefined> {
     const responder = handshake;
     if (responder === undefined || implicitFinishAuthenticated) return undefined;
+    if (
+      accountLocalAuthority !== undefined &&
+      e2eeAuthorizationWithdrawn(
+        accountLocalAuthority,
+        sources.authorization.reReadAuthorization(accountLocalAuthority),
+      )
+    ) {
+      return fatalPostKey("Q9", E2EE_ERROR_CODE_POLICY);
+    }
     const finish = responder.authenticateImplicitFinish({
       now: at,
       // §13.6's last re-check before a withdrawn authority could reach
@@ -1565,6 +1596,13 @@ export function makeNodeE2eeChannelSession(
     intercept,
     emit,
     beginClose,
+    revokeAccountGrant: async () => {
+      if (mode === "e2ee") {
+        await fatalPostKey("Q9", E2EE_ERROR_CODE_POLICY);
+      } else if (mode !== "closed") {
+        fatalPreKey("P12");
+      }
+    },
     dispose: (options = {}) => {
       // §10.4's channel-ended input reaches the machine whatever this session's
       // mode is, and that is the point rather than an oversight. A partial

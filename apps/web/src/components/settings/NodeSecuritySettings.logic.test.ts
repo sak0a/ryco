@@ -144,6 +144,18 @@ describe("the local mode raises no alarm about a relay that is not there", () =>
       available: true,
       unavailableBody: "",
     });
+    expect(nodeOperatorDataAvailability("local", "client")).toEqual({
+      available: false,
+      unavailableBody: expect.stringContaining("owner-only"),
+    });
+    expect(nodeOperatorDataAvailability("local", "checking")).toEqual({
+      available: false,
+      unavailableBody: expect.stringContaining("Checking"),
+    });
+    expect(nodeOperatorDataAvailability("local", "unavailable")).toEqual({
+      available: false,
+      unavailableBody: expect.stringContaining("could not verify"),
+    });
   });
 
   it("says something DIFFERENT about the connection in each mode", () => {

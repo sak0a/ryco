@@ -5,6 +5,7 @@ import {
   RELAY_CLOSE_REASONS,
   RELAY_FRAME_TYPES,
   RELAY_INITIAL_LIMITS,
+  RELAY_PROTOCOL_MINOR,
   RELAY_MAX_DATA_CHUNK_BYTES,
   RelayChannelId,
   RelayFrame,
@@ -13,8 +14,10 @@ import {
 } from "./relay.ts";
 
 const version = { protocolMajor: 1, protocolMinor: 2 } as const;
+const version3 = { protocolMajor: 1, protocolMinor: 3 } as const;
 const nodeId = `node_${"n".repeat(22)}`;
 const channelId = `ch_${"c".repeat(22)}`;
+const digest = new Uint8Array(32).fill(8);
 
 const validFrames = [
   {
@@ -60,6 +63,41 @@ const validFrames = [
   { type: "ping", ...version, nonce: new Uint8Array(8).fill(4) },
   { type: "pong", ...version, nonce: new Uint8Array(8).fill(4) },
   { type: "error", ...version, code: "rate_limited", fatal: false, retryAfterMs: 1_000 },
+  {
+    type: "node.e2ee.statement",
+    ...version3,
+    connectorGeneration: 1,
+    statement: new Uint8Array(128).fill(7),
+    statementDigest: digest,
+    expiresAt: 1_788_451_260_000,
+  },
+  {
+    type: "node.e2ee.statement.ack",
+    ...version3,
+    connectorGeneration: 1,
+    statementDigest: digest,
+  },
+  {
+    type: "e2ee.verifier-keys",
+    ...version3,
+    generation: 1,
+    keys: [
+      {
+        keyId: `hgk_${"k".repeat(22)}`,
+        publicKey: new Uint8Array(32).fill(9),
+        notBefore: 1_788_451_200_000,
+        notAfter: 1_788_451_260_000,
+      },
+    ],
+  },
+  {
+    type: "e2ee.enrollment-revoked",
+    ...version3,
+    enrollmentId: `enr_${"e".repeat(22)}`,
+    enrollmentRevision: 1,
+    accountAuthEpoch: 2,
+    deviceAuthEpoch: 3,
+  },
 ] as const;
 
 describe("relay schemas", () => {
@@ -68,8 +106,12 @@ describe("relay schemas", () => {
   it("decodes both authentication handshakes and every frame class", () => {
     const decoded = validFrames.map((frame) => decodeFrame(frame));
 
-    expect(decoded).toHaveLength(13);
+    expect(decoded).toHaveLength(17);
     expect(new Set(decoded.map((frame) => frame.type))).toEqual(new Set(RELAY_FRAME_TYPES));
+  });
+
+  it("advertises relay minor 3 while retaining the older schema versions", () => {
+    expect(RELAY_PROTOCOL_MINOR).toBe(3);
   });
 
   it("keeps the stable close-reason set exact", () => {
@@ -242,6 +284,88 @@ describe("relay schemas", () => {
       protocolMinor: 1,
       channelId,
     });
+  });
+
+  it("gates the all-or-nothing account grant context on protocol minor 3", () => {
+    const accountGrantContext = [
+      2,
+      `rtk_${"t".repeat(22)}`,
+      digest,
+      new Uint8Array(32).fill(6),
+    ] as const;
+    expect(
+      decodeFrame({
+        type: "channel.open",
+        ...version3,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+        accountGrantContext,
+      }),
+    ).toMatchObject({ type: "channel.open", accountGrantContext });
+    expect(
+      decodeFrame({
+        type: "channel.open",
+        ...version3,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+      }),
+    ).toMatchObject({ type: "channel.open" });
+    expect(() =>
+      decodeFrame({
+        type: "channel.open",
+        ...version,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+        accountGrantContext,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeFrame({
+        type: "channel.open",
+        protocolMajor: 1,
+        protocolMinor: 1,
+        channelId,
+        accountGrantContext,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeFrame({
+        type: "channel.open",
+        ...version3,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+        accountGrantContext: accountGrantContext.slice(0, 3),
+      }),
+    ).toThrow();
+  });
+
+  it("rejects minor-3 E2EE control frames on older connections and duplicate key ids", () => {
+    expect(() =>
+      decodeFrame({
+        type: "node.e2ee.statement.ack",
+        ...version,
+        connectorGeneration: 1,
+        statementDigest: digest,
+      }),
+    ).toThrow();
+    const key = {
+      keyId: `hgk_${"k".repeat(22)}`,
+      publicKey: new Uint8Array(32).fill(9),
+      notBefore: 1_788_451_200_000,
+      notAfter: 1_788_451_260_000,
+    } as const;
+    expect(() =>
+      decodeFrame({
+        type: "e2ee.verifier-keys",
+        ...version3,
+        generation: 1,
+        keys: [key, key],
+      }),
+    ).toThrow();
   });
 
   it("gates protocol minor version 2 close reasons", () => {

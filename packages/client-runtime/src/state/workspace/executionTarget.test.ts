@@ -34,6 +34,14 @@ function project(
 }
 
 describe("workspace execution target", () => {
+  it("allows account-trusted native variants to execute without a manual pin", () => {
+    expect(
+      resolveWorkspaceExecutionTarget({
+        project: project([variant("account", { nativeTrust: "account-trusted" })]),
+      }),
+    ).toMatchObject({ status: "resolved", target: { environmentId: "account" } });
+  });
+
   it("ranks recent use, local Desktop, and stable environment id in order", () => {
     expect(
       resolveWorkspaceExecutionTarget({

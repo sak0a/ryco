@@ -3,6 +3,7 @@ import {
   HOSTED_BROWSER_STATUSES,
   HOSTED_E2EE_CHANNEL_STATUSES,
   HOSTED_RELAY_TRANSPORT_STATUSES,
+  HOSTED_NATIVE_DEVICE_SECURITY_STATUSES,
   HOSTED_RYCO_SESSION_STATUSES,
   HOSTED_SELECTION_STATUSES,
   type HostedConnectionGuarantee,
@@ -26,13 +27,19 @@ export function everyHostedConnectionStatusInput(): ReadonlyArray<HostedConnecti
       for (const selectionStatus of HOSTED_SELECTION_STATUSES) {
         for (const transportStatus of HOSTED_RELAY_TRANSPORT_STATUSES) {
           for (const e2eeStatus of HOSTED_E2EE_CHANNEL_STATUSES) {
-            combinations.push({
-              browserStatus,
-              sessionStatus,
-              selectionStatus,
-              transportStatus,
-              e2eeStatus,
-            });
+            for (const nativeDeviceSecurityStatus of [
+              undefined,
+              ...HOSTED_NATIVE_DEVICE_SECURITY_STATUSES,
+            ]) {
+              combinations.push({
+                browserStatus,
+                sessionStatus,
+                selectionStatus,
+                transportStatus,
+                e2eeStatus,
+                ...(nativeDeviceSecurityStatus === undefined ? {} : { nativeDeviceSecurityStatus }),
+              });
+            }
           }
         }
       }
@@ -83,6 +90,12 @@ export function hostedConnectionConnectedByGateOrder(value: HostedConnectionStat
   if (value.selectionStatus === "authorization-removed") return false;
   if (value.selectionStatus === "revoked") return false;
   if (value.selectionStatus === "incompatible") return false;
+  if (
+    value.nativeDeviceSecurityStatus !== undefined &&
+    value.nativeDeviceSecurityStatus !== "ready"
+  ) {
+    return false;
+  }
   if (value.transportStatus !== "online" || value.sessionStatus !== "ready") return false;
   // §4.4's channel state, restated from the input rather than read off the
   // indicator: a `negotiating` channel has released nothing and a §13.1
@@ -110,6 +123,7 @@ export function hostedConnectionGuaranteeByGateOrder(
 ): HostedConnectionGuarantee {
   if (!hostedConnectionConnectedByGateOrder(value)) return "none";
   if (value.e2eeStatus === "verified") return "e2ee";
+  if (value.e2eeStatus === "account-trusted") return "account";
   if (value.e2eeStatus === "web-unsigned") return "web";
   if (value.e2eeStatus === "legacy") return "legacy";
   return "none";

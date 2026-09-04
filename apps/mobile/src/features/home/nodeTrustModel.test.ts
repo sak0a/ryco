@@ -10,6 +10,7 @@ describe("Node trust presentation", () => {
       authoritativeTrustByEnvironmentId: new Map([
         ["env-a", "verified"],
         ["env-b", "unverified"],
+        ["env-account", "account-trusted"],
         ["env-c", "unknown"],
         ["env-d", "identity-conflict"],
       ]),
@@ -17,6 +18,7 @@ describe("Node trust presentation", () => {
     expect(Object.fromEntries(trust)).toEqual({
       "env-a": "verified",
       "env-b": "unverified",
+      "env-account": "account-trusted",
       "env-c": "unverified",
       "env-d": "unverified",
     });

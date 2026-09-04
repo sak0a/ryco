@@ -73,6 +73,7 @@ describe("relay RPC integration", () => {
     );
     const registry = new RelayChannelRegistry({
       limits,
+      protocol: version,
       sendQueue,
       onOutboundReady: () => sendQueue.flush(),
       factory: {

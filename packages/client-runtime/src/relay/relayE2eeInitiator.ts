@@ -19,6 +19,7 @@ import {
   type E2eeClientHandshakeCredentials,
   type E2eeClientHelloResult,
 } from "@ryco/shared/relayE2eeHandshake";
+import { e2eeSha256 } from "@ryco/shared/relayE2eeKeys";
 import { eraseE2eeSessionSecrets, type E2eeSessionSecrets } from "@ryco/shared/relayE2eeSession";
 import type { NodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeTranscripts";
 import { deriveE2eeWebSas } from "@ryco/shared/relayE2eeVerificationDisplay";
@@ -28,6 +29,7 @@ import {
   decodeE2eeNegotiationRecord,
   E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT,
   E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
   type E2eeSuiteId,
 } from "@ryco/shared/relayE2eeWire";
 
@@ -124,12 +126,7 @@ export interface RelayE2eeInitiatorAttempt {
   readonly pairingOnly: boolean;
   /** §8.2: this client's own fixed local suite-preference order. */
   readonly localSuitePreference: readonly number[];
-  readonly credentials:
-    | E2eeClientHandshakeCredentials
-    | Omit<
-        Extract<E2eeClientHandshakeCredentials, { readonly tier: "native" }>,
-        "agreementSecretKey"
-      >;
+  readonly credentials: E2eeClientHandshakeCredentials | E2eeNativePublicHandshakeCredentials;
   /**
    * Native-only, one-operation access to the static agreement scalar.
    *
@@ -185,6 +182,17 @@ export interface RelayE2eeInitiatorAttempt {
   readonly onWebVerificationCode?: ((code: string) => void) | undefined;
 }
 
+type WithoutAgreementSecret<T> = T extends {
+  readonly agreementSecretKey: Uint8Array;
+}
+  ? Omit<T, "agreementSecretKey">
+  : never;
+
+/** Preserve the local/account discriminant while the durable scalar is borrowed. */
+type E2eeNativePublicHandshakeCredentials = WithoutAgreementSecret<
+  Extract<E2eeClientHandshakeCredentials, { readonly tier: "native" }>
+>;
+
 export interface RelayE2eeNativeHandshakeStartInput {
   readonly statement: Uint8Array;
   readonly channel: {
@@ -194,6 +202,11 @@ export interface RelayE2eeNativeHandshakeStartInput {
     readonly relayProtocolMinor: number;
     readonly channelOpenCapability: string;
     readonly channelOpenEffectiveRole: string;
+    readonly accountGrantContext?: {
+      readonly relayTicketId: string;
+      readonly deviceGrantDigest: Uint8Array;
+      readonly nodeCapabilityStatementDigest: Uint8Array;
+    };
   };
   readonly selectedSuite: E2eeSuiteId;
   readonly offeredSuites: readonly number[];
@@ -299,6 +312,8 @@ if (T_ADV + T_TRUST_COMMIT + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN > RPC_KEEPAL
  */
 function advertisedMaterial(
   statement: NodeE2eeCapabilityStatement,
+  statementBytes: Uint8Array,
+  selectedSuite: E2eeSuiteId,
   anchor: NodeE2eeCapabilityAnchor,
   pin: NodeE2eeVerifiedPin | undefined,
 ): E2eeAdvertisedChannelMaterial {
@@ -312,6 +327,12 @@ function advertisedMaterial(
     agreementPublicKey: statement.prekeyCertificate.agreementPublicKey,
     continuityChainTranscripts: statement.continuityChain.map((entry) => entry.transcript),
     continuityId: pin !== undefined ? pin.continuityId : statement.continuityId,
+    ...(selectedSuite === E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256
+      ? {
+          policyGeneration: statement.policyGeneration,
+          capabilityStatementDigest: e2eeSha256(statementBytes),
+        }
+      : {}),
   };
 }
 
@@ -451,7 +472,11 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
    * selects it, rather than a flag a caller could forget to set.
    */
   function releaseGatedWithoutVerifiedPin(): boolean {
-    return attempt.credentials.tier === "native" && attempt.verifiedPin === undefined;
+    return (
+      attempt.credentials.tier === "native" &&
+      attempt.credentials.trustSource !== "account-enrolled" &&
+      attempt.verifiedPin === undefined
+    );
   }
 
   /**
@@ -595,6 +620,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
             statement,
             connectedHubOrigin: attempt.hubOrigin,
             tier: attempt.credentials.tier,
+            ...(attempt.credentials.trustSource === undefined
+              ? {}
+              : { trustSource: attempt.credentials.trustSource }),
             localSuitePreference: attempt.localSuitePreference,
             now: now(),
             ...(attempt.accountId === undefined ? {} : { accountId: attempt.accountId }),
@@ -727,13 +755,14 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       }
       return borrowAgreementSecretAndSendHello(
         statement,
+        statementBytes,
         anchor,
         selectedSuite,
         credentials,
         localPreKeyDeadline,
       );
     }
-    return sendHelloWithCredentials(statement, anchor, selectedSuite, credentials);
+    return sendHelloWithCredentials(statement, statementBytes, anchor, selectedSuite, credentials);
   }
 
   function startNativeHandshakeAndSendHello(
@@ -783,6 +812,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
           relayProtocolMinor: host.channel.relayProtocolMinor,
           channelOpenCapability: host.channel.capability,
           channelOpenEffectiveRole: host.channel.effectiveRole,
+          ...(host.channel.accountGrantContext === undefined
+            ? {}
+            : { accountGrantContext: host.channel.accountGrantContext }),
         },
         selectedSuite,
         offeredSuites: attempt.localSuitePreference,
@@ -832,12 +864,10 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
 
   function borrowAgreementSecretAndSendHello(
     statement: NodeE2eeCapabilityStatement,
+    statementBytes: Uint8Array,
     anchor: NodeE2eeCapabilityAnchor,
     selectedSuite: E2eeSuiteId,
-    credentials: Omit<
-      Extract<E2eeClientHandshakeCredentials, { readonly tier: "native" }>,
-      "agreementSecretKey"
-    >,
+    credentials: E2eeNativePublicHandshakeCredentials,
     localPreKeyDeadline: number,
   ): Promise<RelayE2eeInboundDisposition> {
     const borrow = attempt.withNativeAgreementSecretKey;
@@ -878,7 +908,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
         // selection replacement. This callback is the first code that sees the
         // scalar, and it emits nothing unless this exact channel still owns K1.
         if (finished || mode !== "negotiating" || helloSent) return REJECTED;
-        return sendHelloWithCredentials(statement, anchor, selectedSuite, {
+        return sendHelloWithCredentials(statement, statementBytes, anchor, selectedSuite, {
           ...credentials,
           agreementSecretKey,
         });
@@ -910,6 +940,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
 
   function sendHelloWithCredentials(
     statement: NodeE2eeCapabilityStatement,
+    statementBytes: Uint8Array,
     anchor: NodeE2eeCapabilityAnchor,
     selectedSuite: E2eeSuiteId,
     credentials: E2eeClientHandshakeCredentials,
@@ -923,8 +954,17 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
         relayProtocolMinor: host.channel.relayProtocolMinor,
         channelOpenCapability: host.channel.capability,
         channelOpenEffectiveRole: host.channel.effectiveRole,
+        ...(host.channel.accountGrantContext === undefined
+          ? {}
+          : { accountGrantContext: host.channel.accountGrantContext }),
       },
-      advertised: advertisedMaterial(statement, anchor, attempt.verifiedPin),
+      advertised: advertisedMaterial(
+        statement,
+        statementBytes,
+        selectedSuite,
+        anchor,
+        attempt.verifiedPin,
+      ),
       selectedSuite,
       offeredSuites: attempt.localSuitePreference,
       credentials,

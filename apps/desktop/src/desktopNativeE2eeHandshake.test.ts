@@ -11,7 +11,7 @@ import {
   encodeNodeE2eePrekeyTranscript,
 } from "@ryco/shared/relayE2eeTranscripts";
 import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { DesktopE2eeTrustStore } from "./desktopE2eeTrust.ts";
 import {
@@ -52,6 +52,115 @@ function memoryStore(): DesktopProtectedRecordStore {
 }
 
 describe("Desktop native E2EE handshake service", () => {
+  it("prepares an account-grant attempt without promoting it to a verified pin", async () => {
+    const origin = "https://hub.example.test";
+    const accountId = `acct_${"A".repeat(22)}`;
+    const nodeId = `node_${"B".repeat(22)}`;
+    const records = memoryStore();
+    const clientKeys = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const clientPublic = rawP256(clientKeys.publicKey);
+    const agreement = generateE2eeAgreementKeyPair();
+    const dispose = vi.fn();
+    const resolve = vi.fn(
+      async () =>
+        ({
+          kind: "authorized",
+          trustSource: "account-enrolled",
+          suiteId: 2,
+          ticket: "T".repeat(43),
+          expiresAt: 1_800_000_160_000,
+          nodeCapabilityStatement: new Uint8Array([9, 8, 7]),
+          effectiveRole: "operator",
+          capability: "ryco.rpc",
+          grant: {
+            claims: {
+              nodePolicyGeneration: 4,
+              relayTicketId: `rtk_${"r".repeat(22)}`,
+              nodeCapabilityStatementDigest: new Uint8Array(32).fill(5),
+            },
+            grantDigest: new Uint8Array(32).fill(6),
+          },
+          dispose,
+        }) as never,
+    );
+    const service = new DesktopNativeE2eeHandshakeService({
+      origin,
+      records,
+      identityStatus: () => ({
+        status: "ready",
+        accountId,
+        nodeId: `node_${"L".repeat(22)}`,
+        localNodeHandle: "H".repeat(22),
+        accountE2eeReady: true,
+      }),
+      accountAuthority: {
+        enrollmentState: () =>
+          ({
+            status: "ready",
+            generation: 1,
+            errorCode: null,
+            ready: { namespace: { hubOrigin: origin, accountId } },
+          }) as never,
+        resolve,
+      },
+      now: () => 1_800_000_100_000,
+      security: {
+        getSigningPublicKey: async () => clientPublic,
+        getSigningKey: async () => ({
+          algorithm: "ES256",
+          publicJwk: uncompressedPointToJwk(clientPublic),
+          sign: async (message) =>
+            derSignatureToRaw(Uint8Array.from(sign("sha256", message, clientKeys.privateKey))),
+        }),
+        ensureAgreementPublicKey: async () => agreement.publicKey,
+        withAgreementSecretKey: async (use) => use(Uint8Array.from(agreement.secretKey)),
+      },
+    });
+
+    const prepared = await service.prepare({
+      accountId,
+      nodeId,
+      expectedTrust: "account-trusted",
+    });
+
+    expect(prepared).toMatchObject({
+      kind: "native",
+      pairingOnly: false,
+      suiteId: 2,
+      relayTicket: { ticket: "T".repeat(43) },
+      credentials: { tier: "native", trustSource: "account-enrolled" },
+    });
+    expect(await new DesktopE2eeTrustStore(records).read(origin, accountId, nodeId)).toBeNull();
+    expect(resolve).toHaveBeenCalledOnce();
+    if (prepared.kind !== "native") throw new Error("Expected account E2EE preparation.");
+    await expect(
+      service.start(prepared.attemptHandle, {
+        statement: new Uint8Array([9, 8, 7]),
+        channel: {
+          hubOrigin: origin,
+          channelId: `ch_${"c".repeat(22)}`,
+          relayProtocolMajor: 1,
+          relayProtocolMinor: 3,
+          channelOpenCapability: "ryco.rpc",
+          channelOpenEffectiveRole: "operator",
+          accountGrantContext: {
+            relayTicketId: `rtk_${"r".repeat(22)}`,
+            deviceGrantDigest: new Uint8Array(32).fill(6),
+            nodeCapabilityStatementDigest: new Uint8Array(32).fill(7),
+          },
+        },
+        selectedSuite: 2,
+        offeredSuites: [2],
+        intendedCapability: "ryco.rpc",
+        intendedRole: "operator",
+        now: 1_800_000_100_000,
+      }),
+    ).rejects.toBeInstanceOf(DesktopNativeE2eeHandshakeError);
+    service.destroy(prepared.attemptHandle);
+    expect(dispose).toHaveBeenCalledOnce();
+    agreement.secretKey.fill(0);
+  });
+
   it("prepares a pairing-only native attempt for another node on a verified Hub", async () => {
     const origin = "https://hub.example.test";
     const accountId = `acct_${"A".repeat(22)}`;

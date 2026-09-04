@@ -14,6 +14,7 @@ import {
   useHostedHubStore,
 } from "../../hostedHub/state";
 import { useMobileE2eeChannelStatus } from "../e2ee/useMobileE2eeSession";
+import { useMobileNativeE2eeEnrollmentStatus } from "../e2ee/useMobileNativeE2eeEnrollment";
 import { SettingsRow } from "../settings/components/SettingsRow";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import {
@@ -52,6 +53,7 @@ export function HostedAccountRouteScreen() {
   const state = useHostedHubStore((value) => value);
   // §12.2 / §2.2: the connection pill names §4.4's locked mode.
   const e2eeStatus = useMobileE2eeChannelStatus(state.selectedNode?.environmentId ?? null);
+  const nativeDeviceSecurityStatus = useMobileNativeE2eeEnrollmentStatus();
   const accountState = useHostedAccountStore((value) => value);
   const [draft, setDraftState] = useState<HostedAccountPromptDraft | null>(null);
   // The ref is the *live* draft and the state is the rendered one. A submit
@@ -92,6 +94,7 @@ export function HostedAccountRouteScreen() {
     state,
     hostedModeAvailable,
     e2eeStatus,
+    nativeDeviceSecurityStatus,
     onSignIn: () => navigation.navigate("Access"),
     actionStatus: accountState.actionStatus,
   });

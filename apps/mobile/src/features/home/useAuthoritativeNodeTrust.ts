@@ -9,6 +9,10 @@ import {
   subscribeAuthoritativeNodeTrustSource,
 } from "./authoritativeNodeTrustSource";
 import { resolveAuthoritativeNativeNodeTrust } from "./nativeNodeEligibilityModel";
+import {
+  getMobileNativeE2eeEnrollmentState,
+  subscribeMobileNativeE2eeEnrollment,
+} from "../../hostedHub/e2eeEnrollment";
 
 export interface AuthoritativeNodeTrustTarget {
   readonly environmentId: string;
@@ -27,6 +31,11 @@ export function useAuthoritativeNodeTrust(
     subscribeMobileE2eeSession,
     getMobileE2eeSessionState,
     getMobileE2eeSessionState,
+  );
+  const enrollment = useSyncExternalStore(
+    subscribeMobileNativeE2eeEnrollment,
+    getMobileNativeE2eeEnrollmentState,
+    getMobileNativeE2eeEnrollmentState,
   );
   const accountId = useHostedHubStore((state) => state.account?.id ?? null);
   const targetKey = targets
@@ -70,13 +79,15 @@ export function useAuthoritativeNodeTrust(
             ? Promise.reject(new Error("Trust source unavailable"))
             : source.classify(selection),
         identityConflictEnvironmentIds: conflicts,
+        accountEnrollmentReady:
+          enrollment.status === "ready" && enrollment.ready?.namespace.accountId === accountId,
       });
       if (!cancelled) setTrust(next);
     })();
     return () => {
       cancelled = true;
     };
-  }, [accountId, activeSession, stableTargets, trustRevision]);
+  }, [accountId, activeSession, enrollment, stableTargets, trustRevision]);
 
   return trust;
 }

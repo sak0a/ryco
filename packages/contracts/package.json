@@ -30,6 +30,11 @@
       "import": "./src/hostedIdentity.ts",
       "require": "./src/hostedIdentity.ts"
     },
+    "./native-e2ee": {
+      "types": "./src/nativeE2ee.ts",
+      "import": "./src/nativeE2ee.ts",
+      "require": "./src/nativeE2ee.ts"
+    },
     "./local-introduction": {
       "types": "./src/localIntroduction.ts",
       "import": "./src/localIntroduction.ts",

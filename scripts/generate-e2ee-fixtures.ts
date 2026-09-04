@@ -28,6 +28,7 @@ import {
   E2EE_HANDSHAKE_REJECT_BYTES,
   E2EE_HANDSHAKE_REJECT_PAD_BYTES,
   E2EE_HUB_ORIGIN_MAX_BYTES,
+  E2EE_HUB_DEVICE_GRANT_MAX_BYTES,
   E2EE_MAX_CLOCK_SKEW,
   E2EE_NEGOTIATION_DISCRIMINATOR,
   E2EE_PREKEY_LIFETIME,
@@ -55,6 +56,16 @@ import {
   T_CLOSE_LINGER_MAX,
   T_KEEPALIVE_FLUSH_MARGIN,
 } from "@ryco/shared/relayE2eeConstants";
+import {
+  decodeHubDeviceGrant,
+  encodeHubDeviceGrantClaims,
+  encodeHubDeviceGrantEnvelope,
+  encodeHubDeviceGrantSigningEnvelope,
+  verifyHubDeviceGrant,
+  type HubDeviceGrantBindings,
+  type HubDeviceGrantClaimsInput,
+  type HubDeviceGrantVerificationKey,
+} from "@ryco/shared/relayE2eeHubDeviceGrant";
 import {
   E2EE_CLOSE_COMMITMENT_DOMAIN,
   E2EE_ERROR_CODE_INTERNAL,
@@ -105,6 +116,7 @@ import {
 import {
   canonicalizeE2eeHubOrigin,
   decodeCanonicalE2eeCbor,
+  encodeCanonicalE2eeCbor,
   e2eeAuthorizationContextCommitment,
   type E2eeAuthorizationContextInput,
   e2eeEffectiveAdmittedPatterns,
@@ -116,6 +128,7 @@ import {
   E2EE_NODE_PREKEY_TRANSCRIPT_DOMAIN,
   E2EE_NOISE_PATTERN_IK,
   E2EE_NOISE_PATTERN_NX,
+  encodeClientE2eePrekeyCertificateCarrier,
   encodeClientE2eePrekeyTranscript,
   encodeE2eeAuthorizationContext,
   encodeE2eeNoisePrologue,
@@ -152,6 +165,7 @@ import {
   E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT,
   E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
   encodeE2eeDirectionLabel,
   encodeE2eeEnvelope,
   encodeE2eeEnvelopeHeader,
@@ -164,6 +178,7 @@ import {
   prepareRelayMessage,
 } from "@ryco/shared/relayMessageChunks";
 import {
+  encodeE2eeAccountGrantIkHelloPayload,
   decodeE2eeClientHello,
   decodeE2eeServerAccept,
   type E2eeAdmittedAuthoritySnapshot,
@@ -310,12 +325,12 @@ interface FixtureFamily {
 // §16.4 obliges a named subset of the families to run in the web browser test
 // suite as well as the Node gate, and the COMPLETE corpus to pass on physical
 // devices on both mobile platforms before the native client ships E2EE support.
-// Neither run exists in this repository yet. That absence is a deferral exactly
-// like a missing case is, so it is DECLARED — once at the top of the manifest and
-// again in each family §16.4 names — rather than left as an unmentioned gap for a
-// reader to infer. A vector that produces different bytes on any supported
-// runtime is a release-blocking defect (§16.4); nothing here has yet shown that
-// none does.
+// The Chromium run is wired under `apps/web/src/components/hostedHub/` and its
+// executable census lives in `relayE2eeCorpusLiveness.ts`. The physical-device
+// run does not exist in this repository yet. That remaining absence is a
+// deferral exactly like a missing case is, so it is DECLARED — once at the top
+// of the manifest and again in each family §16.4 names — rather than left as an
+// unmentioned gap for a reader to infer.
 
 /** The families §16.4 names, with the part of each it names. */
 const CROSS_RUNTIME_SCOPES: ReadonlyMap<number, string> = new Map([
@@ -328,6 +343,7 @@ const CROSS_RUNTIME_SCOPES: ReadonlyMap<number, string> = new Map([
   [14, "the `WebSAS` half of this family"],
   [16, "the NX cases of this family"],
   [17, "the P-256 cases of this family"],
+  [19, "the Web-isolation cases of this family"],
 ]);
 
 function crossRuntimeDeferral(family: number): string {
@@ -335,7 +351,7 @@ function crossRuntimeDeferral(family: number): string {
   if (scope === undefined) {
     throw new Error(`Family F${String(family)} is not named by §16.4.`);
   }
-  return `§16.4 cross-runtime equality: ${scope} MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra.`;
+  return `§16.4 cross-runtime equality: ${scope} now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate.`;
 }
 
 /** §16.2: byte strings are `{"$bytes": "<lowercase hex>"}`. */
@@ -8854,9 +8870,9 @@ async function buildFamily10(): Promise<FixtureFamily> {
     summary:
       "The NODE half of §16.3 F10. Every §4.4 node transition row N1–N17, with its state, its input class and payload bytes, the guards that select it, and its expected ACTION and NEXT STATE — including rows N15–N17, whose input is `channel.accept` and whose §12.5 occurrence accounting §16.3 states field by field, and the §8.9 deadline under each policy. Plus the §11.2 partition of the legacy-lock injection rows: an envelope after the lock is P5, a correctly sized and correctly directed negotiation record after it is P24 — proved to be neither over-bound nor misdirected, and therefore not P3 — and an unknown or absent first byte is P6, each FATAL-PRE because no session keys exist in `legacy`, with two P3 contrast cases fixing the boundary of that partition. The node rows are replayed against the real runtime by apps/server/src/hubConnector/relayE2eeNodeCorpus.test.ts.",
     deferred: [
-      "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state. No client mode machine exists in this repository, so no client row has an implementation to derive an expectation from. The node rows N1–N17 ARE emitted above and are held to the real `NodeE2eeChannelSession` by the node-side consuming test. Owned by the client phase.",
-      "The client rows' §12.1.1 selection classification, the `(hubOrigin, accountId)` scope, and the device-level `anyNodeVerified(hubOrigin)` marker, together with the account-scope-change cases that discharge the §12.1.1 provenance rule (K24/K23 versus K13). These need the §13.1 durable pin store and the §12.1.1 classifier, neither of which is landed. Owned by the client phase.",
-      "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — the stalled accept (K15), the buffered keepalive round trip, and the send-buffer overflow including the connection-wide multi-channel accounting. The buffering and flushing behavior they assert belongs to a client mode machine and to the client's relay engine, neither of which exists here; the §8.9 node deadline under each policy IS emitted above. Owned by the client phase.",
+      "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state — is not yet transcribed into this F10 fixture. The landed client mode machine is exercised by apps/web and packages/client-runtime tests, while the node rows N1–N17 ARE emitted above and held to the real `NodeE2eeChannelSession`. Owned by the F10 corpus expansion.",
+      "The client rows' §12.1.1 selection classification, `(hubOrigin, accountId)` scope, device-level `anyNodeVerified(hubOrigin)` marker, and account-scope-change cases (K24/K23 versus K13) are implemented and covered in client-runtime/Web/native tests but are not yet transcribed into this F10 fixture. Owned by the F10 corpus expansion.",
+      "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — stalled accept K15, buffered keepalive round trip, and send-buffer overflow including connection-wide multi-channel accounting — are implemented and covered by client-runtime/Web tests but are not yet transcribed into this F10 fixture; the §8.9 node deadline under each policy IS emitted above. Owned by the F10 corpus expansion.",
       crossRuntimeDeferral(10),
     ],
     testKeyMaterial: HANDSHAKE_TEST_KEY_MATERIAL,
@@ -9481,11 +9497,716 @@ function buildFamily18(): FixtureFamily {
   };
 }
 
+// ─── F19 — account-enrolled native Hub device grants (§18) ─────────────────
+
+const F19_HUB_GRANT_SEED = seedOf(0x41);
+const F19_OTHER_HUB_GRANT_SEED = seedOf(0x42);
+const F19_HUB_GRANT_PUBLIC = ed25519.getPublicKey(F19_HUB_GRANT_SEED);
+const F19_STATEMENT_DIGEST = nobleSha256(utf8.encode("f19-node-statement"));
+const F19_ACCOUNT_ID = `acct_${"A".repeat(22)}`;
+const F19_ENROLLMENT_ID = `enr_${"E".repeat(22)}`;
+const F19_GRANT_ID = `hgr_${"G".repeat(22)}`;
+const F19_GRANT_KEY_ID = `hgk_${"K".repeat(22)}`;
+const F19_TICKET_ID = `rtk_${"T".repeat(22)}`;
+const F19_CLIENT_PREKEY_TRANSCRIPT = encodeClientE2eePrekeyTranscript({
+  hubOrigin: HUB_ORIGIN,
+  accountId: F19_ACCOUNT_ID,
+  identityPublicKey: CLIENT_IDENTITY_PUBLIC,
+  agreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+  createdAt: NOW - 30_000,
+  expiresAt: NOW + 180_000,
+});
+const F19_CLIENT_PREKEY_SIGNATURE = signClient(F19_CLIENT_PREKEY_TRANSCRIPT);
+const F19_CLIENT_PREKEY_CARRIER = encodeClientE2eePrekeyCertificateCarrier(
+  F19_CLIENT_PREKEY_TRANSCRIPT,
+  F19_CLIENT_PREKEY_SIGNATURE,
+);
+const F19_CERTIFICATE_DIGEST = nobleSha256(F19_CLIENT_PREKEY_CARRIER);
+
+const F19_BASE_CLAIMS = {
+  issuerHubOrigin: HUB_ORIGIN,
+  keyId: F19_GRANT_KEY_ID,
+  grantId: F19_GRANT_ID,
+  accountId: F19_ACCOUNT_ID,
+  accountAuthEpoch: 3,
+  enrollmentId: F19_ENROLLMENT_ID,
+  enrollmentRevision: 4,
+  deviceAuthEpoch: 5,
+  deviceIdentityPublicKey: CLIENT_IDENTITY_PUBLIC,
+  deviceAgreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+  clientPrekeyCertificateDigest: F19_CERTIFICATE_DIGEST,
+  nodeId: NODE_ID,
+  nodeIdentityPublicKey: NODE_IDENTITY_PUBLIC,
+  nodeAgreementPublicKey: NODE_AGREEMENT_PUBLIC,
+  nodeContinuityId: CONTINUITY_ID,
+  nodePolicyGeneration: 6,
+  nodeCapabilityStatementDigest: F19_STATEMENT_DIGEST,
+  relayTicketId: F19_TICKET_ID,
+  maximumRole: "operator",
+  capabilities: ["ryco.rpc"],
+  issuedAt: NOW,
+  notBefore: NOW - 1_000,
+  expiresAt: NOW + 60_000,
+  nonce: new Uint8Array(32).fill(0x19),
+} as unknown as HubDeviceGrantClaimsInput;
+
+const F19_BASE_KEY: HubDeviceGrantVerificationKey = {
+  keyId: F19_GRANT_KEY_ID,
+  publicKey: F19_HUB_GRANT_PUBLIC,
+  notBefore: NOW - 60_000,
+  notAfter: NOW + 180_000,
+};
+
+const F19_BASE_BINDINGS: HubDeviceGrantBindings = {
+  issuerHubOrigin: HUB_ORIGIN,
+  accountId: F19_ACCOUNT_ID,
+  accountAuthEpoch: 3,
+  enrollmentId: F19_ENROLLMENT_ID,
+  enrollmentRevision: 4,
+  deviceAuthEpoch: 5,
+  enrollmentStatus: "active",
+  deviceIdentityPublicKey: CLIENT_IDENTITY_PUBLIC,
+  deviceAgreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+  clientPrekeyCertificateDigest: F19_CERTIFICATE_DIGEST,
+  clientPrekeyCertificateExpiresAt: NOW + 180_000,
+  nodeId: NODE_ID,
+  nodeIdentityPublicKey: NODE_IDENTITY_PUBLIC,
+  nodeAgreementPublicKey: NODE_AGREEMENT_PUBLIC,
+  nodeAgreementPrekeyExpiresAt: NOW + 180_000,
+  nodeContinuityId: CONTINUITY_ID,
+  nodePolicyGeneration: 6,
+  nodeCapabilityStatementDigest: F19_STATEMENT_DIGEST,
+  nodeCapabilityStatementExpiresAt: NOW + 180_000,
+  relayTicketId: F19_TICKET_ID,
+  relayTicketExpiresAt: NOW + 180_000,
+  effectiveRole: "operator",
+  effectiveCapabilities: ["ryco.rpc"],
+  accountGrantAllowed: true,
+  now: NOW,
+};
+
+function f19SignClaims(
+  claims: HubDeviceGrantClaimsInput = F19_BASE_CLAIMS,
+  seed: Uint8Array = F19_HUB_GRANT_SEED,
+): {
+  readonly claimsBytes: Uint8Array;
+  readonly signingEnvelope: Uint8Array;
+  readonly signature: Uint8Array;
+  readonly envelope: Uint8Array;
+} {
+  const claimsBytes = encodeHubDeviceGrantClaims(claims);
+  const signingEnvelope = encodeHubDeviceGrantSigningEnvelope(claimsBytes);
+  const signature = ed25519.sign(signingEnvelope, seed);
+  return {
+    claimsBytes,
+    signingEnvelope,
+    signature,
+    envelope: encodeHubDeviceGrantEnvelope(claimsBytes, signature),
+  };
+}
+
+function f19ResignArray(array: readonly unknown[]): Uint8Array {
+  const claimsBytes = encodeCanonicalE2eeCbor(array);
+  return encodeHubDeviceGrantEnvelope(
+    claimsBytes,
+    ed25519.sign(encodeHubDeviceGrantSigningEnvelope(claimsBytes), F19_HUB_GRANT_SEED),
+  );
+}
+
+function f19ClaimsArray(envelope: Uint8Array): unknown[] {
+  const decodedEnvelope = decodeCanonicalE2eeCbor(envelope);
+  if (decodedEnvelope.kind !== "ok" || !Array.isArray(decodedEnvelope.value)) {
+    throw new Error("F19 generator expected a canonical grant envelope.");
+  }
+  const decodedClaims = decodeCanonicalE2eeCbor(decodedEnvelope.value[0] as Uint8Array);
+  if (decodedClaims.kind !== "ok" || !Array.isArray(decodedClaims.value)) {
+    throw new Error("F19 generator expected canonical grant claims.");
+  }
+  return [...decodedClaims.value];
+}
+
+function f19KeyJson(key: HubDeviceGrantVerificationKey): JsonValue {
+  return {
+    keyId: key.keyId,
+    publicKey: b(key.publicKey),
+    notBefore: key.notBefore,
+    notAfter: key.notAfter,
+  };
+}
+
+function f19BindingsJson(bindings: HubDeviceGrantBindings): JsonValue {
+  return {
+    issuerHubOrigin: bindings.issuerHubOrigin,
+    accountId: bindings.accountId,
+    accountAuthEpoch: bindings.accountAuthEpoch,
+    enrollmentId: bindings.enrollmentId,
+    enrollmentRevision: bindings.enrollmentRevision,
+    deviceAuthEpoch: bindings.deviceAuthEpoch,
+    enrollmentStatus: bindings.enrollmentStatus,
+    deviceIdentityPublicKey: b(bindings.deviceIdentityPublicKey),
+    deviceAgreementPublicKey: b(bindings.deviceAgreementPublicKey),
+    clientPrekeyCertificateDigest: b(bindings.clientPrekeyCertificateDigest),
+    clientPrekeyCertificateExpiresAt: bindings.clientPrekeyCertificateExpiresAt,
+    nodeId: bindings.nodeId,
+    nodeIdentityPublicKey: b(bindings.nodeIdentityPublicKey),
+    nodeAgreementPublicKey: b(bindings.nodeAgreementPublicKey),
+    nodeAgreementPrekeyExpiresAt: bindings.nodeAgreementPrekeyExpiresAt,
+    nodeContinuityId: bindings.nodeContinuityId,
+    nodePolicyGeneration: bindings.nodePolicyGeneration,
+    nodeCapabilityStatementDigest: b(bindings.nodeCapabilityStatementDigest),
+    nodeCapabilityStatementExpiresAt: bindings.nodeCapabilityStatementExpiresAt,
+    relayTicketId: bindings.relayTicketId,
+    relayTicketExpiresAt: bindings.relayTicketExpiresAt,
+    effectiveRole: bindings.effectiveRole,
+    effectiveCapabilities: bindings.effectiveCapabilities,
+    accountGrantAllowed: bindings.accountGrantAllowed,
+    now: bindings.now,
+  };
+}
+
+function f19Verdict(
+  envelope: Uint8Array,
+  verificationKeys: readonly HubDeviceGrantVerificationKey[],
+  bindings: HubDeviceGrantBindings,
+): JsonValue {
+  const result = verifyHubDeviceGrant({ envelope, verificationKeys, bindings });
+  return result.kind === "ok" ? { kind: "ok" } : { kind: "error", reason: result.reason };
+}
+
+function f19Case(input: {
+  readonly name: string;
+  readonly envelope: Uint8Array;
+  readonly verificationKeys?: readonly HubDeviceGrantVerificationKey[];
+  readonly bindings?: HubDeviceGrantBindings;
+  readonly note?: string;
+  readonly inputsExtra?: Readonly<Record<string, JsonValue>>;
+  readonly expectedExtra?: Readonly<Record<string, JsonValue>>;
+}): FixtureCase {
+  const verificationKeys = input.verificationKeys ?? [F19_BASE_KEY];
+  const bindings = input.bindings ?? F19_BASE_BINDINGS;
+  return {
+    name: input.name,
+    sections: ["18.2", "18.3", "18.7", "16.3 F19"],
+    ...(input.note === undefined ? {} : { note: input.note }),
+    inputs: {
+      envelope: b(input.envelope),
+      verificationKeys: verificationKeys.map(f19KeyJson),
+      bindings: f19BindingsJson(bindings),
+      ...input.inputsExtra,
+    },
+    expected: {
+      ...(f19Verdict(input.envelope, verificationKeys, bindings) as Record<string, JsonValue>),
+      ...input.expectedExtra,
+    },
+  };
+}
+
+function f19AccountHandshakeTrace(valid: ReturnType<typeof f19SignClaims>): {
+  readonly inputs: Readonly<Record<string, JsonValue>>;
+  readonly expected: Readonly<Record<string, JsonValue>>;
+} {
+  const verifiedGrant = verifyHubDeviceGrant({
+    envelope: valid.envelope,
+    verificationKeys: [F19_BASE_KEY],
+    bindings: F19_BASE_BINDINGS,
+  });
+  if (verifiedGrant.kind !== "ok") throw new Error("F19 account grant did not verify.");
+
+  const channel = handshakeChannel({
+    relayProtocolMinor: 3,
+    accountGrantContext: {
+      relayTicketId: F19_TICKET_ID,
+      deviceGrantDigest: verifiedGrant.grantDigest,
+      nodeCapabilityStatementDigest: F19_STATEMENT_DIGEST,
+    },
+  });
+  const advertised = advertisedMaterial({
+    policyGeneration: F19_BASE_CLAIMS.nodePolicyGeneration,
+    capabilityStatementDigest: F19_STATEMENT_DIGEST,
+  });
+  const credentials: E2eeClientHandshakeCredentials = {
+    tier: "native",
+    trustSource: "account-enrolled",
+    accountId: F19_ACCOUNT_ID,
+    identityPublicKey: CLIENT_IDENTITY_PUBLIC,
+    agreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+    agreementSecretKey: CLIENT_AGREEMENT_SECRET,
+    prekeyTranscript: F19_CLIENT_PREKEY_TRANSCRIPT,
+    prekeySignature: F19_CLIENT_PREKEY_SIGNATURE,
+    deviceGrant: verifiedGrant,
+  };
+  const client = new E2eeClientHandshake({
+    channel,
+    advertised,
+    selectedSuite: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+    offeredSuites: [
+      E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+      E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+    ],
+    credentials,
+    intendedCapability: CHANNEL_OPEN_CAPABILITY,
+    intendedRole: CHANNEL_OPEN_EFFECTIVE_ROLE,
+    testOnlyClientNonce: copyOf(CLIENT_NONCE),
+    testOnlyEphemeralSecretKey: copyOf(CLIENT_EPHEMERAL_SECRET),
+  });
+  const hello = client.createHello(NOW);
+  if (hello.kind !== "hello") throw new Error("F19 account hello was not created.");
+
+  let localAuthorizationReads = 0;
+  let pairingEvaluations = 0;
+  let grantVerifications = 0;
+  const node = new E2eeNodeHandshake({
+    channel,
+    advertised,
+    advertisedVersionMin: 1,
+    advertisedVersionMax: 1,
+    agreementSecretKey: NODE_AGREEMENT_SECRET,
+    advertisementEmittedAt: NOW,
+    readPolicy: () => ({
+      requireApprovedClientE2EE: false,
+      suiteRegistry: [
+        E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+        E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+      ],
+    }),
+    lookupClientAuthorization: () => {
+      localAuthorizationReads += 1;
+      return APPROVED_AUTHORIZATION;
+    },
+    evaluatePairingAdmission: () => {
+      pairingEvaluations += 1;
+    },
+    verifyAccountGrant: (input) => {
+      grantVerifications += 1;
+      return (
+        verifyHubDeviceGrant({
+          envelope: input.grant.envelope,
+          verificationKeys: [F19_BASE_KEY],
+          bindings: {
+            ...F19_BASE_BINDINGS,
+            now: input.now,
+            clientPrekeyCertificateDigest: input.certificateDigest,
+            clientPrekeyCertificateExpiresAt: input.certificate.expiresAt,
+            nodeId: input.advertised.nodeId,
+            nodeAgreementPublicKey: input.advertised.agreementPublicKey,
+            nodeContinuityId: input.advertised.continuityId,
+            nodePolicyGeneration: input.advertised.policyGeneration ?? -1,
+            nodeCapabilityStatementDigest:
+              input.advertised.capabilityStatementDigest ?? new Uint8Array(0),
+            relayTicketId: input.channel.accountGrantContext?.relayTicketId ?? "",
+            effectiveRole: CHANNEL_OPEN_EFFECTIVE_ROLE,
+            effectiveCapabilities: [CHANNEL_OPEN_CAPABILITY],
+          },
+        }).kind === "ok"
+      );
+    },
+    testOnlyEphemeralSecretKey: copyOf(NODE_EPHEMERAL_SECRET),
+  });
+  const accept = node.receiveHello(hello.record, NOW);
+  if (accept.kind !== "accepted") throw new Error("F19 account hello was not accepted.");
+  const established = client.receiveServerAccept(accept.record, NOW);
+  if (established.kind !== "established") {
+    throw new Error("F19 account handshake did not establish.");
+  }
+  const decodedHello = decodeE2eeClientHello(hello.record);
+  const decodedAccept = decodeE2eeServerAccept(accept.record);
+  const decodedContext = decodeCanonicalE2eeCbor(hello.contextBlock);
+  if (
+    decodedHello.kind !== "ok" ||
+    decodedAccept.kind !== "ok" ||
+    decodedContext.kind !== "ok" ||
+    !Array.isArray(decodedContext.value)
+  ) {
+    throw new Error("F19 account trace did not strict-decode.");
+  }
+  const message1Payload = encodeE2eeAccountGrantIkHelloPayload({
+    clientPrekeyTranscript: F19_CLIENT_PREKEY_TRANSCRIPT,
+    clientPrekeySignature: F19_CLIENT_PREKEY_SIGNATURE,
+    accountId: F19_ACCOUNT_ID,
+    intendedCapability: CHANNEL_OPEN_CAPABILITY,
+    intendedRole: CHANNEL_OPEN_EFFECTIVE_ROLE,
+    hubDeviceGrant: valid.envelope,
+  });
+  const decodedMessage1Payload = decodeCanonicalE2eeCbor(message1Payload);
+  if (decodedMessage1Payload.kind !== "ok" || !Array.isArray(decodedMessage1Payload.value)) {
+    throw new Error("F19 account payload did not strict-decode.");
+  }
+  const message2Payload = encodeE2eeServerAcceptPayload({
+    channelOpenCapability: CHANNEL_OPEN_CAPABILITY,
+    channelOpenEffectiveRole: CHANNEL_OPEN_EFFECTIVE_ROLE,
+    nodeAgreementKeyFingerprint: NODE_AGREEMENT_FINGERPRINT,
+  });
+  const noiseHandshakeHash = replayNoiseHandshakeHash({
+    tier: "native",
+    prologue: hello.prologue,
+    message1Payload,
+    message2Payload,
+    message1: decodedHello.value.noiseMessage1,
+    message2: decodedAccept.value.noiseMessage2,
+  });
+  const independentNoise = composeIndependentNoise({
+    pattern: "IK",
+    prologue: hello.prologue,
+    initiatorStaticSecret: CLIENT_AGREEMENT_SECRET,
+    initiatorEphemeralSecret: CLIENT_EPHEMERAL_SECRET,
+    responderStaticSecret: NODE_AGREEMENT_SECRET,
+    responderEphemeralSecret: NODE_EPHEMERAL_SECRET,
+    message1Payload,
+    message2Payload,
+  });
+  if (
+    hex(independentNoise.message1) !== hex(decodedHello.value.noiseMessage1) ||
+    hex(independentNoise.message2) !== hex(decodedAccept.value.noiseMessage2) ||
+    hex(independentNoise.handshakeHash) !== hex(noiseHandshakeHash)
+  ) {
+    throw new Error("Independent F19 Noise composition disagreed with the account handshake.");
+  }
+
+  const trace: HandshakeTrace = {
+    tier: "native",
+    channel,
+    advertised,
+    contextBlock: copyOf(hello.contextBlock),
+    contextCommitment: copyOf(hello.contextCommitment),
+    prologue: copyOf(hello.prologue),
+    helloRecord: copyOf(hello.record),
+    helloPayloadPlaintext: message1Payload,
+    noiseMessage1: copyOf(decodedHello.value.noiseMessage1),
+    serverAcceptRecord: copyOf(accept.record),
+    serverAcceptTbs: copyOf(accept.serverAcceptTbs),
+    noiseMessage2: copyOf(decodedAccept.value.noiseMessage2),
+    noiseHandshakeHash,
+    noiseChainingKeyFinal: independentNoise.chainingKeyFinal,
+    acceptPayloadPlaintext: message2Payload,
+    confirmationTranscript: copyOf(accept.confirmationTranscript),
+    serverConfirmation: copyOf(decodedAccept.value.serverConfirmation),
+    sessionBindingHash: copyOf(established.sessionBindingHash),
+    epochSecretC2N: copyOf(established.secrets.epochSecretC2N),
+    epochSecretN2C: copyOf(established.secrets.epochSecretN2C),
+    exporterSecret: copyOf(established.secrets.exporterSecret),
+    serverConfirmationKey: copyOf(established.secrets.serverConfirmationKey),
+    aeadKeyC2N: deriveE2eeAeadKey(
+      established.secrets.epochSecretC2N,
+      E2EE_DIRECTION_CLIENT_TO_NODE,
+    ),
+    aeadKeyN2C: deriveE2eeAeadKey(
+      established.secrets.epochSecretN2C,
+      E2EE_DIRECTION_NODE_TO_CLIENT,
+    ),
+    admittedAuthority: accept.admittedAuthority,
+    implicitFinishDeadlineAt: accept.implicitFinishDeadlineAt,
+    secretsAgree:
+      hex(accept.secrets.epochSecretC2N) === hex(established.secrets.epochSecretC2N) &&
+      hex(accept.secrets.epochSecretN2C) === hex(established.secrets.epochSecretN2C) &&
+      hex(accept.secrets.exporterSecret) === hex(established.secrets.exporterSecret) &&
+      hex(accept.secrets.serverConfirmationKey) === hex(established.secrets.serverConfirmationKey),
+  };
+  const authority = accept.accountGrantAuthority;
+  if (authority === undefined) throw new Error("F19 account lease handle is missing.");
+  const result = {
+    inputs: {
+      tier: "native",
+      pattern: E2EE_NOISE_PATTERN_IK,
+      selectedSuite: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+      offeredSuites: [
+        E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+        E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+      ],
+      clientPrekeyTranscript: b(F19_CLIENT_PREKEY_TRANSCRIPT),
+      clientPrekeySignature: b(F19_CLIENT_PREKEY_SIGNATURE),
+      certificateCarrier: b(F19_CLIENT_PREKEY_CARRIER),
+      now: NOW,
+    },
+    expected: {
+      ...handshakeIntermediates(trace),
+      certificateCarrier: b(F19_CLIENT_PREKEY_CARRIER),
+      certificateCarrierDigest: b(F19_CERTIFICATE_DIGEST),
+      contextElements: decodedContext.value.length,
+      helloWrapperElements: 7,
+      message1PayloadElements: decodedMessage1Payload.value.length,
+      clientTrustSource: established.trustSource,
+      nodeTrustSource: accept.trustSource,
+      localAuthorizationReads,
+      pairingEvaluations,
+      grantVerifications,
+      accountGrantAuthority: {
+        trustSource: authority.trustSource,
+        hubOrigin: authority.hubOrigin,
+        accountId: authority.accountId,
+        enrollmentId: authority.enrollmentId,
+        enrollmentRevision: authority.enrollmentRevision,
+        accountAuthEpoch: authority.accountAuthEpoch,
+        deviceAuthEpoch: authority.deviceAuthEpoch,
+        clientIdentityFingerprint: b(authority.clientIdentityFingerprint),
+        maximumRole: authority.maximumRole,
+        capabilitySet: [...authority.capabilitySet],
+      },
+    },
+  } satisfies {
+    readonly inputs: Readonly<Record<string, JsonValue>>;
+    readonly expected: Readonly<Record<string, JsonValue>>;
+  };
+  eraseE2eeSessionSecrets(established.secrets);
+  eraseE2eeSessionSecrets(accept.secrets);
+  return result;
+}
+
+function buildFamily19(): FixtureFamily {
+  const valid = f19SignClaims();
+  const accountTrace = f19AccountHandshakeTrace(valid);
+  const cases: FixtureCase[] = [
+    f19Case({
+      name: "valid-account-enrolled-native-device-grant",
+      envelope: valid.envelope,
+      inputsExtra: accountTrace.inputs,
+      expectedExtra: {
+        claimsBytes: b(valid.claimsBytes),
+        signingEnvelope: b(valid.signingEnvelope),
+        signature: b(valid.signature),
+        envelope: b(valid.envelope),
+        grantDigest: b(nobleSha256(valid.envelope)),
+        envelopeBytes: valid.envelope.byteLength,
+        ...accountTrace.expected,
+      },
+    }),
+  ];
+
+  const maxClaims = {
+    ...F19_BASE_CLAIMS,
+    keyId: `hgk_${"K".repeat(43)}`,
+    grantId: `hgr_${"G".repeat(43)}`,
+    accountId: `acct_${"A".repeat(43)}`,
+    enrollmentId: `enr_${"E".repeat(43)}`,
+    nodeId: `node_${"N".repeat(43)}`,
+    relayTicketId: `rtk_${"T".repeat(43)}`,
+  } as HubDeviceGrantClaimsInput;
+  const max = f19SignClaims(maxClaims);
+  const maxKey = { ...F19_BASE_KEY, keyId: maxClaims.keyId };
+  const maxBindings: HubDeviceGrantBindings = {
+    ...F19_BASE_BINDINGS,
+    accountId: maxClaims.accountId,
+    enrollmentId: maxClaims.enrollmentId,
+    nodeId: maxClaims.nodeId,
+    relayTicketId: maxClaims.relayTicketId,
+  };
+  cases.push(
+    f19Case({
+      name: "maximum-width-conforming-grant-fits-the-hard-envelope-bound",
+      envelope: max.envelope,
+      verificationKeys: [maxKey],
+      bindings: maxBindings,
+      expectedExtra: {
+        envelopeBytes: max.envelope.byteLength,
+        maximumEnvelopeBytes: E2EE_HUB_DEVICE_GRANT_MAX_BYTES,
+        withinBound: max.envelope.byteLength <= E2EE_HUB_DEVICE_GRANT_MAX_BYTES,
+      },
+    }),
+    f19Case({
+      name: "exactly-2048-bytes-is-not-rejected-as-oversize",
+      envelope: new Uint8Array(E2EE_HUB_DEVICE_GRANT_MAX_BYTES),
+    }),
+    f19Case({
+      name: "one-byte-over-the-grant-bound-is-rejected-before-cbor",
+      envelope: new Uint8Array(E2EE_HUB_DEVICE_GRANT_MAX_BYTES + 1),
+    }),
+    f19Case({ name: "malformed-grant-envelope", envelope: new Uint8Array([0xff]) }),
+    f19Case({
+      name: "non-canonical-grant-envelope",
+      envelope: widenArrayHeader(valid.envelope),
+    }),
+  );
+
+  for (const [name, index, value] of [
+    ["unsupported-grant-version", 1, 2],
+    ["unsupported-grant-suite", 2, 1],
+  ] as const) {
+    const array = f19ClaimsArray(valid.envelope);
+    array[index] = value;
+    cases.push(f19Case({ name, envelope: f19ResignArray(array) }));
+  }
+  const short = f19ClaimsArray(valid.envelope).slice(0, -1);
+  cases.push(
+    f19Case({ name: "wrong-grant-claims-element-count", envelope: f19ResignArray(short) }),
+  );
+  const wrongFingerprint = f19ClaimsArray(valid.envelope);
+  wrongFingerprint[13] = new Uint8Array(32).fill(0xaa);
+  cases.push(
+    f19Case({
+      name: "carried-device-fingerprint-is-recomputed",
+      envelope: f19ResignArray(wrongFingerprint),
+    }),
+  );
+
+  cases.push(
+    f19Case({
+      name: "signature-under-an-unrelated-hub-key",
+      envelope: f19SignClaims(F19_BASE_CLAIMS, F19_OTHER_HUB_GRANT_SEED).envelope,
+    }),
+    f19Case({
+      name: "cross-domain-signature-over-bare-claims",
+      envelope: encodeHubDeviceGrantEnvelope(
+        valid.claimsBytes,
+        ed25519.sign(valid.claimsBytes, F19_HUB_GRANT_SEED),
+      ),
+    }),
+    f19Case({
+      name: "unknown-hub-verification-key-id",
+      envelope: valid.envelope,
+      verificationKeys: [{ ...F19_BASE_KEY, keyId: `hgk_${"X".repeat(22)}` }],
+    }),
+    f19Case({
+      name: "duplicate-hub-verification-key-id",
+      envelope: valid.envelope,
+      verificationKeys: [F19_BASE_KEY, F19_BASE_KEY],
+    }),
+    f19Case({
+      name: "retired-hub-verification-key",
+      envelope: valid.envelope,
+      verificationKeys: [{ ...F19_BASE_KEY, notAfter: F19_BASE_CLAIMS.expiresAt - 1 }],
+    }),
+  );
+
+  const futureClaims = {
+    ...F19_BASE_CLAIMS,
+    issuedAt: NOW + 30_001,
+    notBefore: NOW + 30_001,
+    expiresAt: NOW + 90_001,
+  } as HubDeviceGrantClaimsInput;
+  cases.push(
+    f19Case({
+      name: "grant-one-millisecond-beyond-early-clock-skew",
+      envelope: f19SignClaims(futureClaims).envelope,
+    }),
+    f19Case({
+      name: "grant-at-the-early-clock-skew-boundary",
+      envelope: f19SignClaims({
+        ...futureClaims,
+        issuedAt: NOW + 30_000,
+        notBefore: NOW + 30_000,
+        expiresAt: NOW + 90_000,
+      } as HubDeviceGrantClaimsInput).envelope,
+    }),
+    f19Case({
+      name: "grant-one-millisecond-after-expiry",
+      envelope: valid.envelope,
+      bindings: { ...F19_BASE_BINDINGS, now: F19_BASE_CLAIMS.expiresAt + 1 },
+    }),
+    f19Case({
+      name: "grant-at-the-exact-expiry-boundary",
+      envelope: valid.envelope,
+      bindings: { ...F19_BASE_BINDINGS, now: F19_BASE_CLAIMS.expiresAt },
+    }),
+  );
+
+  const otherAgreementKey = x25519.getPublicKey(seedOf(0x51));
+  const otherDeviceKey = p256.getPublicKey(seedOf(0x52), false);
+  const otherNodeKey = ed25519.getPublicKey(seedOf(0x53));
+  const bindingMutations: readonly [string, HubDeviceGrantBindings][] = [
+    ["origin", { ...F19_BASE_BINDINGS, issuerHubOrigin: OTHER_HUB_ORIGIN }],
+    ["account-id", { ...F19_BASE_BINDINGS, accountId: `acct_${"Z".repeat(22)}` }],
+    ["account-epoch", { ...F19_BASE_BINDINGS, accountAuthEpoch: 4 }],
+    ["enrollment-id", { ...F19_BASE_BINDINGS, enrollmentId: `enr_${"Z".repeat(22)}` }],
+    ["enrollment-revision", { ...F19_BASE_BINDINGS, enrollmentRevision: 5 }],
+    ["device-epoch", { ...F19_BASE_BINDINGS, deviceAuthEpoch: 6 }],
+    ["device-identity-key", { ...F19_BASE_BINDINGS, deviceIdentityPublicKey: otherDeviceKey }],
+    ["device-agreement-key", { ...F19_BASE_BINDINGS, deviceAgreementPublicKey: otherAgreementKey }],
+    [
+      "client-certificate-digest",
+      { ...F19_BASE_BINDINGS, clientPrekeyCertificateDigest: seedOf(0x54) },
+    ],
+    ["node-id", { ...F19_BASE_BINDINGS, nodeId: `node_${"Z".repeat(22)}` }],
+    ["node-identity-key", { ...F19_BASE_BINDINGS, nodeIdentityPublicKey: otherNodeKey }],
+    ["node-agreement-key", { ...F19_BASE_BINDINGS, nodeAgreementPublicKey: otherAgreementKey }],
+    ["node-continuity-id", { ...F19_BASE_BINDINGS, nodeContinuityId: OTHER_CONTINUITY_ID }],
+    ["node-policy-generation", { ...F19_BASE_BINDINGS, nodePolicyGeneration: 7 }],
+    [
+      "node-statement-digest",
+      { ...F19_BASE_BINDINGS, nodeCapabilityStatementDigest: seedOf(0x55) },
+    ],
+    ["relay-ticket-replay", { ...F19_BASE_BINDINGS, relayTicketId: `rtk_${"Z".repeat(22)}` }],
+  ];
+  for (const [binding, bindings] of bindingMutations) {
+    cases.push(
+      f19Case({
+        name: `wrong-${binding}-binding`,
+        envelope: valid.envelope,
+        bindings,
+      }),
+    );
+  }
+
+  for (const [name, bindings] of [
+    [
+      "relay-ticket-expires-before-the-grant",
+      { ...F19_BASE_BINDINGS, relayTicketExpiresAt: F19_BASE_CLAIMS.expiresAt - 1 },
+    ],
+    [
+      "client-certificate-expires-before-the-grant",
+      { ...F19_BASE_BINDINGS, clientPrekeyCertificateExpiresAt: F19_BASE_CLAIMS.expiresAt - 1 },
+    ],
+    [
+      "node-statement-expires-before-the-grant",
+      { ...F19_BASE_BINDINGS, nodeCapabilityStatementExpiresAt: F19_BASE_CLAIMS.expiresAt - 1 },
+    ],
+    [
+      "node-prekey-expires-before-the-grant",
+      { ...F19_BASE_BINDINGS, nodeAgreementPrekeyExpiresAt: F19_BASE_CLAIMS.expiresAt - 1 },
+    ],
+  ] as const) {
+    cases.push(f19Case({ name, envelope: valid.envelope, bindings }));
+  }
+
+  cases.push(
+    f19Case({
+      name: "revoked-enrollment",
+      envelope: valid.envelope,
+      bindings: { ...F19_BASE_BINDINGS, enrollmentStatus: "revoked" },
+    }),
+    f19Case({
+      name: "local-policy-denies-account-grant",
+      envelope: valid.envelope,
+      bindings: { ...F19_BASE_BINDINGS, accountGrantAllowed: false },
+    }),
+    f19Case({
+      name: "effective-role-escalates-above-grant-ceiling",
+      envelope: valid.envelope,
+      bindings: { ...F19_BASE_BINDINGS, effectiveRole: "owner" },
+    }),
+    f19Case({
+      name: "effective-capabilities-are-not-a-distinct-subset",
+      envelope: valid.envelope,
+      bindings: { ...F19_BASE_BINDINGS, effectiveCapabilities: ["ryco.rpc", "ryco.rpc"] },
+    }),
+  );
+
+  return {
+    file: "f19-account-device-grant.json",
+    number: 19,
+    title: "Account-enrolled native Hub device grants",
+    sections: ["18.2", "18.3", "18.7", "16.3 F19"],
+    summary:
+      "Canonical Hub device-grant claims, domain-separated Ed25519 verification, hard pre-decode bounds, complete authenticated caller bindings, clock/key overlap, replay, revocation, authority intersection, and a deterministic full suite-0x02 IK trace independently composed through the reference Noise implementation.",
+    deferred: [
+      "§16.3 F19 relay-minor, connector-generation, statement-acknowledgement, retained-prekey, in-flight revocation, lease, durable-write, and four-mode policy vectors are deferred. Owned by the node and Hub lifecycle implementations.",
+      "§16.3 F19 carries no standalone Web-isolation cases for suite selection, grant-free ticket requests, mixed-response rejection, and service-worker exclusion. Those behaviors are implemented and covered by apps/web browser and API tests, including the exact valid F19 grant as hostile relay input, but remain untranscribed into this family. Owned by the F19 corpus expansion.",
+      crossRuntimeDeferral(19),
+    ],
+    testKeyMaterial: {
+      shared: SHARED_TEST_KEY_MATERIAL,
+      testOnlyHubGrantSeed: b(F19_HUB_GRANT_SEED),
+      hubGrantPublicKey: b(F19_HUB_GRANT_PUBLIC),
+      testOnlyUnrelatedHubGrantSeed: b(F19_OTHER_HUB_GRANT_SEED),
+      handshake: HANDSHAKE_TEST_KEY_MATERIAL,
+    },
+    cases,
+  };
+}
+
 // ─── corpus assembly ─────────────────────────────────────────────────────────
 
 /**
  * The §16.3 families this generator emits no file for at all. It is EMPTY: every
- * family F1–F18 now has a file. What several of those files still defer is
+ * family F1–F19 now has a file. What several of those files still defer is
  * recorded per family, in the file's own `deferred` array and in the manifest's
  * `partialFamilies` list, so a reader of the corpus alone can see exactly which
  * §16.3 cases are missing and which component will own each.
@@ -9507,8 +10228,8 @@ export const DEFERRED_FAMILIES: readonly {
  * §16.3 says which cases the corpus must carry. Nothing in it, and nothing in
  * the consuming ledger, says whether a committed case ASSERTS anything — and a
  * sweep over every scalar under every `expected` block found that roughly half
- * of them are read by no test at all. A reader who opens this corpus sees 291
- * cases and 3,297 expectations and has no way to learn that without repeating
+ * of them are read by no test at all. A reader who opens this corpus sees 334
+ * cases and 3,434 expectations and has no way to learn that without repeating
  * the sweep, so the measurement is recorded here, per family, as numbers.
  *
  * These are MEASUREMENTS, not invariants — but they are pinned in both
@@ -9765,6 +10486,19 @@ const LIVENESS_CENSUS_FAMILIES: readonly JsonValue[] = [
       "None measured: every leaf is read once the node consuming suite's run is unioned with the shared one; the §12.6 procedure is driven against the real policy store.",
     residualOwner: "no residual",
   },
+  {
+    family: 19,
+    file: "f19-account-device-grant.json",
+    cases: 43,
+    expectedLeaves: 137,
+    liveLeaves: 137,
+    inertLeaves: 0,
+    livePercent: 100.0,
+    casesWithNoLiveLeaf: 0,
+    residual:
+      "None measured in the landed grant and suite-0x02 IK slices: every expected grant byte and verdict is replayed through the shared verifier, and the complete account-enrolled handshake trace is reconstructed by the shared implementation plus the import-isolated Noise reference. The family-level deferred list names the node/Hub lifecycle, Web-isolation, and cross-runtime work not yet carried by this file.",
+    residualOwner: "the remaining F19 implementation phases named by the family deferrals",
+  },
 ];
 
 export interface E2eeFixtureCorpus {
@@ -9814,6 +10548,7 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
     buildFamily16(),
     buildFamily17(),
     buildFamily18(),
+    buildFamily19(),
   ];
 
   const files = new Map<string, string>();
@@ -9999,9 +10734,9 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
       section: "16.4",
       requirement:
         "Every family runs under the repository's Node test gate. The families named below MUST ALSO run in the web browser test suite, and before the native client ships E2EE support the COMPLETE corpus MUST additionally pass on physical devices on both mobile platforms — an explicit acceptance gate of the native rollout, not an optional extra. A vector that produces different bytes on any supported runtime is a release-blocking defect.",
-      status: "declared-deferred",
+      status: "browser-wired-physical-deferred",
       browserRun: {
-        state: "not-wired",
+        state: "wired",
         families: [...CROSS_RUNTIME_SCOPES.keys()].toSorted((left, right) => left - right),
         scopes: Object.fromEntries(
           [...CROSS_RUNTIME_SCOPES.entries()]
@@ -10009,8 +10744,8 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
             .map(([family, scope]) => [`F${String(family)}`, scope]),
         ),
         reason:
-          "This repository has no browser test gate over packages/shared, so no vector in these families has yet been run anywhere but Node.",
-        ownedBy: "the web phase",
+          "The committed fixtures are loaded by apps/web/test/e2eeCorpus.ts and driven in Chromium by the E2ee*.browser.tsx consumers declared in packages/shared/src/relayE2eeCorpusLiveness.ts; the browser census fails when a family, scope, or consumer disappears.",
+        ownedBy: "apps/web's Chromium vector gate",
       },
       physicalDeviceRun: {
         state: "not-wired",
@@ -10033,7 +10768,7 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
     livenessCensus: {
       section: "16.3",
       status: "read-liveness measured; per-case rule is a one-live-leaf floor",
-      measuredOn: "2026-08-05",
+      measuredOn: "2026-09-04",
       unit: 'One LEAF is one scalar under a case\'s `expected` block; a §16.2 `{"$bytes": …}` wrapper counts as one leaf, not two.',
       method:
         "READ-LIVENESS, measured in one run of each consuming suite and unioned. Every family is loaded through `packages/shared/src/relayE2eeCorpusLiveness.ts`, which hands each leaf to the suite behind an accessor that records the read; a leaf is LIVE when some suite read it. The three runs are `bun run --cwd packages/shared test` (the shared corpus suite and the F15 Noise suite) and `bun run --cwd apps/server test src` (the node suite). Re-measuring means re-running those with the recorder in place. The union is not taken on trust: every leaf a suite other than the shared one is the sole reader of is listed path by path in `E2EE_CORPUS_DELEGATED_LEAF_READS`, the shared suite rejects any such path that is not a real leaf or that it reads itself, the named suite asserts it really reads its own paths, and the per-family `liveLeaves` below is then asserted to EQUAL that union. A published figure that drifts above what the suites read fails a test.",
@@ -10042,7 +10777,7 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
       perCaseClaims:
         "packages/shared/src/relayE2eeCorpusLiveness.ts — E2EE_CORPUS_CASE_LIVENESS. Every committed case must carry at least one live leaf or appear in that table, which names the suite that reads it or declares it DECORATIVE with a reason and an owner. Each of the three consuming suites checks the claims naming it, in both directions.",
       perCaseFloor:
-        "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 96 of the 291 committed cases have at most two live leaves and 182 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
+        "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 137 of the 334 committed cases have at most two live leaves and 224 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
       assertionLiveness: {
         currentCorpus:
           "PARTIAL. Two families have been swept against the corpus as it stands — F4 and F17, the two whose live counts moved this round — and for those two the tight figure now EQUALS the read-liveness figure. Every other family's number in this census is read-liveness and nothing more.",
@@ -10076,26 +10811,26 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
         note: "Mutation-liveness is the tighter measure — it counts a leaf live only when changing it fails a test — and its global figure is 49.4%. It is also STALE: it describes the superseded corpus named in `measuredAgainst`, not the one committed here, so it is not the number to cite about anything below either. There is no current assertion-liveness figure; see `assertionLiveness`.",
       },
       totals: {
-        cases: 291,
-        expectedLeaves: 3297,
-        liveLeaves: 2133,
+        cases: 334,
+        expectedLeaves: 3434,
+        liveLeaves: 2270,
         inertLeaves: 1164,
-        livePercent: 64.7,
+        livePercent: 66.1,
         casesWithNoLiveLeaf: 17,
       },
       casesByLiveLeafCount: {
-        note: "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 291` reads, against a one-leaf threshold, as though the other 274 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
+        note: "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 334` reads, against a one-leaf threshold, as though the other 317 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
         buckets: [
           { liveLeaves: "0", cases: 17 },
-          { liveLeaves: "1", cases: 17 },
-          { liveLeaves: "2", cases: 62 },
-          { liveLeaves: "3-5", cases: 86 },
+          { liveLeaves: "1", cases: 19 },
+          { liveLeaves: "2", cases: 101 },
+          { liveLeaves: "3-5", cases: 87 },
           { liveLeaves: "6-10", cases: 55 },
           { liveLeaves: "11-25", cases: 38 },
-          { liveLeaves: "26+", cases: 16 },
+          { liveLeaves: "26+", cases: 17 },
         ],
-        atMostTwoLiveLeaves: 96,
-        atMostFiveLiveLeaves: 182,
+        atMostTwoLiveLeaves: 137,
+        atMostFiveLiveLeaves: 224,
       },
       families: LIVENESS_CENSUS_FAMILIES,
     },
@@ -10117,7 +10852,7 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
       proves:
         "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and every obligation standing for a group states its case count EXACTLY, so the group can neither lose a member nor gain one without the ledger entry moving with it. So a case that is dropped, a case that is added outside the ledger, or a deferral that is quietly deleted, fails a test. One further check crosses into content: an obligation whose every matching case is read by NO suite must carry an `unasserted` field naming what is missing and who owns it. NINE obligations are in that state and say so, checked against the measured union rather than against a declaration, and in both directions — the field must come off when a case goes live, which is how four of them came off it in this round.",
       doesNotProve:
-        "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 291 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
+        "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 334 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
       reviewObligation:
         "When EITHER side changes — an edit to §16.3, or an edit to the ledger — a reviewer MUST diff the ledger against §16.3 by eye, entry against paragraph, and confirm the two enumerate the same set. That review is the only thing standing between a §16.3 obligation and silent non-coverage. Every ledger entry carries a `section` field naming the §16.3 paragraph to open and a `spec` field carrying the specification's own words for the obligation, so the diff is a side-by-side read rather than an interpretation.",
       whyNotAutomated:

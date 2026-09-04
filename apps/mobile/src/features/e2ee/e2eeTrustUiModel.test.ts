@@ -149,6 +149,7 @@ const UNEXPECTED_FRESH: E2eeTrustClassification = {
 function session(overrides: Partial<MobileE2eeSessionState> = {}): MobileE2eeSessionState {
   return {
     channel: "negotiating",
+    trustSource: "locally-verified",
     selection: {
       hubOrigin: HUB,
       accountId: ACCOUNT,
@@ -548,7 +549,7 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
   it("labels a fallback channel legacy and makes no E2EE claim for it", () => {
     const view = securityView(session({ channel: "legacy" }));
     expect(view.claim).toBe("legacy");
-    expect(view.channelLabel).toBe("Legacy");
+    expect(view.channelLabel).toBe("Legacy connection");
     expect(view.channelMessage).toContain("legacy");
     expect(view.channelMessage.toLowerCase()).toContain("not encrypting");
   });
@@ -567,7 +568,7 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
     // satisfied it vacuously.
     const verified = securityView(session({ channel: "verified" }));
     expect(verified.claim).toBe("verified");
-    expect(verified.channelLabel).toBe("Encrypted");
+    expect(verified.channelLabel).toBe("Encrypted · Verified locally");
     expect(verified.channelMessage).toContain("encrypted end to end");
     expect(verified.channelMessage).toContain("cannot read");
   });
@@ -603,6 +604,17 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
     );
   });
 
+  it("describes automatic account trust without claiming local verification", () => {
+    const view = securityView(
+      session({ channel: "account-trusted", trustSource: "account-enrolled" }),
+    );
+    expect(view.claim).toBe("account-trusted");
+    expect(view.channelLabel).toBe("Encrypted · Account trusted");
+    expect(view.channelMessage).toContain("signed-in Ryco account");
+    expect(view.channelMessage).toContain("active Hub");
+    expect(view.channelMessage).not.toContain("cannot read");
+  });
+
   it("gives every claim its own word and its own sentence", () => {
     // §2.2 forbids "a stronger claim for a weaker configuration"; two claims
     // sharing a message is that, and two sharing a label is `Encrypted` beside a
@@ -634,7 +646,7 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
     const view = securityView(session({ channel: "legacy", keyCustodyUnavailable: true }));
     expect(view.claim).toBe("legacy-no-custody");
     // §12.2's word is still there…
-    expect(view.channelLabel).toBe("Legacy");
+    expect(view.channelLabel).toBe("Legacy connection");
     expect(view.channelMessage.toLowerCase()).toContain("not encrypting");
     // …and the remedy that cannot work is not.
     expect(view.channelMessage).toBe(E2EE_NO_KEY_CUSTODY_MESSAGE);

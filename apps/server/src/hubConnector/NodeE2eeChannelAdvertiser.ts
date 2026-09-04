@@ -93,6 +93,20 @@ export interface NodeE2eeChannelAnnouncement {
   readonly announce: (send: RelayChannelSendHandle) => void;
 }
 
+/** Build the synchronous carrier announcement for one already-selected statement. */
+export function nodeE2eeAdvertisementAnnouncement(
+  advertisement: NodeE2eeAdvertisement,
+): NodeE2eeChannelAnnouncement {
+  const plan: NodeE2eeChannelPlan = { kind: "advertise", advertisement };
+  return {
+    plan,
+    announce: (send) => {
+      const result = send(advertisement.carrier, { onRefused: "report" });
+      if (!result.accepted) throw new NodeE2eeCarrierRefusedError();
+    },
+  };
+}
+
 export interface NodeE2eeChannelAdvertiserSources {
   /** The origin this connector serves. Canonicalized by the statement builder. */
   readonly hubOrigin: string;
@@ -231,21 +245,13 @@ export function makeNodeE2eeChannelAdvertiser(
         : undefined,
     openChannel: async () => {
       const plan = await planFor();
+      if (plan.kind === "advertise") {
+        return nodeE2eeAdvertisementAnnouncement(plan.advertisement);
+      }
       return {
         plan,
         announce: (send) => {
           switch (plan.kind) {
-            case "advertise": {
-              // §5.4: through the channel's own send handle, so the carrier takes
-              // outbound sequence 0 from the SHARED counter and the chunk
-              // prelude is prepended exactly as for any other fitting message.
-              // `report` rather than the default `close`, so the refusal takes
-              // the §11.5 close reason below instead of the send path's
-              // `transfer_limit`/`slow_consumer` vocabulary.
-              const result = send(plan.advertisement.carrier, { onRefused: "report" });
-              if (!result.accepted) throw new NodeE2eeCarrierRefusedError();
-              return;
-            }
             case "suppress":
               // §12.5: recorded at `channel.accept`, in the
               // advertisement-unavailable class, whether or not the peer ever

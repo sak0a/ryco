@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NodeE2eeAdmissionPolicy } from "@ryco/contracts/native-e2ee";
 
 import {
   E2EE_APPROVED_CLIENTS_MAX,
@@ -160,6 +161,7 @@ export type E2eeSessionListView = typeof E2eeSessionListView.Type;
  * understate the guarantee or misreport the configuration.
  */
 export const E2eePolicyView = Schema.Struct({
+  mode: NodeE2eeAdmissionPolicy,
   requireE2EE: Schema.Boolean,
   requireApprovedClientE2EE: Schema.Boolean,
   effectiveRequireE2EE: Schema.Boolean,

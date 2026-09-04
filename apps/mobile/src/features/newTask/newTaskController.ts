@@ -63,7 +63,12 @@ export function resolveMobileNewTaskTarget(input: {
       machineLabel: environment?.label ?? "Unknown machine",
       online: connected,
       canMutate: connected,
-      nativeTrust: environment?.trust === "verified" ? "verified" : "not-required",
+      nativeTrust:
+        environment?.trust === "verified"
+          ? "verified"
+          : environment?.trust === "account-trusted"
+            ? "account-trusted"
+            : "not-required",
       effectiveRole:
         environment?.role === "owner" ||
         environment?.role === "operator" ||

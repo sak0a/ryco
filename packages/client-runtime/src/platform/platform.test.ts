@@ -12,6 +12,7 @@ import {
   type EndpointService,
   type FrameSchedulerService,
   type KVService,
+  type NativeE2eePlatformService,
   type PairingCredentialSourceService,
   type PasskeyCeremonyService,
   type SecretKVService,
@@ -98,6 +99,31 @@ describe("platform contracts", () => {
     const clock: ClockService = { now: () => 1 };
     const frames: FrameSchedulerService = { scheduleFrame: (callback) => callback() };
     const config: ClientRuntimeConfigService = { clientMode: "standard" };
+    const nativeE2ee: NativeE2eePlatformService = {
+      platform: "ios",
+      appVersion: "1.0.0",
+      deviceLabel: () => "Phone",
+      randomBytes: async (length) => new Uint8Array(length),
+      ensureIdentity: async () => ({
+        publicKey: new Uint8Array(65),
+        fingerprint: new Uint8Array(32),
+        backing: "secure-enclave",
+      }),
+      ensureClientPrekey: async () => ({
+        agreementPublicKey: new Uint8Array(32),
+        agreementFingerprint: new Uint8Array(32),
+        transcript: new Uint8Array([1]),
+        signature: new Uint8Array(64),
+        certificate: new Uint8Array([2]),
+        certificateDigest: new Uint8Array(32),
+        expiresAt: 2,
+      }),
+      getOrCreateEnrollmentId: async () => "enr_aaaaaaaaaaaaaaaaaaaaaa",
+      clearEnrollment: async () => undefined,
+      withAgreementSecret: async (use) => use(new Uint8Array(32)),
+      readAccountTrustedNode: async () => null,
+      writeAccountTrustedNode: async () => undefined,
+    };
 
     await kv.setItem("plain", "value");
     await secretKv.set("secret", "value");
@@ -120,6 +146,9 @@ describe("platform contracts", () => {
     });
     expect(framed).toBe(true);
     expect(config.clientMode).toBe("standard");
+    expect(nativeE2ee.deviceLabel()).toBe("Phone");
+    expect((await nativeE2ee.ensureIdentity()).backing).toBe("secure-enclave");
+    expect(await nativeE2ee.randomBytes(32)).toHaveLength(32);
   });
 
   it("uses the no-op observability default", () => {

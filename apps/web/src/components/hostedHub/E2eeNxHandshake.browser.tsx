@@ -1,4 +1,12 @@
 import { makeRelayE2eeInitiator, type RelayE2eeHost } from "@ryco/client-runtime/relay";
+import { verifyNodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeCapabilityVerify";
+import {
+  E2eeClientHandshake,
+  E2eeNodeHandshake,
+  decodeE2eeClientHello,
+  decodeE2eeServerAccept,
+} from "@ryco/shared/relayE2eeHandshake";
+import { E2eeRecordSession, deriveE2eeAeadKey } from "@ryco/shared/relayE2eeSession";
 import {
   E2EE_WEB_SAS_HKDF_BYTES,
   E2EE_WEB_SAS_MIN_DISPLAYED_BITS,
@@ -7,6 +15,9 @@ import {
 import { decodeNodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeTranscripts";
 import { deriveE2eeWebSas } from "@ryco/shared/relayE2eeVerificationDisplay";
 import {
+  E2EE_DIRECTION_CLIENT_TO_NODE,
+  E2EE_DIRECTION_NODE_TO_CLIENT,
+  E2EE_INNER_TYPE_RPC,
   classifyPostStripPayload,
   decodeE2eeNegotiationRecord,
   encodeE2eeCapabilityCarrier,
@@ -27,6 +38,7 @@ import {
   FIXTURE_NODE_ID,
   FIXTURE_NOW,
   F03,
+  F07,
   F14,
   hexOf,
   outboundRelayPayloads,
@@ -36,6 +48,7 @@ import {
   USABLE_STATEMENT_CASE,
   type MockWebSocket,
 } from "../../../test/maliciousRelay";
+import { protectOneRecord } from "../../../test/e2eeCorpus";
 import { webRelayE2eeAttempt } from "../../hostedHub/e2eeAttempt";
 import {
   acceptedWebE2eePolicyGeneration,
@@ -146,6 +159,44 @@ const waitPastTAdv = (): Promise<void> =>
   new Promise((resolve) => globalThis.setTimeout(resolve, T_ADV + 250));
 
 describe("§16.3 F3 admitted patterns — NX tier confusion (§5.2 step 9, §7.6 element 14)", () => {
+  it("drives the require-approved statement whose encoder admits only IK", async () => {
+    const entry = fixtureCase(F03, "admitted-pattern-set-under-require-approved-client-e2ee");
+    expect(entry.inputs.requireApprovedClientE2EE).toBe(true);
+    expect(entry.expected.admittedPatterns).toEqual(["IK"]);
+    const statement = fixtureBytes(entry.expected.statement);
+    const decoded = decodeNodeE2eeCapabilityStatement(statement);
+    expect(decoded.kind).toBe("ok");
+    if (decoded.kind !== "ok") return;
+    expect(decoded.value.admittedPatterns).toEqual(["IK"]);
+
+    latchWebE2eeSelection(SELECTION);
+    const channel = openChannel();
+    channel.facade.send(new TextEncoder().encode('{"buffered":true}'));
+    deliverRelayPayload(channel.socket, encodeE2eeCapabilityCarrier(statement));
+    await settleRelay();
+    expect(channel.diagnostics).toEqual(["P15"]);
+    expect(outboundRelayPayloads(channel.socket)).toEqual([]);
+    expect(relayCloseReasons(channel.socket)).toEqual(["channel_rejected"]);
+  });
+
+  it("evaluates the identical IK-only statement on the native tier as K1", () => {
+    const entry = fixtureCase(F03, "admitted-pattern-set-ik-only-evaluated-as-native");
+    const result = verifyNodeE2eeCapabilityStatement({
+      statement: fixtureBytes(entry.inputs.statement),
+      connectedHubOrigin: FIXTURE_HUB_ORIGIN,
+      tier: "native",
+      localSuitePreference: entry.inputs.localSuitePreference as readonly number[],
+      now: FIXTURE_NOW,
+    });
+    expect(result.kind).toBe("verified");
+    if (result.kind !== "verified") return;
+    expect(result.selectedSuite).toBe(1);
+    expect(result.statement.admittedPatterns).toEqual(["IK"]);
+    expect(entry.expected.selection).toEqual({ kind: "usable", selectedSuite: 1 });
+    expect(entry.expected.helloMayBeBuilt).toBe(true);
+    expect(entry.expected.row).toBe("K1");
+  });
+
   it("takes P15 on an IK-only statement while latched, flushing no buffered send", async () => {
     // The REACHABLE version-1 configuration: §12.1 sets the web latch on the
     // statement's own validation and step 9 runs after it, so a web client
@@ -480,6 +531,185 @@ describe("§8 the NX handshake completes in Chromium and yields §13.5's code", 
         // it bare, and `String({ code })` is `[object Object]`.
         expect(call.map(serializedForLeakScan).join(" ")).not.toContain(code);
       }
+    }
+  });
+});
+
+describe("§16.4 F7 exact NX trace in Chromium", () => {
+  it("reconstructs both handshake halves, every secret, implicit finish, and first records", async () => {
+    const entry = fixtureCase(F07, "nx-handshake-complete-trace");
+    const expected = entry.expected;
+    const material = F07.testKeyMaterial;
+    const channelMaterial = material.channel as Readonly<Record<string, unknown>>;
+    const now = entry.inputs.now as number;
+    const channel = {
+      hubOrigin: entry.inputs.hubOrigin as string,
+      channelId: entry.inputs.channelId as string,
+      relayProtocolMajor: channelMaterial.relayProtocolMajor as number,
+      relayProtocolMinor: channelMaterial.relayProtocolMinor as number,
+      channelOpenCapability: channelMaterial.channelOpenCapability as string,
+      channelOpenEffectiveRole: channelMaterial.channelOpenEffectiveRole as string,
+    } as const;
+    const advertised = {
+      nodeId: entry.inputs.nodeId as string,
+      nodeIdentityFingerprint: fixtureBytes(material.nodeIdentityFingerprint),
+      prekeyId: entry.inputs.prekeyId as string,
+      agreementPublicKey: fixtureBytes(material.nodeAgreementPublicKey),
+      continuityChainTranscripts: [],
+      continuityId: entry.inputs.continuityId as string,
+    } as const;
+
+    const client = new E2eeClientHandshake({
+      channel,
+      advertised,
+      selectedSuite: 1,
+      offeredSuites: entry.inputs.offeredSuites as readonly number[],
+      credentials: { tier: "web" },
+      intendedCapability: channel.channelOpenCapability,
+      intendedRole: channel.channelOpenEffectiveRole,
+      testOnlyClientNonce: fixtureBytes(material.testOnlyClientNonce),
+      testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyClientEphemeralSecretKey),
+    });
+    const hello = client.createHello(now);
+    expect(hello.kind).toBe("hello");
+    if (hello.kind !== "hello") return;
+
+    expect(hexOf(hello.contextBlock)).toBe(hexOf(fixtureBytes(expected.contextBlock)));
+    expect(hello.contextBlock.byteLength).toBe(expected.contextBlockBytes);
+    expect(hexOf(hello.contextCommitment)).toBe(hexOf(fixtureBytes(expected.contextCommitment)));
+    expect(hexOf(hello.prologue)).toBe(hexOf(fixtureBytes(expected.prologue)));
+    expect(hexOf(hello.record)).toBe(hexOf(fixtureBytes(expected.clientHello)));
+    expect(hello.record.byteLength).toBe(expected.clientHelloBytes);
+    const decodedHello = decodeE2eeClientHello(hello.record);
+    expect(decodedHello.kind).toBe("ok");
+    if (decodedHello.kind !== "ok") return;
+    expect(hexOf(decodedHello.value.noiseMessage1)).toBe(
+      hexOf(fixtureBytes(expected.noiseMessage1)),
+    );
+    expect(fixtureBytes(expected.message1PayloadPlaintext)).toHaveLength(0);
+    expect(expected.message1PayloadPlaintextBytes).toBe(0);
+    expect(expected.message1PayloadIsEmpty).toBe(true);
+
+    const node = new E2eeNodeHandshake({
+      channel,
+      advertised,
+      advertisedVersionMin: 1,
+      advertisedVersionMax: 1,
+      agreementSecretKey: fixtureBytes(material.testOnlyNodeAgreementSecretKey),
+      advertisementEmittedAt: now,
+      readPolicy: () => ({ requireApprovedClientE2EE: false, suiteRegistry: [1] }),
+      testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyNodeEphemeralSecretKey),
+    });
+    const accepted = node.receiveHello(hello.record, now);
+    expect(accepted.kind).toBe("accepted");
+    if (accepted.kind !== "accepted") return;
+    expect(accepted.tier).toBe("web");
+    expect(accepted.trustSource).toBe("web-unsigned");
+    expect(accepted.admittedAuthority).toBeUndefined();
+    expect(expected.admittedAuthority).toBeNull();
+    expect(hexOf(accepted.contextBlock)).toBe(hexOf(fixtureBytes(expected.contextBlock)));
+    expect(hexOf(accepted.contextCommitment)).toBe(hexOf(fixtureBytes(expected.contextCommitment)));
+    expect(hexOf(accepted.serverAcceptTbs)).toBe(hexOf(fixtureBytes(expected.serverAcceptTbs)));
+    expect(hexOf(accepted.confirmationTranscript)).toBe(
+      hexOf(fixtureBytes(expected.confirmationTranscript)),
+    );
+    expect(hexOf(accepted.record)).toBe(hexOf(fixtureBytes(expected.serverAccept)));
+    expect(accepted.record.byteLength).toBe(expected.serverAcceptBytes);
+
+    const decodedAccept = decodeE2eeServerAccept(accepted.record);
+    expect(decodedAccept.kind).toBe("ok");
+    if (decodedAccept.kind !== "ok") return;
+    expect(hexOf(decodedAccept.value.noiseMessage2)).toBe(
+      hexOf(fixtureBytes(expected.noiseMessage2)),
+    );
+    expect(hexOf(decodedAccept.value.serverConfirmation)).toBe(
+      hexOf(fixtureBytes(expected.serverConfirmation)),
+    );
+
+    const established = client.receiveServerAccept(accepted.record, now);
+    expect(established.kind).toBe("established");
+    if (established.kind !== "established") return;
+    expect(established.trustSource).toBe("web-unsigned");
+    expect(hexOf(established.sessionBindingHash)).toBe(
+      hexOf(fixtureBytes(expected.sessionBindingHash)),
+    );
+    expect(hexOf(established.secrets.epochSecretC2N)).toBe(
+      hexOf(fixtureBytes(expected.epochSecretC2N)),
+    );
+    expect(hexOf(established.secrets.epochSecretN2C)).toBe(
+      hexOf(fixtureBytes(expected.epochSecretN2C)),
+    );
+    expect(hexOf(established.secrets.exporterSecret)).toBe(
+      hexOf(fixtureBytes(expected.exporterSecret)),
+    );
+    expect(hexOf(established.secrets.serverConfirmationKey)).toBe(
+      hexOf(fixtureBytes(expected.serverConfirmationKey)),
+    );
+    expect(
+      hexOf(deriveE2eeAeadKey(established.secrets.epochSecretC2N, E2EE_DIRECTION_CLIENT_TO_NODE)),
+    ).toBe(hexOf(fixtureBytes(expected.aeadKeyC2NEpoch0)));
+    expect(
+      hexOf(deriveE2eeAeadKey(established.secrets.epochSecretN2C, E2EE_DIRECTION_NODE_TO_CLIENT)),
+    ).toBe(hexOf(fixtureBytes(expected.aeadKeyN2CEpoch0)));
+    expect(expected.bothEndpointsDerivedIdenticalSecrets).toBe(
+      hexOf(accepted.secrets.epochSecretC2N) === hexOf(established.secrets.epochSecretC2N) &&
+        hexOf(accepted.secrets.epochSecretN2C) === hexOf(established.secrets.epochSecretN2C) &&
+        hexOf(accepted.secrets.exporterSecret) === hexOf(established.secrets.exporterSecret),
+    );
+
+    const clientRecords = new E2eeRecordSession({
+      secrets: established.secrets,
+      suite: 1,
+      sessionBindingHash: established.sessionBindingHash,
+      sendDirection: E2EE_DIRECTION_CLIENT_TO_NODE,
+      plaintextCeiling: 1_024,
+    });
+    const nodeRecords = new E2eeRecordSession({
+      secrets: accepted.secrets,
+      suite: 1,
+      sessionBindingHash: accepted.sessionBindingHash,
+      sendDirection: E2EE_DIRECTION_NODE_TO_CLIENT,
+      plaintextCeiling: 1_024,
+    });
+    try {
+      const envelopes = expected.firstProtectedEnvelopes as Readonly<Record<string, unknown>>;
+      const c2n = envelopes.clientToNode as Readonly<Record<string, unknown>>;
+      expect(node.mayInvokeRpcHandler).toBe(false);
+      expect(node.mayEmitApplicationRpc).toBe(false);
+      const protectedPing = await protectOneRecord(clientRecords, {
+        innerType: E2EE_INNER_TYPE_RPC,
+        body: fixtureBytes(c2n.innerBody),
+      });
+      expect(protectedPing.result.kind).toBe("protected");
+      expect(hexOf(protectedPing.envelope!)).toBe(hexOf(fixtureBytes(c2n.envelope)));
+      const openedPing = nodeRecords.unprotect(protectedPing.envelope!);
+      expect(openedPing.kind).toBe("authenticated");
+      if (openedPing.kind !== "authenticated") return;
+      expect(openedPing.body.byteLength).toBe(
+        (c2n.receivedByNode as Readonly<Record<string, unknown>>).bodyBytes,
+      );
+      expect(node.authenticateImplicitFinish({ now })).toEqual({ kind: "finished" });
+      expect(node.mayInvokeRpcHandler).toBe(true);
+      expect(node.mayEmitApplicationRpc).toBe(true);
+      const implicit = envelopes.implicitFinish as Readonly<Record<string, unknown>>;
+      expect(implicit.deadlineAt).toBe(accepted.implicitFinishDeadlineAt);
+
+      const n2c = envelopes.nodeToClient as Readonly<Record<string, unknown>>;
+      const protectedPong = await protectOneRecord(nodeRecords, {
+        innerType: E2EE_INNER_TYPE_RPC,
+        body: fixtureBytes(n2c.innerBody),
+      });
+      expect(protectedPong.result.kind).toBe("protected");
+      expect(hexOf(protectedPong.envelope!)).toBe(hexOf(fixtureBytes(n2c.envelope)));
+      const openedPong = clientRecords.unprotect(protectedPong.envelope!);
+      expect(openedPong.kind).toBe("authenticated");
+      if (openedPong.kind !== "authenticated") return;
+      expect(openedPong.body.byteLength).toBe(
+        (n2c.receivedByClient as Readonly<Record<string, unknown>>).bodyBytes,
+      );
+    } finally {
+      clientRecords.erase();
+      nodeRecords.erase();
     }
   });
 });

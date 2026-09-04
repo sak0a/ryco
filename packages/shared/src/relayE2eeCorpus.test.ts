@@ -21,6 +21,7 @@ import {
   E2EE_ERROR_RECORDS_RESERVED,
   E2EE_HANDSHAKE_REJECT_BYTES,
   E2EE_HUB_ORIGIN_MAX_BYTES,
+  E2EE_HUB_DEVICE_GRANT_MAX_BYTES,
   E2EE_REKEY_MAX_RECORDS,
   E2EE_SIGNING_INPUT_MAX_BYTES,
   RELAY_CHUNK_CAPABILITY_PRELUDE,
@@ -32,6 +33,13 @@ import {
   RPC_KEEPALIVE_INTERVAL,
   e2eeChannelSizeBudget,
 } from "./relayE2eeConstants.ts";
+import {
+  decodeHubDeviceGrant,
+  encodeHubDeviceGrantSigningEnvelope,
+  verifyHubDeviceGrant,
+  type HubDeviceGrantBindings,
+  type HubDeviceGrantVerificationKey,
+} from "./relayE2eeHubDeviceGrant.ts";
 import {
   E2EE_CLOSE_COMMITMENT_DOMAIN,
   E2EE_ERROR_CODE_POLICY,
@@ -51,6 +59,7 @@ import {
   deriveE2eeAeadKey,
   deriveE2eeEpochKeys,
   deriveE2eeServerConfirmationKey,
+  eraseE2eeSessionSecrets,
   type E2eeDirectionState,
   type E2eeProtectResult,
   type E2eeSessionSecrets,
@@ -68,6 +77,7 @@ import {
 } from "./relayE2eeKeys.ts";
 import {
   E2eeClientHandshake,
+  E2eeNodeHandshake,
   decodeE2eeClientHello,
   decodeE2eeServerAccept,
   e2eeAuthorizationKeysEqual,
@@ -75,6 +85,8 @@ import {
   e2eeConfirmationTranscript,
   e2eeServerConfirmation,
   e2eeSessionBindingHash,
+  encodeE2eeAccountGrantIkHelloPayload,
+  encodeE2eeServerAcceptPayload,
   selectE2eeSuite,
   verifyE2eeClientPrekeyCertificate,
 } from "./relayE2eeHandshake.ts";
@@ -88,6 +100,7 @@ import {
   decodeCanonicalE2eeCbor,
   e2eeAuthorizationContextCommitment,
   e2eeEffectiveAdmittedPatterns,
+  encodeClientE2eePrekeyCertificateCarrier,
   encodeClientE2eePrekeyTranscript,
   encodeNodeE2eeCapabilitySigningEnvelope,
   encodeNodeE2eePrekeyTranscript,
@@ -110,6 +123,7 @@ import {
   E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT,
   E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
   classifyPostStripPayload,
   decodeE2eeEnvelope,
   decodeE2eeNegotiationRecord,
@@ -130,6 +144,7 @@ import {
   prepareRelayMessage,
 } from "./relayMessageChunks.ts";
 import {
+  E2EE_BROWSER_CROSS_RUNTIME_COVERAGE,
   E2EE_CORPUS_CASE_LIVENESS,
   E2EE_CORPUS_DELEGATED_LEAF_READS,
   E2eeCorpusLivenessRecorder,
@@ -253,6 +268,7 @@ const F14 = readFamily("f14-verification-display.json");
 const F16 = readFamily("f16-authorization-context.json");
 const F17 = readFamily("f17-key-material-validation.json");
 const F18 = readFamily("f18-node-admission-policy.json");
+const F19 = readFamily("f19-account-device-grant.json");
 
 const ALL_FAMILIES = [
   F01,
@@ -272,6 +288,7 @@ const ALL_FAMILIES = [
   F16,
   F17,
   F18,
+  F19,
 ];
 
 /**
@@ -302,6 +319,7 @@ const FAMILY_FILES: ReadonlyMap<number, string> = new Map([
   [16, "f16-authorization-context.json"],
   [17, "f17-key-material-validation.json"],
   [18, "f18-node-admission-policy.json"],
+  [19, "f19-account-device-grant.json"],
 ]);
 
 const FAMILIES_BY_NUMBER: ReadonlyMap<number, FixtureFamily> = new Map(
@@ -3947,6 +3965,420 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
   });
 });
 
+describe("§16.3 F19 account-enrolled native Hub device grants (§18)", () => {
+  function keyFromFixture(value: unknown): HubDeviceGrantVerificationKey {
+    const key = value as JsonRecord;
+    return {
+      keyId: key.keyId as string,
+      publicKey: fixtureBytes(key.publicKey),
+      notBefore: key.notBefore as number,
+      notAfter: key.notAfter as number,
+    };
+  }
+
+  function bindingsFromFixture(value: unknown): HubDeviceGrantBindings {
+    const bindings = value as JsonRecord;
+    return {
+      issuerHubOrigin: bindings.issuerHubOrigin as string,
+      accountId: bindings.accountId as string,
+      accountAuthEpoch: bindings.accountAuthEpoch as number,
+      enrollmentId: bindings.enrollmentId as string,
+      enrollmentRevision: bindings.enrollmentRevision as number,
+      deviceAuthEpoch: bindings.deviceAuthEpoch as number,
+      enrollmentStatus: bindings.enrollmentStatus as HubDeviceGrantBindings["enrollmentStatus"],
+      deviceIdentityPublicKey: fixtureBytes(bindings.deviceIdentityPublicKey),
+      deviceAgreementPublicKey: fixtureBytes(bindings.deviceAgreementPublicKey),
+      clientPrekeyCertificateDigest: fixtureBytes(bindings.clientPrekeyCertificateDigest),
+      clientPrekeyCertificateExpiresAt: bindings.clientPrekeyCertificateExpiresAt as number,
+      nodeId: bindings.nodeId as string,
+      nodeIdentityPublicKey: fixtureBytes(bindings.nodeIdentityPublicKey),
+      nodeAgreementPublicKey: fixtureBytes(bindings.nodeAgreementPublicKey),
+      nodeAgreementPrekeyExpiresAt: bindings.nodeAgreementPrekeyExpiresAt as number,
+      nodeContinuityId: bindings.nodeContinuityId as string,
+      nodePolicyGeneration: bindings.nodePolicyGeneration as number,
+      nodeCapabilityStatementDigest: fixtureBytes(bindings.nodeCapabilityStatementDigest),
+      nodeCapabilityStatementExpiresAt: bindings.nodeCapabilityStatementExpiresAt as number,
+      relayTicketId: bindings.relayTicketId as string,
+      relayTicketExpiresAt: bindings.relayTicketExpiresAt as number,
+      effectiveRole: bindings.effectiveRole as HubDeviceGrantBindings["effectiveRole"],
+      effectiveCapabilities:
+        bindings.effectiveCapabilities as HubDeviceGrantBindings["effectiveCapabilities"],
+      accountGrantAllowed: bindings.accountGrantAllowed as boolean,
+      now: bindings.now as number,
+    };
+  }
+
+  it("replays every grant and consumes every expected F19 leaf", () => {
+    expect(F19.cases).toHaveLength(43);
+    for (const entry of F19.cases) {
+      const envelope = fixtureBytes(entry.inputs.envelope);
+      const keys = (entry.inputs.verificationKeys as readonly unknown[]).map(keyFromFixture);
+      const bindings = bindingsFromFixture(entry.inputs.bindings);
+      const result = verifyHubDeviceGrant({ envelope, verificationKeys: keys, bindings });
+      const actual: Record<string, unknown> =
+        result.kind === "ok" ? { kind: "ok" } : { kind: "error", reason: result.reason };
+
+      if (Object.hasOwn(entry.expected, "claimsBytes")) {
+        expect(result.kind, entry.name).toBe("ok");
+        if (result.kind !== "ok") continue;
+        actual.claimsBytes = { $bytes: hex(result.claimsBytes) };
+        actual.signingEnvelope = {
+          $bytes: hex(encodeHubDeviceGrantSigningEnvelope(result.claimsBytes)),
+        };
+        actual.signature = { $bytes: hex(result.signature) };
+        actual.envelope = { $bytes: hex(envelope) };
+        actual.grantDigest = { $bytes: hex(result.grantDigest) };
+      }
+      if (Object.hasOwn(entry.expected, "envelopeBytes")) {
+        actual.envelopeBytes = envelope.byteLength;
+      }
+      if (Object.hasOwn(entry.expected, "maximumEnvelopeBytes")) {
+        actual.maximumEnvelopeBytes = E2EE_HUB_DEVICE_GRANT_MAX_BYTES;
+        actual.withinBound = envelope.byteLength <= E2EE_HUB_DEVICE_GRANT_MAX_BYTES;
+      }
+      // The valid case also carries the suite-0x02 handshake trace. That trace
+      // is reconstructed below; comparing only the verifier-owned fields here
+      // keeps this loop honest about which implementation produced each value.
+      const expectedVerifier: Record<string, unknown> = {};
+      for (const key of [
+        "kind",
+        "reason",
+        "claimsBytes",
+        "signingEnvelope",
+        "signature",
+        "envelope",
+        "grantDigest",
+        "envelopeBytes",
+        "maximumEnvelopeBytes",
+        "withinBound",
+      ]) {
+        if (Object.hasOwn(entry.expected, key)) expectedVerifier[key] = entry.expected[key];
+      }
+      expect(actual, entry.name).toEqual(expectedVerifier);
+    }
+  });
+
+  it("reconstructs the complete suite-0x02 account-grant IK trace", () => {
+    const entry = caseByName(F19, "valid-account-enrolled-native-device-grant");
+    const expected = entry.expected;
+    const material = F19.testKeyMaterial.handshake as JsonRecord;
+    const identifiers = material.identifiers as JsonRecord;
+    const channelMaterial = material.channel as JsonRecord;
+    const bindings = bindingsFromFixture(entry.inputs.bindings);
+    const verificationKeys = (entry.inputs.verificationKeys as readonly unknown[]).map(
+      keyFromFixture,
+    );
+    const verifiedGrant = verifyHubDeviceGrant({
+      envelope: fixtureBytes(entry.inputs.envelope),
+      verificationKeys,
+      bindings,
+    });
+    expect(verifiedGrant.kind).toBe("ok");
+    if (verifiedGrant.kind !== "ok") return;
+
+    const selectedSuite = entry.inputs.selectedSuite as number;
+    expect(selectedSuite).toBe(E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256);
+    expect(entry.inputs.tier).toBe("native");
+    expect(entry.inputs.pattern).toBe("IK");
+    const offeredSuites = entry.inputs.offeredSuites as readonly number[];
+    expect(offeredSuites).toEqual([
+      E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+      E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+    ]);
+
+    const clientPrekeyTranscript = fixtureBytes(entry.inputs.clientPrekeyTranscript);
+    const clientPrekeySignature = fixtureBytes(entry.inputs.clientPrekeySignature);
+    const certificateCarrier = encodeClientE2eePrekeyCertificateCarrier(
+      clientPrekeyTranscript,
+      clientPrekeySignature,
+    );
+    expect(hex(certificateCarrier)).toBe(hex(fixtureBytes(entry.inputs.certificateCarrier)));
+    expect(hex(certificateCarrier)).toBe(hex(fixtureBytes(expected.certificateCarrier)));
+    expect(hex(sha256(certificateCarrier))).toBe(
+      hex(fixtureBytes(expected.certificateCarrierDigest)),
+    );
+
+    const channel = {
+      hubOrigin: bindings.issuerHubOrigin,
+      channelId: channelMaterial.channelId as string,
+      relayProtocolMajor: channelMaterial.relayProtocolMajor as number,
+      relayProtocolMinor: 3,
+      channelOpenCapability: channelMaterial.channelOpenCapability as string,
+      channelOpenEffectiveRole: channelMaterial.channelOpenEffectiveRole as string,
+      accountGrantContext: {
+        relayTicketId: bindings.relayTicketId,
+        deviceGrantDigest: verifiedGrant.grantDigest,
+        nodeCapabilityStatementDigest: bindings.nodeCapabilityStatementDigest,
+      },
+    } as const;
+    const advertised = {
+      nodeId: bindings.nodeId,
+      nodeIdentityFingerprint: fixtureBytes(material.nodeIdentityFingerprint),
+      prekeyId: identifiers.prekeyId as string,
+      agreementPublicKey: bindings.nodeAgreementPublicKey,
+      continuityChainTranscripts: [],
+      continuityId: bindings.nodeContinuityId,
+      policyGeneration: bindings.nodePolicyGeneration,
+      capabilityStatementDigest: bindings.nodeCapabilityStatementDigest,
+    } as const;
+    const now = entry.inputs.now as number;
+    const client = new E2eeClientHandshake({
+      channel,
+      advertised,
+      selectedSuite: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+      offeredSuites,
+      credentials: {
+        tier: "native",
+        trustSource: "account-enrolled",
+        accountId: bindings.accountId,
+        identityPublicKey: bindings.deviceIdentityPublicKey,
+        agreementPublicKey: bindings.deviceAgreementPublicKey,
+        agreementSecretKey: fixtureBytes(material.testOnlyClientAgreementSecretKey),
+        prekeyTranscript: clientPrekeyTranscript,
+        prekeySignature: clientPrekeySignature,
+        deviceGrant: verifiedGrant,
+      },
+      intendedCapability: channel.channelOpenCapability,
+      intendedRole: channel.channelOpenEffectiveRole,
+      testOnlyClientNonce: fixtureBytes(material.testOnlyClientNonce),
+      testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyClientEphemeralSecretKey),
+    });
+    const hello = client.createHello(now);
+    expect(hello.kind).toBe("hello");
+    if (hello.kind !== "hello") return;
+
+    let localAuthorizationReads = 0;
+    let pairingEvaluations = 0;
+    let grantVerifications = 0;
+    const node = new E2eeNodeHandshake({
+      channel,
+      advertised,
+      advertisedVersionMin: 1,
+      advertisedVersionMax: 1,
+      agreementSecretKey: fixtureBytes(material.testOnlyNodeAgreementSecretKey),
+      advertisementEmittedAt: now,
+      readPolicy: () => ({
+        requireApprovedClientE2EE: false,
+        suiteRegistry: [
+          E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+          E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        ],
+      }),
+      lookupClientAuthorization: () => {
+        localAuthorizationReads += 1;
+        return { status: "approved", maxRole: "owner", capabilitySet: ["ryco.rpc"] };
+      },
+      evaluatePairingAdmission: () => {
+        pairingEvaluations += 1;
+      },
+      verifyAccountGrant: (input) => {
+        grantVerifications += 1;
+        return (
+          verifyHubDeviceGrant({
+            envelope: input.grant.envelope,
+            verificationKeys,
+            bindings: {
+              ...bindings,
+              now: input.now,
+              clientPrekeyCertificateDigest: input.certificateDigest,
+              clientPrekeyCertificateExpiresAt: input.certificate.expiresAt,
+              nodeId: input.advertised.nodeId,
+              nodeAgreementPublicKey: input.advertised.agreementPublicKey,
+              nodeContinuityId: input.advertised.continuityId,
+              nodePolicyGeneration: input.advertised.policyGeneration ?? -1,
+              nodeCapabilityStatementDigest:
+                input.advertised.capabilityStatementDigest ?? new Uint8Array(0),
+              relayTicketId: input.channel.accountGrantContext?.relayTicketId ?? "",
+            },
+          }).kind === "ok"
+        );
+      },
+      testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyNodeEphemeralSecretKey),
+    });
+    const accepted = node.receiveHello(hello.record, now);
+    expect(accepted.kind).toBe("accepted");
+    if (accepted.kind !== "accepted") return;
+    const established = client.receiveServerAccept(accepted.record, now);
+    expect(established.kind).toBe("established");
+    if (established.kind !== "established") {
+      eraseE2eeSessionSecrets(accepted.secrets);
+      return;
+    }
+
+    try {
+      expect(hex(hello.contextBlock)).toBe(hex(fixtureBytes(expected.contextBlock)));
+      expect(hello.contextBlock.byteLength).toBe(expected.contextBlockBytes);
+      expect(hex(hello.contextCommitment)).toBe(hex(fixtureBytes(expected.contextCommitment)));
+      expect(hex(hello.prologue)).toBe(hex(fixtureBytes(expected.prologue)));
+      expect(hex(hello.record)).toBe(hex(fixtureBytes(expected.clientHello)));
+      expect(hello.record.byteLength).toBe(expected.clientHelloBytes);
+
+      const decodedHello = decodeE2eeClientHello(hello.record);
+      const decodedAccept = decodeE2eeServerAccept(accepted.record);
+      expect(decodedHello.kind).toBe("ok");
+      expect(decodedAccept.kind).toBe("ok");
+      if (decodedHello.kind !== "ok" || decodedAccept.kind !== "ok") return;
+
+      const message1Payload = encodeE2eeAccountGrantIkHelloPayload({
+        clientPrekeyTranscript,
+        clientPrekeySignature,
+        accountId: bindings.accountId,
+        intendedCapability: channel.channelOpenCapability,
+        intendedRole: channel.channelOpenEffectiveRole,
+        hubDeviceGrant: verifiedGrant.envelope,
+      });
+      const message2Payload = encodeE2eeServerAcceptPayload({
+        channelOpenCapability: channel.channelOpenCapability,
+        channelOpenEffectiveRole: channel.channelOpenEffectiveRole,
+        nodeAgreementKeyFingerprint: fixtureBytes(material.nodeAgreementFingerprint),
+      });
+      expect(hex(decodedHello.value.noiseMessage1)).toBe(hex(fixtureBytes(expected.noiseMessage1)));
+      expect(hex(message1Payload)).toBe(hex(fixtureBytes(expected.message1PayloadPlaintext)));
+      expect(message1Payload.byteLength).toBe(expected.message1PayloadPlaintextBytes);
+      expect(hex(accepted.serverAcceptTbs)).toBe(hex(fixtureBytes(expected.serverAcceptTbs)));
+      expect(hex(decodedAccept.value.noiseMessage2)).toBe(
+        hex(fixtureBytes(expected.noiseMessage2)),
+      );
+      expect(hex(message2Payload)).toBe(hex(fixtureBytes(expected.message2PayloadPlaintext)));
+
+      const replayInitiator = new E2eeNoiseHandshake({
+        pattern: "IK",
+        role: "initiator",
+        prologue: hello.prologue,
+        staticSecretKey: fixtureBytes(material.testOnlyClientAgreementSecretKey),
+        remoteStaticPublicKey: bindings.nodeAgreementPublicKey,
+        testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyClientEphemeralSecretKey),
+      });
+      const replayResponder = new E2eeNoiseHandshake({
+        pattern: "IK",
+        role: "responder",
+        prologue: hello.prologue,
+        staticSecretKey: fixtureBytes(material.testOnlyNodeAgreementSecretKey),
+        testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyNodeEphemeralSecretKey),
+      });
+      try {
+        expect(replayInitiator.writeMessage(message1Payload)).toEqual(
+          decodedHello.value.noiseMessage1,
+        );
+        expect(replayResponder.readMessage(decodedHello.value.noiseMessage1)).toEqual(
+          message1Payload,
+        );
+        expect(replayResponder.writeMessage(message2Payload)).toEqual(
+          decodedAccept.value.noiseMessage2,
+        );
+        expect(replayInitiator.readMessage(decodedAccept.value.noiseMessage2)).toEqual(
+          message2Payload,
+        );
+        expect(hex(replayInitiator.testOnlyHandshakeHash!)).toBe(
+          hex(fixtureBytes(expected.noiseHandshakeHash)),
+        );
+        // The import-isolated reference suite below checks the exact final ck;
+        // the shared implementation intentionally exposes no production ck.
+        expect(fixtureBytes(expected.noiseChainingKeyFinal)).toHaveLength(32);
+      } finally {
+        replayInitiator.destroy();
+        replayResponder.destroy();
+      }
+
+      expect(hex(established.secrets.exporterSecret)).toBe(
+        hex(fixtureBytes(expected.exporterSecret)),
+      );
+      expect(hex(established.secrets.serverConfirmationKey)).toBe(
+        hex(fixtureBytes(expected.serverConfirmationKey)),
+      );
+      expect(hex(accepted.confirmationTranscript)).toBe(
+        hex(fixtureBytes(expected.confirmationTranscript)),
+      );
+      expect(hex(decodedAccept.value.serverConfirmation)).toBe(
+        hex(fixtureBytes(expected.serverConfirmation)),
+      );
+      expect(hex(accepted.record)).toBe(hex(fixtureBytes(expected.serverAccept)));
+      expect(accepted.record.byteLength).toBe(expected.serverAcceptBytes);
+      expect(hex(established.sessionBindingHash)).toBe(
+        hex(fixtureBytes(expected.sessionBindingHash)),
+      );
+      expect(hex(established.secrets.epochSecretC2N)).toBe(
+        hex(fixtureBytes(expected.epochSecretC2N)),
+      );
+      expect(hex(established.secrets.epochSecretN2C)).toBe(
+        hex(fixtureBytes(expected.epochSecretN2C)),
+      );
+      expect(
+        hex(deriveE2eeAeadKey(established.secrets.epochSecretC2N, E2EE_DIRECTION_CLIENT_TO_NODE)),
+      ).toBe(hex(fixtureBytes(expected.aeadKeyC2NEpoch0)));
+      expect(
+        hex(deriveE2eeAeadKey(established.secrets.epochSecretN2C, E2EE_DIRECTION_NODE_TO_CLIENT)),
+      ).toBe(hex(fixtureBytes(expected.aeadKeyN2CEpoch0)));
+      expect(expected.bothEndpointsDerivedIdenticalSecrets).toBe(
+        hex(accepted.secrets.epochSecretC2N) === hex(established.secrets.epochSecretC2N) &&
+          hex(accepted.secrets.epochSecretN2C) === hex(established.secrets.epochSecretN2C) &&
+          hex(accepted.secrets.exporterSecret) === hex(established.secrets.exporterSecret) &&
+          hex(accepted.secrets.serverConfirmationKey) ===
+            hex(established.secrets.serverConfirmationKey),
+      );
+
+      const context = decodeCanonicalE2eeCbor(hello.contextBlock);
+      const wrapper = decodeCanonicalE2eeCbor(hello.record.subarray(2));
+      const payload = decodeCanonicalE2eeCbor(message1Payload);
+      expect(context.kind).toBe("ok");
+      expect(wrapper.kind).toBe("ok");
+      expect(payload.kind).toBe("ok");
+      if (context.kind !== "ok" || wrapper.kind !== "ok" || payload.kind !== "ok") return;
+      expect(Array.isArray(context.value) ? context.value.length : -1).toBe(
+        expected.contextElements,
+      );
+      expect(Array.isArray(wrapper.value) ? wrapper.value.length : -1).toBe(
+        expected.helloWrapperElements,
+      );
+      expect(Array.isArray(payload.value) ? payload.value.length : -1).toBe(
+        expected.message1PayloadElements,
+      );
+      expect(established.trustSource).toBe(expected.clientTrustSource);
+      expect(accepted.trustSource).toBe(expected.nodeTrustSource);
+      expect(localAuthorizationReads).toBe(expected.localAuthorizationReads);
+      expect(pairingEvaluations).toBe(expected.pairingEvaluations);
+      expect(grantVerifications).toBe(expected.grantVerifications);
+      expect(accepted.accountGrantAuthority).toBeDefined();
+      const authority = accepted.accountGrantAuthority!;
+      expect({
+        trustSource: authority.trustSource,
+        hubOrigin: authority.hubOrigin,
+        accountId: authority.accountId,
+        enrollmentId: authority.enrollmentId,
+        enrollmentRevision: authority.enrollmentRevision,
+        accountAuthEpoch: authority.accountAuthEpoch,
+        deviceAuthEpoch: authority.deviceAuthEpoch,
+        clientIdentityFingerprint: { $bytes: hex(authority.clientIdentityFingerprint) },
+        maximumRole: authority.maximumRole,
+        capabilitySet: [...authority.capabilitySet],
+      }).toEqual(expected.accountGrantAuthority);
+    } finally {
+      eraseE2eeSessionSecrets(established.secrets);
+      eraseE2eeSessionSecrets(accepted.secrets);
+    }
+  });
+
+  it("pins the boundary ordering independently of CBOR and signature validity", () => {
+    const at = caseByName(F19, "exactly-2048-bytes-is-not-rejected-as-oversize");
+    const over = caseByName(F19, "one-byte-over-the-grant-bound-is-rejected-before-cbor");
+    expect(fixtureBytes(at.inputs.envelope)).toHaveLength(E2EE_HUB_DEVICE_GRANT_MAX_BYTES);
+    expect(at.expected.reason).toBe("grant_malformed");
+    expect(fixtureBytes(over.inputs.envelope)).toHaveLength(E2EE_HUB_DEVICE_GRANT_MAX_BYTES + 1);
+    expect(over.expected.reason).toBe("grant_oversize");
+  });
+
+  it("keeps failures closed and free of peer-controlled identifiers", () => {
+    for (const entry of F19.cases) {
+      if (entry.expected.kind !== "error") continue;
+      const result = decodeHubDeviceGrant(fixtureBytes(entry.inputs.envelope));
+      if (result.kind === "ok") continue;
+      expect(Object.keys(result).toSorted(), entry.name).toEqual(["kind", "reason"]);
+      expect(JSON.stringify(result), entry.name).not.toContain("acct_");
+      expect(JSON.stringify(result), entry.name).not.toContain("rtk_");
+    }
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // The §16.3 coverage ledger
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4006,15 +4438,15 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 // corpus manifest under `livenessCensus`; the tests at the bottom of this file
 // hold the manifest to the corpus and to itself.
 //
-//   2,133 of 3,297 committed expectation leaves are read by some suite: 64.7%.
-//   1,164 are read by nothing. 17 of the 291 committed cases carry no live
+//   2,270 of 3,434 committed expectation leaves are read by some suite: 66.1%.
+//   1,164 are read by nothing. 17 of the 334 committed cases carry no live
 //   leaf at all — they are named one by one in `E2EE_CORPUS_CASE_LIVENESS`,
 //   each with the reason and the owner of the missing work.
 //
 //   Per family, live/total: F1 161/161 · F2 16/30 · F3 80/190 · F4 80/81 ·
 //   F5 52/66 · F6 26/62 · F7 31/73 · F8 117/148 · F9 182/589 · F10 361/361 ·
 //   F11 198/396 · F12 42/120 · F13 8/8 · F14 30/46 · F15 22/22 · F16 144/332 ·
-//   F17 168/197 · F18 405/405.
+//   F17 168/197 · F18 405/405 · F19 137/137.
 //
 //   MOVED THIS ROUND, and only these two: F4 44→80 and F17 150→168, which took
 //   the contentless count from 32 to 17 and left every remaining one in F3.
@@ -4031,14 +4463,14 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 //   obligations that stopped being `unasserted` stopped because their cases went
 //   live.
 //
-// "17 OF 291" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
-// one-leaf threshold it invites the reading that the other 274 assert something
+// "17 OF 334" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
+// one-leaf threshold it invites the reading that the other 317 assert something
 // substantial. The distribution is what shows the shape, and the manifest
 // publishes it as `casesByLiveLeafCount`:
 //
-//   live leaves per case:  0 → 17 · 1 → 17 · 2 → 62 · 3–5 → 86 · 6–10 → 54 ·
-//   11–25 → 38 · 26+ → 16.   96 of 291 cases have at most TWO live leaves;
-//   182 have at most five.
+//   live leaves per case:  0 → 17 · 1 → 19 · 2 → 101 · 3–5 → 87 · 6–10 → 55 ·
+//   11–25 → 38 · 26+ → 17.   137 of 334 cases have at most TWO live leaves;
+//   224 have at most five.
 //
 // READ-LIVENESS IS AN UPPER BOUND ON ASSERTION EVERYWHERE EXCEPT F4 AND F17. A
 // suite that reads a value and never compares it marks it live here. The tighter
@@ -5496,6 +5928,127 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     spec: "the §12.5 non-interaction: every case above MUST assert that no fallback occurrence of either class was recorded by the withdrawal (§12.6), since the sweep is an operator action and not a legacy acceptance",
     generated: /^no-withdrawal-records-a-fallback-occurrence-of-either-class$/,
   },
+  // ── F19 — account-enrolled native authorization ──────────────────────────
+  {
+    id: "f19-valid-grant-artifacts",
+    family: 19,
+    section: "16.3 F19 (§18.3, §18.4, §18.6)",
+    spec: "exact grant claims, signing input, signature, envelope and digest, certificate carrier and digest, suite-0x02 context block/commitment, hello, both Noise messages, confirmation, sessionBindingHash, and both directional epoch-zero secrets for one valid deterministic trace",
+    generated: /^valid-account-enrolled-native-device-grant$/,
+  },
+  {
+    id: "f19-grant-bounds",
+    family: 19,
+    section: "16.3 F19 (§18.2, §18.3)",
+    spec: "minimum and maximum conforming fields, the exact 2,048-byte envelope boundary, and one-byte-over rejection before CBOR or signature work [the minimum semantic fields are the valid-grant case above]",
+    generated:
+      /^(?:maximum-width-conforming-grant-fits-the-hard-envelope-bound|exactly-2048-bytes-is-not-rejected-as-oversize|one-byte-over-the-grant-bound-is-rejected-before-cbor)$/,
+    cases: 3,
+  },
+  {
+    id: "f19-malformed-canonical-shapes",
+    family: 19,
+    section: "16.3 F19 (§18.3)",
+    spec: "malformed and non-canonical arrays, wrong element counts/types, and excess fields [the landed shared slice carries malformed, non-canonical, and wrong-count cases; remaining semantic boundary cases stay covered by contract/unit tests]",
+    generated:
+      /^(?:malformed-grant-envelope|non-canonical-grant-envelope|wrong-grant-claims-element-count)$/,
+    cases: 3,
+  },
+  {
+    id: "f19-version-suite",
+    family: 19,
+    section: "16.3 F19 (§18.3)",
+    spec: "unsupported versions and unsupported account-grant suite identifiers",
+    generated: /^unsupported-grant-(?:version|suite)$/,
+    cases: 2,
+  },
+  {
+    id: "f19-fingerprint-recomputation",
+    family: 19,
+    section: "16.3 F19 (§18.3, §18.7)",
+    spec: "both device keys and fingerprints, node keys/fingerprints [one carried-fingerprint substitution pins recomputation; caller-binding substitutions below cover every raw key]",
+    generated: /^carried-device-fingerprint-is-recomputed$/,
+  },
+  {
+    id: "f19-signatures",
+    family: 19,
+    section: "16.3 F19 (§18.3)",
+    spec: "non-canonical Ed25519 signatures, and cross-domain signature substitution [wrong-key and bare-claims cross-domain substitutions in this slice]",
+    generated: /^(?:signature-under-an-unrelated-hub-key|cross-domain-signature-over-bare-claims)$/,
+    cases: 2,
+  },
+  {
+    id: "f19-keyset",
+    family: 19,
+    section: "16.3 F19 (§18.3)",
+    spec: "unknown or retired signing keys, and duplicate key ids",
+    generated:
+      /^(?:unknown-hub-verification-key-id|duplicate-hub-verification-key-id|retired-hub-verification-key)$/,
+    cases: 3,
+  },
+  {
+    id: "f19-time-window",
+    family: 19,
+    section: "16.3 F19 (§18.3)",
+    spec: "expired and future grants, including each exact clock-skew and expiry boundary",
+    generated:
+      /^grant-(?:one-millisecond-beyond-early-clock-skew|at-the-early-clock-skew-boundary|one-millisecond-after-expiry|at-the-exact-expiry-boundary)$/,
+    cases: 4,
+  },
+  {
+    id: "f19-caller-bindings",
+    family: 19,
+    section: "16.3 F19 (§18.7)",
+    spec: "every binding changed one at a time: origin, account/device epoch, enrollment/revision, both device keys, certificate digest, node id/keys/continuity/policy generation, statement digest, ticket id, and replay on another ticket",
+    generated: /^wrong-.*-binding$/,
+    cases: 16,
+  },
+  {
+    id: "f19-dependency-expiries",
+    family: 19,
+    section: "16.3 F19 (§18.3, §18.7)",
+    spec: "each time bound [relay ticket, client certificate, node statement, and node agreement prekey must each outlive the grant]",
+    generated:
+      /^(?:relay-ticket|client-certificate|node-statement|node-prekey)-expires-before-the-grant$/,
+    cases: 4,
+  },
+  {
+    id: "f19-revocation",
+    family: 19,
+    section: "16.3 F19 (§18.7)",
+    spec: "revocation [the pure verifier's already-revoked enrollment verdict]",
+    generated: /^revoked-enrollment$/,
+  },
+  {
+    id: "f19-authority-intersection",
+    family: 19,
+    section: "16.3 F19 (§18.7)",
+    spec: "role/capability escalation, verified-pin/local-denial precedence, and exact authority intersection [pure grant/policy intersection cases]",
+    generated:
+      /^(?:local-policy-denies-account-grant|effective-role-escalates-above-grant-ceiling|effective-capabilities-are-not-a-distinct-subset)$/,
+    cases: 3,
+  },
+  {
+    id: "f19-relay-and-node-lifecycle",
+    family: 19,
+    section: "16.3 F19 (§18.5, §18.7, §18.8)",
+    spec: "relay minor 2, partial channel.open context, stale connector generation, unacknowledged statement, missing retained prekey, revocation during in-flight/established channels, four policy modes, local precedence, authority intersection, and no durable approved-client write",
+    declared: /^§16\.3 F19 relay-minor, connector-generation, statement-acknowledgement/,
+  },
+  {
+    id: "f19-web-isolation",
+    family: 19,
+    section: "16.3 F19 (§18.1, §18.9)",
+    spec: "Web-only negative cases proving suite selection/failure, grant-free browser tickets, mixed-response rejection, and no grant canary in decoder, state, DOM, service-worker cache, or relay send",
+    declared: /^§16\.3 F19 carries no standalone Web-isolation cases/,
+  },
+  {
+    id: "f19-cross-runtime",
+    family: 19,
+    section: "16.4",
+    spec: "F19's Web-isolation cases MUST also run in the web browser test suite and the complete corpus on physical mobile devices before native E2EE ships",
+    declared: CROSS_RUNTIME,
+  },
 ];
 
 describe("§16.3 coverage ledger", () => {
@@ -5509,7 +6062,7 @@ describe("§16.3 coverage ledger", () => {
       expect(FAMILY_FILES.has(entry.family), entry.id).toBe(true);
     }
     const covered = new Set(SECTION_16_3_LEDGER.map((entry) => entry.family));
-    for (let family = 1; family <= 18; family += 1) {
+    for (let family = 1; family <= 19; family += 1) {
       expect(covered.has(family), `family F${String(family)}`).toBe(true);
     }
   });
@@ -5543,7 +6096,7 @@ describe("§16.3 coverage ledger", () => {
     // reviewer counts against §16.3's bullets. Pinning the total means growing
     // or shrinking the ledger is a deliberate, visible edit rather than a line
     // that slips in with an unrelated change.
-    expect(SECTION_16_3_LEDGER.length).toBe(170);
+    expect(SECTION_16_3_LEDGER.length).toBe(185);
   });
 
   it("resolves every §16.3-named case as generated or as declared, never as neither", () => {
@@ -5710,7 +6263,7 @@ describe("§16.3 coverage ledger", () => {
       expect(listed.get(file)?.deferred, file).toEqual(deferred);
       expect(listed.get(file)?.family, file).toBe(number);
     }
-    // Nothing is wholesale-omitted; every F1–F18 has a file on disk.
+    // Nothing is wholesale-omitted; every F1–F19 has a file on disk.
     expect(MANIFEST.deferredFamilies).toEqual([]);
     expect(Object.keys(MANIFEST.files).toSorted()).toEqual([...FAMILY_FILES.values()].toSorted());
     // The families that defer NOTHING, named so the set cannot shrink unnoticed.
@@ -5755,12 +6308,12 @@ describe("§16.3 coverage ledger", () => {
   });
 
   it("declares the §16.4 cross-runtime run instead of leaving it unmentioned", () => {
-    // §16.4 is not a missing case — every vector exists — but a missing RUN, and
-    // an undeclared missing run reads exactly like a discharged obligation.
+    // §16.4 is not a missing case — every vector exists. The Chromium half is
+    // executable; the physical-device half remains explicitly deferred.
     const crossRuntime = MANIFEST.crossRuntime;
     expect(crossRuntime.section).toBe("16.4");
-    expect(crossRuntime.status).toBe("declared-deferred");
-    expect(crossRuntime.browserRun.state).toBe("not-wired");
+    expect(crossRuntime.status).toBe("browser-wired-physical-deferred");
+    expect(crossRuntime.browserRun.state).toBe("wired");
     expect(crossRuntime.physicalDeviceRun.state).toBe("not-wired");
     expect(crossRuntime.physicalDeviceRun.families).toBe("all");
     expect(crossRuntime.browserRun.ownedBy.length).toBeGreaterThan(0);
@@ -5768,12 +6321,26 @@ describe("§16.3 coverage ledger", () => {
     // Exactly the families §16.4 names: F1, F2, F7, F8, F10, the admitted-pattern
     // cases of F3, the `WebSAS` half of F14, the NX cases of F16, the P-256
     // cases of F17.
-    expect(crossRuntime.browserRun.families).toEqual([1, 2, 3, 7, 8, 10, 14, 16, 17]);
+    expect(crossRuntime.browserRun.families).toEqual([1, 2, 3, 7, 8, 10, 14, 16, 17, 19]);
     expect(Object.keys(crossRuntime.browserRun.scopes).toSorted()).toEqual(
       crossRuntime.browserRun.families.map((family) => `F${String(family)}`).toSorted(),
     );
-    // …and each of them repeats the declaration in its own file, so the family a
-    // reader opens tells them the run has not happened.
+    expect(crossRuntime.browserRun.families).toEqual(
+      E2EE_BROWSER_CROSS_RUNTIME_COVERAGE.map((entry) => entry.family),
+    );
+    expect(crossRuntime.browserRun.scopes).toEqual(
+      Object.fromEntries(
+        E2EE_BROWSER_CROSS_RUNTIME_COVERAGE.map((entry) => [
+          `F${String(entry.family)}`,
+          entry.scope,
+        ]),
+      ),
+    );
+    for (const coverage of E2EE_BROWSER_CROSS_RUNTIME_COVERAGE) {
+      expect(coverage.consumers.length, coverage.fixtureFile).toBeGreaterThan(0);
+    }
+    // …and each named family repeats both the completed browser run and the
+    // remaining physical-device deferral in its own file.
     for (const family of crossRuntime.browserRun.families) {
       const declarations = (familyByNumber(family).deferred ?? []).filter((reason) =>
         CROSS_RUNTIME.test(reason),
@@ -5781,6 +6348,12 @@ describe("§16.3 coverage ledger", () => {
       expect(declarations.length, `F${String(family)}`).toBe(1);
       expect(declarations[0], `F${String(family)}`).toContain(
         crossRuntime.browserRun.scopes[`F${String(family)}`]!,
+      );
+      expect(declarations[0], `F${String(family)}`).toContain(
+        "now runs against the committed fixture",
+      );
+      expect(declarations[0], `F${String(family)}`).toContain(
+        "physical-device run has not occurred",
       );
     }
     // And no family that §16.4 does NOT name carries the declaration.
@@ -5815,7 +6388,7 @@ describe("§16.3 coverage ledger", () => {
 // committed case has at least one leaf some suite reads. It does not guarantee
 // that a case's expectations are meaningfully asserted, and it is not evidence
 // that they are. A case can keep its name and one or two live leaves with the
-// rest of its `expected` block inert and satisfy this in full; 96 of the 291
+// rest of its `expected` block inert and satisfy this in full; 137 of the 334
 // committed cases have at most two live leaves. The distribution the census
 // publishes is the honest picture; the floor is the thing a test can enforce.
 //
@@ -6048,7 +6621,7 @@ describe("§16.3 corpus liveness", () => {
   });
 
   it("publishes the SHAPE of per-case liveness, not one reassuring number", () => {
-    // `casesWithNoLiveLeaf: 17 of 291` invites the reading that the other 274
+    // `casesWithNoLiveLeaf: 17 of 334` invites the reading that the other 317
     // assert something substantial. They do not: the rule is a one-leaf floor,
     // and a large fraction of the corpus sits one or two leaves above it. The
     // distribution is published so that shape is visible, and it is recomputed

@@ -30,7 +30,9 @@ function isEligible(variant: WorkspacePhysicalProjectVariant): boolean {
   return (
     variant.online &&
     variant.canMutate &&
-    (variant.nativeTrust === "verified" || variant.nativeTrust === "not-required")
+    (variant.nativeTrust === "verified" ||
+      variant.nativeTrust === "account-trusted" ||
+      variant.nativeTrust === "not-required")
   );
 }
 

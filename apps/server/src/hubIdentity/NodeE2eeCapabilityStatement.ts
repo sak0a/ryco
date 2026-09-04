@@ -9,6 +9,7 @@ import {
   E2EE_NODE_IDENTITY_ALGORITHM,
   e2eeBytesEqual,
   e2eeKeyFingerprint,
+  e2eeSha256,
   validateE2eeNodeSignature,
   verifyE2eeSignature,
 } from "@ryco/shared/relayE2eeKeys";
@@ -113,6 +114,8 @@ export interface NodeE2eeAdvertisement {
   readonly signature: Uint8Array;
   /** `[ bstr(transcript), bstr(signature) ]` (§7.6). */
   readonly statement: Uint8Array;
+  /** SHA-256 of the exact statement bytes published to the Hub and carried to peers. */
+  readonly statementDigest: Uint8Array;
   /** The §5.3 carrier JSON, UTF-8, ready for one unchunked data payload. */
   readonly carrier: Uint8Array;
   /** §7.6 element 15 (§5.7). */
@@ -138,6 +141,8 @@ export interface NodeE2eeAdvertisement {
    */
   readonly e2eeVersionMin: number;
   readonly e2eeVersionMax: number;
+  /** Expiry of the exact agreement prekey carried by this statement. */
+  readonly nodeAgreementPrekeyExpiresAt: number;
   /**
    * The §8.3 per-channel snapshot of what this statement advertised.
    *
@@ -442,11 +447,13 @@ export function makeNodeE2eeCapabilityStatementClient(
     });
     if (check.kind === "error") return unavailable(check.failure);
 
+    const statementDigest = e2eeSha256(statement);
     const advertisement: NodeE2eeAdvertisement = {
       hubOrigin,
       transcript,
       signature,
       statement,
+      statementDigest,
       carrier,
       policyGeneration: inputs.generation,
       issuedAt,
@@ -454,6 +461,7 @@ export function makeNodeE2eeCapabilityStatementClient(
       nodeIdentityPublicKey: inputs.identity.identityPublicKey,
       e2eeVersionMin: E2EE_PROTOCOL_VERSION,
       e2eeVersionMax: E2EE_PROTOCOL_VERSION,
+      nodeAgreementPrekeyExpiresAt: inputs.prekey.expiresAt,
       material: {
         nodeId: inputs.identity.nodeId,
         nodeIdentityFingerprint: e2eeKeyFingerprint(
@@ -464,6 +472,8 @@ export function makeNodeE2eeCapabilityStatementClient(
         agreementPublicKey: inputs.prekey.agreementPublicKey,
         continuityChainTranscripts: inputs.continuity.chain.map((entry) => entry.transcript),
         continuityId: inputs.continuity.continuityId,
+        policyGeneration: inputs.generation,
+        capabilityStatementDigest: statementDigest,
       },
     };
     cache.set(hubOrigin, { advertisement });

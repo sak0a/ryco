@@ -30,6 +30,7 @@ describe("workspace machine catalog", () => {
   it("keeps verified, unverified, unknown, offline, and revoked distinct", () => {
     const catalog = reconcileWorkspaceMachineCatalog([
       input("verified"),
+      input("account", { nativeTrust: "account-trusted" }),
       input("unverified", { nativeTrust: "unverified" }),
       input("unknown", { nativeTrust: "unknown" }),
       input("offline", { online: false }),
@@ -38,6 +39,12 @@ describe("workspace machine catalog", () => {
     const byId = new Map(catalog.map((machine) => [machine.environmentId, machine]));
 
     expect(byId.get(EnvironmentId.make("verified"))).toMatchObject({
+      canReadMetadata: true,
+      canConnect: true,
+      canMutate: true,
+      cacheDisposition: "available",
+    });
+    expect(byId.get(EnvironmentId.make("account"))).toMatchObject({
       canReadMetadata: true,
       canConnect: true,
       canMutate: true,

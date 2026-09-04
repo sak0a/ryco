@@ -5,6 +5,7 @@ export * from "./remoteAccess.ts";
 export * from "./relay.ts";
 export * from "./nativeHandoff.ts";
 export * from "./hostedIdentity.ts";
+export * from "./nativeE2ee.ts";
 export * from "./localIntroduction.ts";
 export * from "./desktopNativeNodeClaim.ts";
 export * from "./hubConnector.ts";

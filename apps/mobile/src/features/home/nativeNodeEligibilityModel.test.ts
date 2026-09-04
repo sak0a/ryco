@@ -47,6 +47,18 @@ describe("authoritative native node eligibility", () => {
     expect([...workspaceEligibleEnvironmentIds(result)]).toEqual(["env-a"]);
   });
 
+  it("makes fresh nodes account-trusted and selectable once enrollment is ready", async () => {
+    const result = await resolveAuthoritativeNativeNodeTrust({
+      scope: { hubOrigin: "https://hub.example", accountId: "account" },
+      targets: [{ environmentId: "env-a", nodeId: "node-a" }],
+      classify: async () => ({ class: "legacy-eligible", branch: "a" }),
+      accountEnrollmentReady: true,
+    });
+    expect(result.get("env-a")).toBe("account-trusted");
+    expect([...workspaceEligibleEnvironmentIds(result)]).toEqual(["env-a"]);
+    expect([...needsVerificationEnvironmentIds(result)]).toEqual(["env-a"]);
+  });
+
   it("keeps revocation, presence, role and trust as independent gates", () => {
     const base = {
       label: "Node",
@@ -60,6 +72,13 @@ describe("authoritative native node eligibility", () => {
         ...base,
         environmentId: EnvironmentId.make("verified-operator"),
         nativeTrust: "verified",
+        effectiveRole: "operator",
+        online: true,
+      },
+      {
+        ...base,
+        environmentId: EnvironmentId.make("account-operator"),
+        nativeTrust: "account-trusted",
         effectiveRole: "operator",
         online: true,
       },
@@ -95,6 +114,7 @@ describe("authoritative native node eligibility", () => {
     ]);
     const byId = new Map(catalog.map((entry) => [entry.environmentId, entry]));
     expect(byId.get("verified-operator" as never)?.canMutate).toBe(true);
+    expect(byId.get("account-operator" as never)?.canMutate).toBe(true);
     expect(byId.get("offline" as never)?.accessReasons).toContain("offline");
     expect(byId.get("viewer" as never)?.accessReasons).toContain("viewer");
     expect(byId.get("unknown" as never)?.accessReasons).toContain("trust-unknown");

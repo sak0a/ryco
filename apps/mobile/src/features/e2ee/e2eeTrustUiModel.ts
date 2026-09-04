@@ -715,6 +715,8 @@ export const E2EE_VERIFICATION_UNAVAILABLE =
 export type E2eeChannelClaim =
   /** §2.2's bottom row. The only value that may carry an E2EE claim. */
   | "verified"
+  /** §18 account-grant IK: encrypted, but not independently verified. */
+  | "account-trusted"
   /** §13.1's release gate: the ceremony, and nothing else. */
   | "pairing-only"
   /** §12.2's honest label for a channel that FELL BACK and could pair out of it. */
@@ -787,17 +789,20 @@ export interface E2eeSecurityInput {
 }
 
 export const CHANNEL_LABELS: Record<E2eeChannelClaim, string> = {
-  verified: "Encrypted",
+  verified: "Encrypted · Verified locally",
+  "account-trusted": "Encrypted · Account trusted",
   "pairing-only": "Not verified",
   // §12.2: "MUST label the channel legacy in every user-facing surface and
   // diagnostic". One word, and both legacy claims carry it.
-  legacy: "Legacy",
-  "legacy-no-custody": "Legacy",
+  legacy: "Legacy connection",
+  "legacy-no-custody": "Legacy connection",
   none: "No connection",
 };
 
 export const CHANNEL_MESSAGES: Record<E2eeChannelClaim, string> = {
   verified: E2EE_VERIFIED_CHANNEL_MESSAGE,
+  "account-trusted":
+    "This channel is end-to-end encrypted and authorized by your signed-in Ryco account. Verify independently for protection from an active Hub.",
   "pairing-only": E2EE_PAIRING_ONLY_MESSAGE,
   legacy: E2EE_LEGACY_CHANNEL_MESSAGE,
   "legacy-no-custody": E2EE_NO_KEY_CUSTODY_MESSAGE,
@@ -822,6 +827,8 @@ function claimFor(session: MobileE2eeSessionState): E2eeChannelClaim {
       // a green "Encrypted" over an open substitution warning is the strongest
       // form of §2.2's forbidden overclaim.
       return session.event === null ? "verified" : "none";
+    case "account-trusted":
+      return session.event === null ? "account-trusted" : "none";
     case "unverified":
       return "pairing-only";
     case "legacy":

@@ -18,13 +18,13 @@
         "11.4",
         "16.3 F1"
       ],
-      "sha256": "b41960ba46983cb6c506dbf764b64dac136cc7dc013e4293328d6212b7ff339a",
+      "sha256": "29022ef3fad3e1af17145cd31ad3d1b32bc387088f8b64cbddfad6362ed5167e",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 19,
       "deferred": [
         "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict, and no mode machine is reachable from packages/shared/src: the node's lives in apps/server and the client's does not exist. The row is therefore carried here as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The transition rows themselves are family F10, whose NODE rows are now generated and driven against the real runtime; its client rows remain deferred. Owned by the client phase.",
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     "f02-carrier-compatibility.json": {
@@ -35,7 +35,7 @@
         "5.6",
         "16.3 F2"
       ],
-      "sha256": "fab5c0b292213d70c10e87bb7f14413e79de11879cc887822ecec257efa5429b",
+      "sha256": "2ee753d27d2ec6823010a61a72da67334338d4be6e1b7d487b7000f4fc50da02",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 5,
@@ -43,7 +43,7 @@
         "Cases C2, C3, and C4 are behavioral claims about the PINNED third-party RPC client — its protocol-socket broadcast routing, its response dispatcher's default branch, and the client-runtime connection wrapper. §5.6 scopes them normatively to `effect@4.0.0-beta.106` as patched by `patches/effect@4.0.0-beta.106.patch`, and no shared module can produce their outcomes. They require a harness that drives the real decoder, and §5.6 requires that harness to be RE-RUN against any new build before a changed `effect` pin — or a changed patch touching its RPC client — lands. The current build is exercised by `apps/web/src/rpc/wsTransport.test.ts`. Owned by the §5.6 compatibility harness.",
         "Case C5, the node-direction hazard, is the defect reply the node's RPC server emits for an unknown request tag. It is a property of the pinned RPC server rather than of any protocol structure, and it is what makes the carrier direction node-to-client only. Owned by the §5.6 compatibility harness, together with the node phase.",
         "The §5.5 U1 accounting half of the boundary pair — advertisement suppression, exactly one `undersized-connection` occurrence, NO peer-legacy occurrence, and FATAL-PRE `P2`/`P23` under effective `requireE2EE` — is node policy (§12.5) with no implementation in packages/shared/src, so THIS family carries only the comparison the decision reads, which IS emitted above. The accounting itself is family F10's rows N15–N17, emitted there and driven against the real advertiser by the node-side consuming test. Owned by the node phase.",
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     "f03-capability-statement.json": {
@@ -60,7 +60,7 @@
         "3.2.1",
         "16.3 F3"
       ],
-      "sha256": "95bc3840a12c0e057fc76bfa4ffb854b256e27a335a2f01b3e13dae0e24006de",
+      "sha256": "ce9275e78ae74ce7ce659ad493b0b43558b8100267cbed3217628cf84c0a8026",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 35,
@@ -69,7 +69,7 @@
         "A statement OMITTING element 18, and a statement whose element 18 disagrees with the PINNED continuity id. The first needs a §7.6 statement decoder to have an arity verdict to derive; the second needs the §13.1 durable pin record. Owned by the §5.2 statement verifier and the client trust-state work respectively. The element-18-disagrees-with-a-carried-chain-entry case IS emitted, in family F5.",
         "The CLIENT half of the protocol-range and admitted-pattern cases — the K3/P15 channel disposition, the assertion that no `E2EEClientHello` was produced, and the single-use ticket accounting — is a §4.4 client row (family F10). What this family derives is `selectE2eeSuite`'s verdict. Their NODE-SIDE companions, a hello whose `e2eeVersion` lies outside the advertised range and an NX hello to a node running `requireApprovedClientE2EE`, ARE emitted, in family F12, where their §11.5 observable can be compared against the reject vector directly. Owned by the client phase, together with family F10.",
         "The K3/K2 channel dispositions and the ticket-accounting assertions attached to the selection cases are §4.4 client rows (family F10) and are carried here as labels. What this family DERIVES is `selectE2eeSuite`'s verdict, which is the precondition the rows read: `helloMayBeBuilt: false` is the 'no hello may be built from the statement' obligation, stated over the landed function. Owned by the client phase, which will assert the dispositions themselves.",
-        "§16.4 cross-runtime equality: the admitted-pattern cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: the admitted-pattern cases of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     "f04-prekey-certificates.json": {
@@ -83,7 +83,7 @@
         "3.2.1 S9",
         "16.3 F4"
       ],
-      "sha256": "f1b91dbee4e2cfbd7fe9893250dc0afaae3253a0bebfe55049f4d7feb1add235",
+      "sha256": "53fe80a083ab149aefc00e0c818d7f589c026eaa8452d90a2ac694f2830c951d",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 25,
@@ -130,12 +130,12 @@
         "8",
         "16.3 F7"
       ],
-      "sha256": "9cd8f3bbbebd0f23dafe6a0ad265a004a14bedd6905bbfd5514d80278c35ce3e",
+      "sha256": "9ae0d45b4b020bc0e1b0785a34c8cbb0d50e305912fb34ec1c0ba0dd9f6c7323",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 3,
       "deferred": [
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     "f08-record-protection.json": {
@@ -147,12 +147,12 @@
         "9.3",
         "16.3 F8"
       ],
-      "sha256": "201a967092f10d84bfed126c9367e7441d26de7ed8e2410bed1acc5f1b312c4f",
+      "sha256": "b79e530658d70c42fb7405386e65cb825e8cb07e22a805fbaf380dde4891c235",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 13,
       "deferred": [
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     "f09-rekey-boundaries.json": {
@@ -185,15 +185,15 @@
         "12.5",
         "16.3 F10"
       ],
-      "sha256": "cd1ee994e74087ae83059f23dbbfaaf325cfbd93bb12a188e53692d4b3e37e59",
+      "sha256": "ab2ecff2fd9793633569ebb58fc3760d83331a607e667ee78fa2221ddf94bbdf",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 34,
       "deferred": [
-        "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state. No client mode machine exists in this repository, so no client row has an implementation to derive an expectation from. The node rows N1–N17 ARE emitted above and are held to the real `NodeE2eeChannelSession` by the node-side consuming test. Owned by the client phase.",
-        "The client rows' §12.1.1 selection classification, the `(hubOrigin, accountId)` scope, and the device-level `anyNodeVerified(hubOrigin)` marker, together with the account-scope-change cases that discharge the §12.1.1 provenance rule (K24/K23 versus K13). These need the §13.1 durable pin store and the §12.1.1 classifier, neither of which is landed. Owned by the client phase.",
-        "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — the stalled accept (K15), the buffered keepalive round trip, and the send-buffer overflow including the connection-wide multi-channel accounting. The buffering and flushing behavior they assert belongs to a client mode machine and to the client's relay engine, neither of which exists here; the §8.9 node deadline under each policy IS emitted above. Owned by the client phase.",
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state — is not yet transcribed into this F10 fixture. The landed client mode machine is exercised by apps/web and packages/client-runtime tests, while the node rows N1–N17 ARE emitted above and held to the real `NodeE2eeChannelSession`. Owned by the F10 corpus expansion.",
+        "The client rows' §12.1.1 selection classification, `(hubOrigin, accountId)` scope, device-level `anyNodeVerified(hubOrigin)` marker, and account-scope-change cases (K24/K23 versus K13) are implemented and covered in client-runtime/Web/native tests but are not yet transcribed into this F10 fixture. Owned by the F10 corpus expansion.",
+        "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — stalled accept K15, buffered keepalive round trip, and send-buffer overflow including connection-wide multi-channel accounting — are implemented and covered by client-runtime/Web tests but are not yet transcribed into this F10 fixture; the §8.9 node deadline under each policy IS emitted above. Owned by the F10 corpus expansion.",
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     "f11-authenticated-close.json": {
@@ -254,12 +254,12 @@
         "3.2.1 S11",
         "16.3 F14"
       ],
-      "sha256": "ff7f17224361bb45fd246c5009bfa87b9ecf97604db15c3a43c3d4da3080ca92",
+      "sha256": "8b283dedb80f8a729622f31684e27c031dcda6309a2d0378b700fcc87691657f",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 6,
       "deferred": [
-        "§16.4 cross-runtime equality: the `WebSAS` half of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: the `WebSAS` half of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     "f15-noise-core-vectors.json": {
@@ -297,13 +297,13 @@
         "13.6",
         "16.3 F16"
       ],
-      "sha256": "d2077d3cd6eaef0a0b2013fae6c9e4688ade3c2bf8ea15affa13325cf5f2ca72",
+      "sha256": "064ace2a0d5c37f5f5a8331e125e839eaae14dcc43cb921dffcfc513df13a8a1",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 34,
       "deferred": [
         "The §13.6 pending-cap and pairing-window cases — the cap-exceeding attempt with no window, the flood at `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the per-account and global eviction cases, the spent reservation, and the `E2EE_PAIRING_RESERVATION_LIFETIME` ageing case. They are node-state transitions over a durable pending set with reservations. The store that decides them now EXISTS — `NodeClientAuthorizationStore` and `NodeClientAuthorizationClient` in apps/server, which this generator sits under in the dependency graph and cannot import — and it is covered by its own module tests, but the transitions have not been transcribed into this corpus and no consuming test holds the runtime to a committed table of them, as family F10's rows and family F18's transitions now are. Owned by the node phase.",
-        "§16.4 cross-runtime equality: the NX cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: the NX cases of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     "f17-key-material-validation.json": {
@@ -317,14 +317,14 @@
         "7.2",
         "16.3 F17"
       ],
-      "sha256": "7c921d3b8a49c85159ab691c3092c81f3604f5a06e21fcb9b8e1e470878882f1",
+      "sha256": "fbf52f327800c08d4f82477806e25b198c0ce65f818ea57721096654d5338ae5",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 26,
       "deferred": [
         "Each case names the §11 row for the position the material occupies (P11 inside the IK client certificate, P10 for a Noise-level failure, K2/K3 and P15 inside a node-signed statement). The row for material inside a node-signed statement depends on the §5.2 verifier and the §12.1.1 selection classification, neither of which is in packages/shared/src; those rows are carried as §16.2 labels and the DERIVED value in every case is the validator's or the verification path's own verdict. Owned by the §5.2 statement verifier and the client phase.",
         "A small-order Ed25519 public key is NOT emitted as a rejected encoding: the pinned primitive's strict public-key validation accepts it, and the rejection happens at verification. Asserting a validator rejection here would have been wrong, so the case is left to the verification-path rows above.",
-        "§16.4 cross-runtime equality: the P-256 cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: the P-256 cases of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     "f18-node-admission-policy.json": {
@@ -345,6 +345,25 @@
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 15
+    },
+    "f19-account-device-grant.json": {
+      "family": 19,
+      "title": "Account-enrolled native Hub device grants",
+      "sections": [
+        "18.2",
+        "18.3",
+        "18.7",
+        "16.3 F19"
+      ],
+      "sha256": "e544bdda11bda1927a3043a51a71dcb54e676e6d99b677297288ee974fdb0c89",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 43,
+      "deferred": [
+        "§16.3 F19 relay-minor, connector-generation, statement-acknowledgement, retained-prekey, in-flight revocation, lease, durable-write, and four-mode policy vectors are deferred. Owned by the node and Hub lifecycle implementations.",
+        "§16.3 F19 carries no standalone Web-isolation cases for suite selection, grant-free ticket requests, mixed-response rejection, and service-worker exclusion. Those behaviors are implemented and covered by apps/web browser and API tests, including the exact valid F19 grant as hostile relay input, but remain untranscribed into this family. Owned by the F19 corpus expansion.",
+        "§16.4 cross-runtime equality: the Web-isolation cases of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
+      ]
     }
   },
   "portableExecution": {
@@ -2443,6 +2462,307 @@
         "ownedBy": "the case's existing Node/Hub/platform consuming suite"
       },
       {
+        "fixtureId": "F19/valid-account-enrolled-native-device-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "valid-account-enrolled-native-device-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/maximum-width-conforming-grant-fits-the-hard-envelope-bound",
+        "file": "f19-account-device-grant.json",
+        "case": "maximum-width-conforming-grant-fits-the-hard-envelope-bound",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/exactly-2048-bytes-is-not-rejected-as-oversize",
+        "file": "f19-account-device-grant.json",
+        "case": "exactly-2048-bytes-is-not-rejected-as-oversize",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/one-byte-over-the-grant-bound-is-rejected-before-cbor",
+        "file": "f19-account-device-grant.json",
+        "case": "one-byte-over-the-grant-bound-is-rejected-before-cbor",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/malformed-grant-envelope",
+        "file": "f19-account-device-grant.json",
+        "case": "malformed-grant-envelope",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/non-canonical-grant-envelope",
+        "file": "f19-account-device-grant.json",
+        "case": "non-canonical-grant-envelope",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/unsupported-grant-version",
+        "file": "f19-account-device-grant.json",
+        "case": "unsupported-grant-version",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/unsupported-grant-suite",
+        "file": "f19-account-device-grant.json",
+        "case": "unsupported-grant-suite",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-grant-claims-element-count",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-grant-claims-element-count",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/carried-device-fingerprint-is-recomputed",
+        "file": "f19-account-device-grant.json",
+        "case": "carried-device-fingerprint-is-recomputed",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/signature-under-an-unrelated-hub-key",
+        "file": "f19-account-device-grant.json",
+        "case": "signature-under-an-unrelated-hub-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/cross-domain-signature-over-bare-claims",
+        "file": "f19-account-device-grant.json",
+        "case": "cross-domain-signature-over-bare-claims",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/unknown-hub-verification-key-id",
+        "file": "f19-account-device-grant.json",
+        "case": "unknown-hub-verification-key-id",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/duplicate-hub-verification-key-id",
+        "file": "f19-account-device-grant.json",
+        "case": "duplicate-hub-verification-key-id",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/retired-hub-verification-key",
+        "file": "f19-account-device-grant.json",
+        "case": "retired-hub-verification-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/grant-one-millisecond-beyond-early-clock-skew",
+        "file": "f19-account-device-grant.json",
+        "case": "grant-one-millisecond-beyond-early-clock-skew",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/grant-at-the-early-clock-skew-boundary",
+        "file": "f19-account-device-grant.json",
+        "case": "grant-at-the-early-clock-skew-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/grant-one-millisecond-after-expiry",
+        "file": "f19-account-device-grant.json",
+        "case": "grant-one-millisecond-after-expiry",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/grant-at-the-exact-expiry-boundary",
+        "file": "f19-account-device-grant.json",
+        "case": "grant-at-the-exact-expiry-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-origin-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-origin-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-account-id-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-account-id-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-account-epoch-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-account-epoch-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-enrollment-id-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-enrollment-id-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-enrollment-revision-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-enrollment-revision-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-device-epoch-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-device-epoch-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-device-identity-key-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-device-identity-key-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-device-agreement-key-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-device-agreement-key-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-client-certificate-digest-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-client-certificate-digest-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-id-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-id-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-identity-key-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-identity-key-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-agreement-key-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-agreement-key-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-continuity-id-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-continuity-id-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-policy-generation-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-policy-generation-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-node-statement-digest-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-node-statement-digest-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/wrong-relay-ticket-replay-binding",
+        "file": "f19-account-device-grant.json",
+        "case": "wrong-relay-ticket-replay-binding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/relay-ticket-expires-before-the-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "relay-ticket-expires-before-the-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/client-certificate-expires-before-the-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "client-certificate-expires-before-the-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/node-statement-expires-before-the-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "node-statement-expires-before-the-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/node-prekey-expires-before-the-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "node-prekey-expires-before-the-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/revoked-enrollment",
+        "file": "f19-account-device-grant.json",
+        "case": "revoked-enrollment",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/local-policy-denies-account-grant",
+        "file": "f19-account-device-grant.json",
+        "case": "local-policy-denies-account-grant",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/effective-role-escalates-above-grant-ceiling",
+        "file": "f19-account-device-grant.json",
+        "case": "effective-role-escalates-above-grant-ceiling",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F19/effective-capabilities-are-not-a-distinct-subset",
+        "file": "f19-account-device-grant.json",
+        "case": "effective-capabilities-are-not-a-distinct-subset",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
         "fixtureId": "F15/cacophony/Noise_IK_25519_ChaChaPoly_SHA256",
         "file": "f15-noise-core-vectors.json",
         "case": "cacophony/Noise_IK_25519_ChaChaPoly_SHA256",
@@ -2486,7 +2806,7 @@
       "file": "f01-payload-discrimination.json",
       "deferred": [
         "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict, and no mode machine is reachable from packages/shared/src: the node's lives in apps/server and the client's does not exist. The row is therefore carried here as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The transition rows themselves are family F10, whose NODE rows are now generated and driven against the real runtime; its client rows remain deferred. Owned by the client phase.",
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     {
@@ -2497,7 +2817,7 @@
         "Cases C2, C3, and C4 are behavioral claims about the PINNED third-party RPC client — its protocol-socket broadcast routing, its response dispatcher's default branch, and the client-runtime connection wrapper. §5.6 scopes them normatively to `effect@4.0.0-beta.106` as patched by `patches/effect@4.0.0-beta.106.patch`, and no shared module can produce their outcomes. They require a harness that drives the real decoder, and §5.6 requires that harness to be RE-RUN against any new build before a changed `effect` pin — or a changed patch touching its RPC client — lands. The current build is exercised by `apps/web/src/rpc/wsTransport.test.ts`. Owned by the §5.6 compatibility harness.",
         "Case C5, the node-direction hazard, is the defect reply the node's RPC server emits for an unknown request tag. It is a property of the pinned RPC server rather than of any protocol structure, and it is what makes the carrier direction node-to-client only. Owned by the §5.6 compatibility harness, together with the node phase.",
         "The §5.5 U1 accounting half of the boundary pair — advertisement suppression, exactly one `undersized-connection` occurrence, NO peer-legacy occurrence, and FATAL-PRE `P2`/`P23` under effective `requireE2EE` — is node policy (§12.5) with no implementation in packages/shared/src, so THIS family carries only the comparison the decision reads, which IS emitted above. The accounting itself is family F10's rows N15–N17, emitted there and driven against the real advertiser by the node-side consuming test. Owned by the node phase.",
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     {
@@ -2509,7 +2829,7 @@
         "A statement OMITTING element 18, and a statement whose element 18 disagrees with the PINNED continuity id. The first needs a §7.6 statement decoder to have an arity verdict to derive; the second needs the §13.1 durable pin record. Owned by the §5.2 statement verifier and the client trust-state work respectively. The element-18-disagrees-with-a-carried-chain-entry case IS emitted, in family F5.",
         "The CLIENT half of the protocol-range and admitted-pattern cases — the K3/P15 channel disposition, the assertion that no `E2EEClientHello` was produced, and the single-use ticket accounting — is a §4.4 client row (family F10). What this family derives is `selectE2eeSuite`'s verdict. Their NODE-SIDE companions, a hello whose `e2eeVersion` lies outside the advertised range and an NX hello to a node running `requireApprovedClientE2EE`, ARE emitted, in family F12, where their §11.5 observable can be compared against the reject vector directly. Owned by the client phase, together with family F10.",
         "The K3/K2 channel dispositions and the ticket-accounting assertions attached to the selection cases are §4.4 client rows (family F10) and are carried here as labels. What this family DERIVES is `selectE2eeSuite`'s verdict, which is the precondition the rows read: `helloMayBeBuilt: false` is the 'no hello may be built from the statement' obligation, stated over the landed function. Owned by the client phase, which will assert the dispositions themselves.",
-        "§16.4 cross-runtime equality: the admitted-pattern cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: the admitted-pattern cases of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     {
@@ -2535,7 +2855,7 @@
       "title": "NX handshake",
       "file": "f07-nx-handshake.json",
       "deferred": [
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     {
@@ -2543,7 +2863,7 @@
       "title": "Record protection",
       "file": "f08-record-protection.json",
       "deferred": [
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     {
@@ -2559,10 +2879,10 @@
       "title": "Mode machine",
       "file": "f10-mode-machine.json",
       "deferred": [
-        "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state. No client mode machine exists in this repository, so no client row has an implementation to derive an expectation from. The node rows N1–N17 ARE emitted above and are held to the real `NodeE2eeChannelSession` by the node-side consuming test. Owned by the client phase.",
-        "The client rows' §12.1.1 selection classification, the `(hubOrigin, accountId)` scope, and the device-level `anyNodeVerified(hubOrigin)` marker, together with the account-scope-change cases that discharge the §12.1.1 provenance rule (K24/K23 versus K13). These need the §13.1 durable pin store and the §12.1.1 classifier, neither of which is landed. Owned by the client phase.",
-        "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — the stalled accept (K15), the buffered keepalive round trip, and the send-buffer overflow including the connection-wide multi-channel accounting. The buffering and flushing behavior they assert belongs to a client mode machine and to the client's relay engine, neither of which exists here; the §8.9 node deadline under each policy IS emitted above. Owned by the client phase.",
-        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state — is not yet transcribed into this F10 fixture. The landed client mode machine is exercised by apps/web and packages/client-runtime tests, while the node rows N1–N17 ARE emitted above and held to the real `NodeE2eeChannelSession`. Owned by the F10 corpus expansion.",
+        "The client rows' §12.1.1 selection classification, `(hubOrigin, accountId)` scope, device-level `anyNodeVerified(hubOrigin)` marker, and account-scope-change cases (K24/K23 versus K13) are implemented and covered in client-runtime/Web/native tests but are not yet transcribed into this F10 fixture. Owned by the F10 corpus expansion.",
+        "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — stalled accept K15, buffered keepalive round trip, and send-buffer overflow including connection-wide multi-channel accounting — are implemented and covered by client-runtime/Web tests but are not yet transcribed into this F10 fixture; the §8.9 node deadline under each policy IS emitted above. Owned by the F10 corpus expansion.",
+        "§16.4 cross-runtime equality: this whole family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     {
@@ -2587,7 +2907,7 @@
       "title": "Safety number and WebSAS",
       "file": "f14-verification-display.json",
       "deferred": [
-        "§16.4 cross-runtime equality: the `WebSAS` half of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: the `WebSAS` half of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     {
@@ -2596,7 +2916,7 @@
       "file": "f16-authorization-context.json",
       "deferred": [
         "The §13.6 pending-cap and pairing-window cases — the cap-exceeding attempt with no window, the flood at `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the per-account and global eviction cases, the spent reservation, and the `E2EE_PAIRING_RESERVATION_LIFETIME` ageing case. They are node-state transitions over a durable pending set with reservations. The store that decides them now EXISTS — `NodeClientAuthorizationStore` and `NodeClientAuthorizationClient` in apps/server, which this generator sits under in the dependency graph and cannot import — and it is covered by its own module tests, but the transitions have not been transcribed into this corpus and no consuming test holds the runtime to a committed table of them, as family F10's rows and family F18's transitions now are. Owned by the node phase.",
-        "§16.4 cross-runtime equality: the NX cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: the NX cases of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     },
     {
@@ -2606,16 +2926,26 @@
       "deferred": [
         "Each case names the §11 row for the position the material occupies (P11 inside the IK client certificate, P10 for a Noise-level failure, K2/K3 and P15 inside a node-signed statement). The row for material inside a node-signed statement depends on the §5.2 verifier and the §12.1.1 selection classification, neither of which is in packages/shared/src; those rows are carried as §16.2 labels and the DERIVED value in every case is the validator's or the verification path's own verdict. Owned by the §5.2 statement verifier and the client phase.",
         "A small-order Ed25519 public key is NOT emitted as a rejected encoding: the pinned primitive's strict public-key validation accepts it, and the rejection happens at verification. Asserting a validator rejection here would have been wrong, so the case is left to the verification-path rows above.",
-        "§16.4 cross-runtime equality: the P-256 cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+        "§16.4 cross-runtime equality: the P-256 cases of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
+      ]
+    },
+    {
+      "family": 19,
+      "title": "Account-enrolled native Hub device grants",
+      "file": "f19-account-device-grant.json",
+      "deferred": [
+        "§16.3 F19 relay-minor, connector-generation, statement-acknowledgement, retained-prekey, in-flight revocation, lease, durable-write, and four-mode policy vectors are deferred. Owned by the node and Hub lifecycle implementations.",
+        "§16.3 F19 carries no standalone Web-isolation cases for suite selection, grant-free ticket requests, mixed-response rejection, and service-worker exclusion. Those behaviors are implemented and covered by apps/web browser and API tests, including the exact valid F19 grant as hostile relay input, but remain untranscribed into this family. Owned by the F19 corpus expansion.",
+        "§16.4 cross-runtime equality: the Web-isolation cases of this family now runs against the committed fixture in Chromium under apps/web/src/components/hostedHub, with the executable family/scope/consumer census in packages/shared/src/relayE2eeCorpusLiveness.ts. The complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. That physical-device run has not occurred and this repository has no physical-device harness. A vector that produces different bytes on any supported runtime is a release-blocking defect. Owned by the native rollout's explicit physical-device acceptance gate."
       ]
     }
   ],
   "crossRuntime": {
     "section": "16.4",
     "requirement": "Every family runs under the repository's Node test gate. The families named below MUST ALSO run in the web browser test suite, and before the native client ships E2EE support the COMPLETE corpus MUST additionally pass on physical devices on both mobile platforms — an explicit acceptance gate of the native rollout, not an optional extra. A vector that produces different bytes on any supported runtime is a release-blocking defect.",
-    "status": "declared-deferred",
+    "status": "browser-wired-physical-deferred",
     "browserRun": {
-      "state": "not-wired",
+      "state": "wired",
       "families": [
         1,
         2,
@@ -2625,7 +2955,8 @@
         10,
         14,
         16,
-        17
+        17,
+        19
       ],
       "scopes": {
         "F1": "this whole family",
@@ -2636,10 +2967,11 @@
         "F10": "this whole family",
         "F14": "the `WebSAS` half of this family",
         "F16": "the NX cases of this family",
-        "F17": "the P-256 cases of this family"
+        "F17": "the P-256 cases of this family",
+        "F19": "the Web-isolation cases of this family"
       },
-      "reason": "This repository has no browser test gate over packages/shared, so no vector in these families has yet been run anywhere but Node.",
-      "ownedBy": "the web phase"
+      "reason": "The committed fixtures are loaded by apps/web/test/e2eeCorpus.ts and driven in Chromium by the E2ee*.browser.tsx consumers declared in packages/shared/src/relayE2eeCorpusLiveness.ts; the browser census fails when a family, scope, or consumer disappears.",
+      "ownedBy": "apps/web's Chromium vector gate"
     },
     "physicalDeviceRun": {
       "state": "not-wired",
@@ -2651,12 +2983,12 @@
   "livenessCensus": {
     "section": "16.3",
     "status": "read-liveness measured; per-case rule is a one-live-leaf floor",
-    "measuredOn": "2026-08-05",
+    "measuredOn": "2026-09-04",
     "unit": "One LEAF is one scalar under a case's `expected` block; a §16.2 `{\"$bytes\": …}` wrapper counts as one leaf, not two.",
     "method": "READ-LIVENESS, measured in one run of each consuming suite and unioned. Every family is loaded through `packages/shared/src/relayE2eeCorpusLiveness.ts`, which hands each leaf to the suite behind an accessor that records the read; a leaf is LIVE when some suite read it. The three runs are `bun run --cwd packages/shared test` (the shared corpus suite and the F15 Noise suite) and `bun run --cwd apps/server test src` (the node suite). Re-measuring means re-running those with the recorder in place. The union is not taken on trust: every leaf a suite other than the shared one is the sole reader of is listed path by path in `E2EE_CORPUS_DELEGATED_LEAF_READS`, the shared suite rejects any such path that is not a real leaf or that it reads itself, the named suite asserts it really reads its own paths, and the per-family `liveLeaves` below is then asserted to EQUAL that union. A published figure that drifts above what the suites read fails a test.",
     "whatLiveMeans": "Read-liveness is an UPPER BOUND on assertion. A suite that reads a value and does not compare it, or reads it only to feed it back as an input, marks it live here. It is exact in the direction that matters: a leaf no suite reads cannot be asserted by one, so every INERT leaf below is proof of absent coverage, while a LIVE leaf is only evidence of present coverage.",
     "perCaseClaims": "packages/shared/src/relayE2eeCorpusLiveness.ts — E2EE_CORPUS_CASE_LIVENESS. Every committed case must carry at least one live leaf or appear in that table, which names the suite that reads it or declares it DECORATIVE with a reason and an owner. Each of the three consuming suites checks the claims naming it, in both directions.",
-    "perCaseFloor": "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 96 of the 291 committed cases have at most two live leaves and 182 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
+    "perCaseFloor": "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 137 of the 334 committed cases have at most two live leaves and 224 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
     "assertionLiveness": {
       "currentCorpus": "PARTIAL. Two families have been swept against the corpus as it stands — F4 and F17, the two whose live counts moved this round — and for those two the tight figure now EQUALS the read-liveness figure. Every other family's number in this census is read-liveness and nothing more.",
       "measuredFamilySweep": {
@@ -2683,15 +3015,15 @@
       "note": "Mutation-liveness is the tighter measure — it counts a leaf live only when changing it fails a test — and its global figure is 49.4%. It is also STALE: it describes the superseded corpus named in `measuredAgainst`, not the one committed here, so it is not the number to cite about anything below either. There is no current assertion-liveness figure; see `assertionLiveness`."
     },
     "totals": {
-      "cases": 291,
-      "expectedLeaves": 3297,
-      "liveLeaves": 2133,
+      "cases": 334,
+      "expectedLeaves": 3434,
+      "liveLeaves": 2270,
       "inertLeaves": 1164,
-      "livePercent": 64.7,
+      "livePercent": 66.1,
       "casesWithNoLiveLeaf": 17
     },
     "casesByLiveLeafCount": {
-      "note": "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 291` reads, against a one-leaf threshold, as though the other 274 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
+      "note": "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 334` reads, against a one-leaf threshold, as though the other 317 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
       "buckets": [
         {
           "liveLeaves": "0",
@@ -2699,15 +3031,15 @@
         },
         {
           "liveLeaves": "1",
-          "cases": 17
+          "cases": 19
         },
         {
           "liveLeaves": "2",
-          "cases": 62
+          "cases": 101
         },
         {
           "liveLeaves": "3-5",
-          "cases": 86
+          "cases": 87
         },
         {
           "liveLeaves": "6-10",
@@ -2719,11 +3051,11 @@
         },
         {
           "liveLeaves": "26+",
-          "cases": 16
+          "cases": 17
         }
       ],
-      "atMostTwoLiveLeaves": 96,
-      "atMostFiveLiveLeaves": 182
+      "atMostTwoLiveLeaves": 137,
+      "atMostFiveLiveLeaves": 224
     },
     "families": [
       {
@@ -2941,6 +3273,18 @@
         "casesWithNoLiveLeaf": 0,
         "residual": "None measured: every leaf is read once the node consuming suite's run is unioned with the shared one; the §12.6 procedure is driven against the real policy store.",
         "residualOwner": "no residual"
+      },
+      {
+        "family": 19,
+        "file": "f19-account-device-grant.json",
+        "cases": 43,
+        "expectedLeaves": 137,
+        "liveLeaves": 137,
+        "inertLeaves": 0,
+        "livePercent": 100,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "None measured in the landed grant and suite-0x02 IK slices: every expected grant byte and verdict is replayed through the shared verifier, and the complete account-enrolled handshake trace is reconstructed by the shared implementation plus the import-isolated Noise reference. The family-level deferred list names the node/Hub lifecycle, Web-isolation, and cross-runtime work not yet carried by this file.",
+        "residualOwner": "the remaining F19 implementation phases named by the family deferrals"
       }
     ]
   },
@@ -2949,7 +3293,7 @@
     "ledger": "packages/shared/src/relayE2eeCorpus.test.ts — SECTION_16_3_LEDGER",
     "status": "hand-maintained-transcription",
     "proves": "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and every obligation standing for a group states its case count EXACTLY, so the group can neither lose a member nor gain one without the ledger entry moving with it. So a case that is dropped, a case that is added outside the ledger, or a deferral that is quietly deleted, fails a test. One further check crosses into content: an obligation whose every matching case is read by NO suite must carry an `unasserted` field naming what is missing and who owns it. NINE obligations are in that state and say so, checked against the measured union rather than against a declaration, and in both directions — the field must come off when a case goes live, which is how four of them came off it in this round.",
-    "doesNotProve": "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 291 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
+    "doesNotProve": "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 334 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
     "reviewObligation": "When EITHER side changes — an edit to §16.3, or an edit to the ledger — a reviewer MUST diff the ledger against §16.3 by eye, entry against paragraph, and confirm the two enumerate the same set. That review is the only thing standing between a §16.3 obligation and silent non-coverage. Every ledger entry carries a `section` field naming the §16.3 paragraph to open and a `spec` field carrying the specification's own words for the obligation, so the diff is a side-by-side read rather than an interpretation.",
     "whyNotAutomated": "Parsing §16.3's prose to derive the obligation set automatically was considered and deliberately rejected. The section is discursive English — nested bullets, prose qualifiers, single obligations spread across several sentences, some of them negative — and an extractor over it would be wrong in ways no test could surface. A green check from an unreliable extractor is strictly worse than a known limitation whose reviewer is told, in as many words, to close it.",
     "unassertedObligations": {

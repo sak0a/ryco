@@ -14,6 +14,7 @@ import {
 import {
   deriveE2eeAgreementPublicKey,
   e2eeKeyFingerprint,
+  e2eeSha256,
   verifyE2eeSignature,
 } from "@ryco/shared/relayE2eeKeys";
 import {
@@ -116,6 +117,7 @@ function harness(overrides: Partial<Harness> = {}): Harness {
     key,
     signCalls: 0,
     policy: effectiveNodeE2eePolicy({
+      mode: "compatibility",
       requireE2EE: false,
       requireApprovedClientE2EE: false,
       suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
@@ -190,6 +192,7 @@ describe("NodeE2eeCapabilityStatement", () => {
     expect(wire).toHaveLength(2);
     expect(Uint8Array.from(wire[0]!)).toEqual(advertisement.transcript);
     expect(Uint8Array.from(wire[1]!)).toEqual(advertisement.signature);
+    expect(advertisement.statementDigest).toEqual(e2eeSha256(advertisement.statement));
 
     const elements = transcriptElements(advertisement.transcript);
     expect(elements).toHaveLength(19);
@@ -243,6 +246,8 @@ describe("NodeE2eeCapabilityStatement", () => {
     expect(advertisement.material.nodeId).toBe(NODE_ID);
     expect(advertisement.material.prekeyId).toBe(PREKEY_ID);
     expect(advertisement.material.continuityId).toBe(CONTINUITY_ID);
+    expect(advertisement.material.policyGeneration).toBe(7);
+    expect(advertisement.material.capabilityStatementDigest).toEqual(advertisement.statementDigest);
     expect(advertisement.material.nodeIdentityFingerprint).toEqual(
       e2eeKeyFingerprint("node-identity", state.key.publicKey),
     );
@@ -251,6 +256,7 @@ describe("NodeE2eeCapabilityStatement", () => {
   it('advertises `["IK"]` under requireApprovedClientE2EE (§7.6 element 14, §12.4)', async () => {
     const state = harness({
       policy: effectiveNodeE2eePolicy({
+        mode: "require-locally-approved-native-e2ee",
         requireE2EE: false,
         requireApprovedClientE2EE: true,
         suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
@@ -305,6 +311,7 @@ describe("NodeE2eeCapabilityStatement", () => {
     // The advertised policy values themselves, at the same generation: still a
     // different statement, because the transcript carries them.
     state.policy = effectiveNodeE2eePolicy({
+      mode: "require-e2ee",
       requireE2EE: true,
       requireApprovedClientE2EE: false,
       suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],

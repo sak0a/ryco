@@ -6,12 +6,9 @@ import type {
   RelayEffectiveRole,
   RelayFrame,
   RelayLimits,
+  RelayProtocolVersion,
 } from "@ryco/contracts/relay";
-import {
-  RELAY_MAX_RPC_MESSAGE_BYTES,
-  RELAY_PROTOCOL_MAJOR,
-  RELAY_PROTOCOL_MINOR,
-} from "@ryco/contracts/relay";
+import { RELAY_MAX_RPC_MESSAGE_BYTES } from "@ryco/contracts/relay";
 import { decodeRelayFrame } from "@ryco/shared/relayCodec";
 import { stripRelayChunkCapabilityPrelude } from "@ryco/shared/relayMessageChunks";
 
@@ -63,6 +60,7 @@ function harness(
   options: {
     readonly connection?: () => RelayConnectionIdentity | undefined;
     readonly onAccepted?: (input: ChannelOpenInput) => void | Promise<void>;
+    readonly protocol?: RelayProtocolVersion;
   } = {},
 ) {
   const sent: Uint8Array[] = [];
@@ -87,6 +85,7 @@ function harness(
   >();
   const registry = new RelayChannelRegistry({
     limits,
+    protocol: options.protocol ?? version,
     sendQueue,
     factory: {
       open: async (input) => {
@@ -416,8 +415,7 @@ describe("RelayChannelRegistry", () => {
       channelId: channelA,
       capability: "ryco.rpc",
       effectiveRole: "owner",
-      protocolMajor: RELAY_PROTOCOL_MAJOR,
-      protocolMinor: RELAY_PROTOCOL_MINOR,
+      ...version,
     });
 
     // Read at each use, not captured at open. A channel opened before the
@@ -439,6 +437,29 @@ describe("RelayChannelRegistry", () => {
     sendQueue.flush();
     const frames = decodeAll(sent);
     expect(frames.map((frame) => (frame.type === "data" ? frame.sequence : -1))).toEqual([0, 1]);
+  });
+
+  it("passes the exact minor-3 account-grant context only to its channel session", async () => {
+    const protocol = { protocolMajor: 1, protocolMinor: 3 } as const;
+    const grantDigest = new Uint8Array(32).fill(2);
+    const statementDigest = new Uint8Array(32).fill(3);
+    const { registry, opens } = harness({ protocol });
+    await registry.handle({
+      type: "channel.open",
+      ...protocol,
+      channelId: channelA,
+      capability: "ryco.rpc",
+      effectiveRole: "operator",
+      accountGrantContext: [2, `rtk_${"T".repeat(22)}`, grantDigest, statementDigest],
+    } as unknown as RelayChannelOpenFrame);
+
+    expect(opens[0]?.accountGrantContext).toEqual([
+      2,
+      `rtk_${"T".repeat(22)}`,
+      grantDigest,
+      statementDigest,
+    ]);
+    expect(opens[0]).toMatchObject(protocol);
   });
 
   it("awaits an asynchronous acceptance announcement before delivering any inbound frame", async () => {

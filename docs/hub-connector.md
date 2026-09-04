@@ -5,7 +5,8 @@ behind NAT or CGNAT receive authorized logical `ryco.rpc` channels without openi
 listener. Direct LAN, desktop-local, SSH-assisted, and Tailscale access continue to use the existing
 server listener and are independent of the connector.
 
-The connector consumes relay protocol 1.2. It does not provide a generic tunnel and does not move
+The connector consumes relay protocol 1.2 and negotiates 1.3 when the Hub supports account-enrolled
+native E2EE. It does not provide a generic tunnel and does not move
 projects, files, terminals, conversations, provider sessions, orchestration state, attachments, or
 payload persistence into Hub. The Ryco node remains authoritative for all application state.
 
@@ -42,34 +43,39 @@ overrides.
 
 ## Relay end-to-end encryption admission policy
 
-Two further options govern which relay channels the node admits. They follow the same
-flag → environment → bootstrap-envelope precedence, and are defined normatively in
-`docs/relay-e2ee-protocol.md` §12.3, §12.4 and §12.6.
+One closed policy value governs which relay channels the node admits. It follows the same
+flag → environment → bootstrap-envelope precedence and is defined normatively in
+`docs/relay-e2ee-protocol.md` §18.8.
 
-| CLI flag                             | Environment fallback                    | Default |
-| ------------------------------------ | --------------------------------------- | ------- |
-| `--hub-require-e2ee`                 | `RYCO_HUB_REQUIRE_E2EE`                 | `false` |
-| `--hub-require-approved-client-e2ee` | `RYCO_HUB_REQUIRE_APPROVED_CLIENT_E2EE` | `false` |
+| CLI flag                   | Environment fallback   | Default         |
+| -------------------------- | ---------------------- | --------------- |
+| `--hub-e2ee-policy <mode>` | `RYCO_HUB_E2EE_POLICY` | `compatibility` |
 
-Unlike the connector settings above, these two are **durable node state, not per-process
-configuration**. A value given on a start is committed to the node's policy record; a value left
-unset on a later start leaves the committed value exactly as it was. That is deliberate: an
-operator who enables a policy in one shell must not have it silently withdrawn by the next start
-from a launcher or a service manager. Only an explicit `false` widens the policy back.
+The accepted modes are:
 
-`--hub-require-e2ee` accepts only end-to-end encrypted channels. It closes the plaintext
-downgrade path; it still admits unsigned web sessions.
+| Mode                                   | Legacy | Web NX | Account-enrolled native | Locally approved native |
+| -------------------------------------- | ------ | ------ | ----------------------- | ----------------------- |
+| `compatibility`                        | yes    | yes    | yes                     | yes                     |
+| `require-e2ee`                         | no     | yes    | yes                     | yes                     |
+| `require-native-e2ee`                  | no     | no     | yes                     | yes                     |
+| `require-locally-approved-native-e2ee` | no     | no     | no                      | yes                     |
 
-**`--hub-require-approved-client-e2ee` disables web and legacy access entirely.** Only approved
-native clients reach application payload, and if every approved native client key is lost, remote
-access to this node is stranded until it is recovered locally. Local node recovery never relaxes
-the admission policy. This option implies `--hub-require-e2ee` even when that flag is false.
+This is **durable node state, not per-process configuration**. A value given on a start is committed
+to the node's policy record; leaving it unset later leaves the committed value unchanged. Moving to a
+stricter mode is a policy withdrawal: before acknowledging it, the node commits the new value,
+increments its policy generation, aborts newly disallowed handshakes, and closes newly disallowed live
+channels. Widening affects only later channels.
 
-Enabling either option — or removing a suite from the advertised registry — is a **policy
-withdrawal**: before the change is acknowledged the node durably commits it, increments its policy
-generation, and closes every live channel the narrowed policy no longer admits, reporting how many
-it closed in each class and how many in-flight handshakes it aborted. Widening a policy takes
-effect on channels admitted afterwards and never closes an open one.
+The legacy `--hub-require-e2ee` / `RYCO_HUB_REQUIRE_E2EE` and
+`--hub-require-approved-client-e2ee` / `RYCO_HUB_REQUIRE_APPROVED_CLIENT_E2EE` inputs remain migration
+aliases. An explicit approved-client requirement maps to
+`require-locally-approved-native-e2ee`; otherwise an explicit E2EE requirement maps to
+`require-e2ee`; otherwise the v1 record maps to `compatibility`. Conflicting new and legacy inputs are
+configuration errors. No old record maps implicitly to `require-native-e2ee`.
+
+**`require-locally-approved-native-e2ee` disables Web, account enrollment, and legacy access.** If
+every approved native key is lost, remote access is stranded until local recovery. Recovery never
+relaxes policy.
 
 ### Capability advertisement
 
@@ -94,7 +100,7 @@ A node can fail to have an advertisement for a channel in exactly two ways, and 
   a continuity chain past its bound, a refused signing call, or a continuity id the startup
   cross-check could not resolve.
 
-Under an effective `--hub-require-e2ee` either condition is fatal: the affected channels are closed
+Under any policy mode except `compatibility` either condition is fatal: the affected channels are closed
 with the ordinary `channel_rejected` reason, indistinguishable on the wire from every other
 pre-key rejection, and the node logs an operator diagnostic naming the condition — and, for an
 undersized connection, both the asserted limit and the minimum this protocol needs. Otherwise the
@@ -109,6 +115,31 @@ policy record, the bounded fallback counters, and the approved-client records th
 handshake checks. None of them holds channel, session, key, or payload data, and the client
 records hold key fingerprints rather than keys. The policy record is the operator's own and
 survives leaving a Hub; the client records are Hub-scoped and are erased with the enrollment.
+
+### Capability publication and relay 1.3
+
+On a relay 1.3 connector, the node publishes the exact signed capability statement to the Hub after
+`ready`. Publication contains the exact statement bytes, their SHA-256 digest and expiry, and the
+current connector generation. The node republishes after any identity, agreement-prekey,
+continuity-chain, suite, policy, validity-window, or connector-generation change. Account-grant
+admission remains disabled until the Hub acknowledges the exact digest in the same generation.
+
+The authenticated connector also receives a bounded, generation-numbered Ed25519 Hub verification
+keyset and enrollment-revocation events. These values remain in memory. Reconnect clears the statement
+acknowledgement, keyset, ticket contexts, and subscriptions before a new generation may report ready.
+Signing keys supplied only inside a ticket, grant, or channel frame are never trusted.
+
+For an account-grant ticket the Hub's minor-3 `channel.open` adds one all-or-nothing context:
+
+```text
+[ 0x02, relayTicketId, bstr(deviceGrantDigest), bstr(nodeCapabilityStatementDigest) ]
+```
+
+The node requires the ticket id and both digests to match the decrypted grant and the exact statement
+it advertised on that channel. The node retains the statement and matching prekey until their last
+ticket/grant overlap expires. A missing snapshot, partial context, stale generation, or mismatched
+digest is rejected before application data. Suite `0x01` and Web channels omit this context and remain
+compatible with relay 1.2.
 
 ### What a channel does after the advertisement
 
@@ -209,7 +240,7 @@ ryco e2ee client window open <fingerprint> # the discriminator is required
 ryco e2ee client window close
 ryco e2ee sessions                         # the advisory per-session code, for the web tier
 ryco e2ee policy show
-ryco e2ee policy set [--require-e2ee] [--require-approved-client-e2ee] [--suite <id>]
+ryco e2ee policy set --mode <compatibility|require-e2ee|require-native-e2ee|require-locally-approved-native-e2ee> [--suite <id>]
 ryco e2ee policy recover                   # advance a rolled-back policy generation
 ryco e2ee prekey show
 ryco e2ee prekey rotate
@@ -386,8 +417,9 @@ and for a disabled one — it reports the unchanged state rather than implying i
 
 ## Relay channels, limits, and roles
 
-Ryco explicitly accepts only protocol 1.2 `channel.open` frames with capability `ryco.rpc`, an
-effective role, and room under the negotiated channel limit. Every other open is rejected. Each
+Ryco accepts protocol 1.2 `channel.open` frames and the strict protocol 1.3 extension above, always
+with capability `ryco.rpc`, an effective role, and room under the negotiated channel limit. Every
+other open is rejected. Each
 accepted logical channel owns an isolated RPC byte-session scope and uses the same application
 handlers and services as direct Ryco WebSocket clients. Provider, terminal, orchestration, project,
 and persistence logic is not duplicated.

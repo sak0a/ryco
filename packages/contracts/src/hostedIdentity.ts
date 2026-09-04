@@ -74,10 +74,11 @@ const Opaque256 = Schema.String.check(
   Schema.isMaxLength(43),
   Schema.isPattern(/^[A-Za-z0-9_-]{43}$/),
 );
-const AccountId = Schema.String.check(
+export const HubAccountId = Schema.String.check(
   Schema.isPattern(/^acct_[A-Za-z0-9_-]{22,43}$/),
   Schema.isMaxLength(48),
 );
+export type HubAccountId = typeof HubAccountId.Type;
 const SessionId = Schema.String.check(
   Schema.isPattern(/^sess_[A-Za-z0-9_-]{22,43}$/),
   Schema.isMaxLength(48),
@@ -438,7 +439,7 @@ export type HubActiveSpaceSummary = typeof HubActiveSpaceSummary.Type;
 
 export const HubPublicAccount = strict(
   Schema.Struct({
-    id: AccountId,
+    id: HubAccountId,
     username: HubUsername,
     displayName: BoundedDisplayName,
     createdAt: EpochMs,
@@ -450,7 +451,7 @@ export type HubPublicAccount = typeof HubPublicAccount.Type;
 export const HubPublicBrowserSession = strict(
   Schema.Struct({
     id: SessionId,
-    accountId: AccountId,
+    accountId: HubAccountId,
     activeSpaceId: HubSpaceId,
     createdAt: EpochMs,
     expiresAt: EpochMs,
@@ -1052,7 +1053,7 @@ export const NativeNodeClaimStartResponse = strictTimed({
   transcriptVersion: Schema.Literal(NATIVE_NODE_CLAIM_TRANSCRIPT_VERSION),
   claimId: NativeNodeClaimId,
   challenge: Opaque256,
-  accountId: AccountId,
+  accountId: HubAccountId,
   spaceId: HubSpaceId,
   sessionId: SessionId,
   dpopKeyThumbprint: Opaque256,

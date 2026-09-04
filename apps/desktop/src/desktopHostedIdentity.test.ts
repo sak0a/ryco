@@ -1,5 +1,18 @@
+import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
+
 import type { HostedHubApi } from "@ryco/client-runtime/authorization";
 import { HostedHubApiError } from "@ryco/client-runtime/authorization";
+import type { NativeE2eePlatformService } from "@ryco/client-runtime/platform";
+import { derSignatureToRaw, encodeBase64Url } from "@ryco/client-runtime/relay";
+import {
+  e2eeKeyFingerprint,
+  e2eeSha256,
+  generateE2eeAgreementKeyPair,
+} from "@ryco/shared/relayE2eeKeys";
+import {
+  encodeClientE2eePrekeyCertificateCarrier,
+  encodeClientE2eePrekeyTranscript,
+} from "@ryco/shared/relayE2eeTranscripts";
 
 import type { DesktopHubControlClient } from "./desktopHubControl.ts";
 import {
@@ -18,6 +31,7 @@ function coordinator(input: {
   readonly setup?: ConstructorParameters<typeof DesktopHostedIdentityCoordinator>[0]["setup"];
   readonly trust?: DesktopE2eeTrustStore;
   readonly control?: DesktopHubControlClient;
+  readonly nativeE2eePlatform?: NativeE2eePlatformService;
 }) {
   return new DesktopHostedIdentityCoordinator({
     origin: "https://hub.example.test",
@@ -34,7 +48,68 @@ function coordinator(input: {
     records: {} as DesktopProtectedRecordStore,
     ...(input.trust === undefined ? {} : { trust: input.trust }),
     ...(input.setup === undefined ? {} : { setup: input.setup }),
+    ...(input.nativeE2eePlatform === undefined
+      ? {}
+      : { nativeE2eePlatform: input.nativeE2eePlatform }),
   });
+}
+
+function rawP256(key: KeyObject): Uint8Array {
+  const jwk = key.export({ format: "jwk" });
+  return Uint8Array.from([
+    0x04,
+    ...Buffer.from(jwk.x!, "base64url"),
+    ...Buffer.from(jwk.y!, "base64url"),
+  ]);
+}
+
+function enrollmentPlatform(
+  clearEnrollment: NativeE2eePlatformService["clearEnrollment"],
+): NativeE2eePlatformService {
+  const identity = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const identityPublic = rawP256(identity.publicKey);
+  const agreement = generateE2eeAgreementKeyPair();
+  return {
+    platform: "darwin",
+    appVersion: "1.2.3",
+    deviceLabel: () => "Studio Mac",
+    randomBytes: async (length) => new Uint8Array(length).fill(9),
+    ensureIdentity: async () => ({
+      publicKey: identityPublic,
+      fingerprint: e2eeKeyFingerprint("client-identity", identityPublic),
+      backing: "secure-enclave",
+    }),
+    ensureClientPrekey: async ({ hubOrigin, accountId }) => {
+      const createdAt = Date.now() - 1_000;
+      const expiresAt = Date.now() + 120_000;
+      const transcript = encodeClientE2eePrekeyTranscript({
+        hubOrigin,
+        accountId,
+        identityPublicKey: identityPublic,
+        agreementPublicKey: agreement.publicKey,
+        createdAt,
+        expiresAt,
+      });
+      const signature = derSignatureToRaw(
+        Uint8Array.from(sign("sha256", transcript, identity.privateKey)),
+      );
+      const certificate = encodeClientE2eePrekeyCertificateCarrier(transcript, signature);
+      return {
+        agreementPublicKey: agreement.publicKey,
+        agreementFingerprint: e2eeKeyFingerprint("agreement", agreement.publicKey),
+        transcript,
+        signature,
+        certificate,
+        certificateDigest: e2eeSha256(certificate),
+        expiresAt,
+      };
+    },
+    getOrCreateEnrollmentId: async () => `enr_${"e".repeat(22)}`,
+    clearEnrollment,
+    withAgreementSecret: async (use) => use(Uint8Array.from(agreement.secretKey)),
+    readAccountTrustedNode: async () => null,
+    writeAccountTrustedNode: async () => undefined,
+  };
 }
 
 describe("Desktop hosted identity coordinator", () => {
@@ -91,7 +166,9 @@ describe("Desktop hosted identity coordinator", () => {
       setup: vi.fn().mockRejectedValue(new Error("node connector disabled")),
     });
 
-    await expect(identity.connect()).resolves.toEqual({ status: "unavailable" });
+    await expect(identity.connect()).resolves.toEqual({
+      status: "unavailable",
+    });
     expect(identity.hasSessionMaterial).toBe(true);
   });
 
@@ -124,6 +201,111 @@ describe("Desktop hosted identity coordinator", () => {
       localNodeHandle: "L".repeat(22),
     });
     expect(list).toHaveBeenCalledWith("https://hub.example.test", "account-1");
+  });
+
+  it("automatically enrolls after restore, rotates account scope, and clears on sign-out", async () => {
+    const firstAccountId = `acct_${"a".repeat(22)}`;
+    const secondAccountId = `acct_${"b".repeat(22)}`;
+    const clearEnrollment = vi.fn<NativeE2eePlatformService["clearEnrollment"]>(
+      async () => undefined,
+    );
+    let enrollmentRevision = 0;
+    const upsertE2eeDeviceEnrollment = vi.fn<HostedHubApi["upsertE2eeDeviceEnrollment"]>(
+      async (request) =>
+        ({
+          enrollmentId: request.enrollmentId,
+          enrollmentRevision: ++enrollmentRevision,
+          accountAuthEpoch: 1,
+          deviceAuthEpoch: 1,
+          platform: request.platform,
+          appVersion: request.appVersion,
+          reportedKeyBacking: request.reportedKeyBacking,
+          deviceLabel: request.deviceLabel,
+          identityFingerprint: request.identityFingerprint,
+          agreementFingerprint: request.agreementFingerprint,
+          clientPrekeyCertificateDigest: request.clientPrekeyCertificateDigest,
+          certificateExpiresAt: request.certificateExpiresAt,
+          status: "active",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          lastUsedAt: null,
+          revokedAt: null,
+        }) as Awaited<ReturnType<HostedHubApi["upsertE2eeDeviceEnrollment"]>>,
+    );
+    const restoreSession = vi
+      .fn()
+      .mockResolvedValueOnce({ account: { id: firstAccountId } })
+      .mockResolvedValueOnce({ account: { id: secondAccountId } });
+    const identity = coordinator({
+      api: {
+        hasSessionMaterial: true,
+        restoreSession,
+        upsertE2eeDeviceEnrollment,
+        listNodes: vi.fn().mockResolvedValue([]),
+        clearSessionMaterial: vi.fn(),
+      },
+      setup: vi.fn(async ({ accountId }) => ({
+        nodeId: `node-${accountId}`,
+        localNodeHandle: `handle-${accountId}`,
+      })),
+      nativeE2eePlatform: enrollmentPlatform(clearEnrollment),
+    });
+
+    await expect(identity.resume()).resolves.toMatchObject({
+      status: "ready",
+      accountId: firstAccountId,
+      accountE2eeReady: true,
+    });
+    await expect(identity.resume()).resolves.toMatchObject({
+      status: "ready",
+      accountId: secondAccountId,
+      accountE2eeReady: true,
+    });
+    expect(upsertE2eeDeviceEnrollment).toHaveBeenCalledTimes(2);
+    expect(clearEnrollment).toHaveBeenCalledWith({
+      hubOrigin: "https://hub.example.test",
+      accountId: firstAccountId,
+    });
+
+    await identity.disconnect();
+    expect(clearEnrollment).toHaveBeenLastCalledWith({
+      hubOrigin: "https://hub.example.test",
+      accountId: secondAccountId,
+    });
+  });
+
+  it("keeps local account trust ready when account-grant enrollment is unavailable", async () => {
+    const accountId = `acct_${"a".repeat(22)}`;
+    const setup = vi.fn().mockResolvedValue({
+      nodeId: "node-local",
+      localNodeHandle: "local-node-handle",
+    });
+    const identity = coordinator({
+      api: {
+        hasSessionMaterial: true,
+        restoreSession: vi.fn().mockResolvedValue({ account: { id: accountId } }),
+        upsertE2eeDeviceEnrollment: vi
+          .fn()
+          .mockRejectedValue(new HostedHubApiError("not_found", 404)),
+        listNodes: vi.fn().mockResolvedValue([]),
+      },
+      setup,
+      nativeE2eePlatform: enrollmentPlatform(vi.fn(async () => undefined)),
+    });
+
+    const status = await identity.resume();
+
+    expect(status).toEqual({
+      status: "ready",
+      accountId,
+      nodeId: "node-local",
+      localNodeHandle: "local-node-handle",
+    });
+    expect(setup).toHaveBeenCalledWith({ accountId });
+    expect(identity.nativeE2eeEnrollmentState).toMatchObject({
+      status: "unavailable",
+      errorCode: "enrollment_unavailable",
+    });
   });
 
   it("upgrades a concurrent background resume when the user chooses Connect", async () => {
@@ -218,7 +400,10 @@ describe("Desktop hosted identity coordinator", () => {
           ],
         }),
       },
-      setup: vi.fn().mockResolvedValue({ nodeId: "node-1", localNodeHandle: "local-node-1" }),
+      setup: vi.fn().mockResolvedValue({
+        nodeId: "node-1",
+        localNodeHandle: "local-node-1",
+      }),
     });
 
     const status = await identity.resume();
@@ -226,7 +411,11 @@ describe("Desktop hosted identity coordinator", () => {
       status: "ready",
       github: {
         linkAvailable: true,
-        identity: { provider: "github", login: "octocat", displayName: "The Octocat" },
+        identity: {
+          provider: "github",
+          login: "octocat",
+          displayName: "The Octocat",
+        },
       },
     });
     expect(JSON.stringify(status)).not.toContain("providerSubject");

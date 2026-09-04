@@ -193,10 +193,17 @@ describe("relay attempt validation", () => {
 
   it("throws and never creates a socket for an already-expired ticket", () => {
     const createSocket = vi.fn();
-    expect(() => build({ ticketExpiresAt: 500, now: () => 1_000, createSocket })).toThrow(
-      "Relay attempt is no longer valid.",
-    );
+    const disposePreparedContext = vi.fn();
+    expect(() =>
+      build({
+        ticketExpiresAt: 500,
+        now: () => 1_000,
+        createSocket,
+        disposePreparedContext,
+      }),
+    ).toThrow("Relay attempt is no longer valid.");
     expect(createSocket).not.toHaveBeenCalled();
+    expect(disposePreparedContext).toHaveBeenCalledOnce();
   });
 
   it("rejects a query string on the relay URL", () => {

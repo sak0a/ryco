@@ -1,9 +1,11 @@
+import type { NodeE2eeAdmissionPolicy as NodeE2eeAdmissionPolicyMode } from "@ryco/contracts/native-e2ee";
 import { E2EE_SUITE_REGISTRY_MAX_ENTRIES } from "@ryco/shared/relayE2eeConstants";
+import type { E2eeNoisePattern } from "@ryco/shared/relayE2eeTranscripts";
 import {
-  e2eeEffectiveAdmittedPatterns,
-  type E2eeNoisePattern,
-} from "@ryco/shared/relayE2eeTranscripts";
-import { E2EE_SUITE_25519_CHACHAPOLY_SHA256, isE2eeSuiteId } from "@ryco/shared/relayE2eeWire";
+  E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+  isE2eeSuiteId,
+} from "@ryco/shared/relayE2eeWire";
 import type { E2eeSuiteId } from "@ryco/shared/relayE2eeWire";
 
 import { NodeContinuityAnchorError, type NodeContinuityAnchor } from "./NodeContinuityAnchor.ts";
@@ -94,6 +96,8 @@ function stateError(code: NodeE2eePolicyStoreErrorCode): never {
  * get from element 14. Only `EffectiveNodeE2eePolicy` below decides admission.
  */
 export interface NodeE2eeAdmissionPolicy {
+  /** The sole durable policy choice; every remaining field is its wire projection. */
+  readonly mode: NodeE2eeAdmissionPolicyMode;
   readonly requireE2EE: boolean;
   readonly requireApprovedClientE2EE: boolean;
   /** §7.6 element 9. Non-empty, ascending, no duplicates. */
@@ -113,12 +117,15 @@ export interface NodeE2eeAdmissionPolicy {
  * object that looks like the admission rule but is not it.
  */
 export interface EffectiveNodeE2eePolicy {
+  readonly mode: NodeE2eeAdmissionPolicyMode;
   /** §12.4: `requireE2EE OR requireApprovedClientE2EE`. */
   readonly requireE2EE: boolean;
   readonly requireApprovedClientE2EE: boolean;
   /** §7.6 element 14, from the shared derivation; never configured. */
   readonly admittedPatterns: readonly E2eeNoisePattern[];
   readonly suiteRegistry: readonly E2eeSuiteId[];
+  /** Whether suite 0x02 may authorize a new channel under this mode. */
+  readonly accountGrantsAllowed: boolean;
   /** The raw §7.6 elements 9, 12 and 13. For the transcript encoder and the CLI display. */
   readonly advertised: NodeE2eeAdmissionPolicy;
 }
@@ -126,14 +133,63 @@ export interface EffectiveNodeE2eePolicy {
 /**
  * §12.4's deterministic effective-policy rule, and the only place it is applied.
  */
+export function nodeE2eeAdmissionPolicyForMode(
+  mode: NodeE2eeAdmissionPolicyMode,
+): NodeE2eeAdmissionPolicy {
+  switch (mode) {
+    case "compatibility":
+      return {
+        mode,
+        requireE2EE: false,
+        requireApprovedClientE2EE: false,
+        suiteRegistry: [
+          E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+          E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        ],
+      };
+    case "require-e2ee":
+      return {
+        mode,
+        requireE2EE: true,
+        requireApprovedClientE2EE: false,
+        suiteRegistry: [
+          E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+          E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        ],
+      };
+    case "require-native-e2ee":
+      return {
+        mode,
+        requireE2EE: true,
+        requireApprovedClientE2EE: false,
+        suiteRegistry: [
+          E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+          E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        ],
+      };
+    case "require-locally-approved-native-e2ee":
+      return {
+        mode,
+        requireE2EE: true,
+        requireApprovedClientE2EE: true,
+        suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
+      };
+  }
+}
+
 export function effectiveNodeE2eePolicy(
   advertised: NodeE2eeAdmissionPolicy,
 ): EffectiveNodeE2eePolicy {
+  const nativeOnly =
+    advertised.mode === "require-native-e2ee" ||
+    advertised.mode === "require-locally-approved-native-e2ee";
   return {
-    requireE2EE: advertised.requireE2EE || advertised.requireApprovedClientE2EE,
+    mode: advertised.mode,
+    requireE2EE: advertised.mode !== "compatibility",
     requireApprovedClientE2EE: advertised.requireApprovedClientE2EE,
-    admittedPatterns: e2eeEffectiveAdmittedPatterns(advertised.requireApprovedClientE2EE),
+    admittedPatterns: nativeOnly ? ["IK"] : ["IK", "NX"],
     suiteRegistry: advertised.suiteRegistry,
+    accountGrantsAllowed: advertised.mode !== "require-locally-approved-native-e2ee",
     advertised,
   };
 }
@@ -148,11 +204,9 @@ export function effectiveNodeE2eePolicy(
  * the one suite this version defines would admit nothing at all, which is a
  * different failure from admitting too much.
  */
-export const NODE_E2EE_FAIL_CLOSED_POLICY: EffectiveNodeE2eePolicy = effectiveNodeE2eePolicy({
-  requireE2EE: true,
-  requireApprovedClientE2EE: true,
-  suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
-});
+export const NODE_E2EE_FAIL_CLOSED_POLICY: EffectiveNodeE2eePolicy = effectiveNodeE2eePolicy(
+  nodeE2eeAdmissionPolicyForMode("require-locally-approved-native-e2ee"),
+);
 
 /**
  * §12.6's four narrowing cases, evaluated as one predicate.
@@ -191,6 +245,7 @@ export function sameNodeE2eeAdmissionPolicy(
   right: NodeE2eeAdmissionPolicy,
 ): boolean {
   return (
+    left.mode === right.mode &&
     left.requireE2EE === right.requireE2EE &&
     left.requireApprovedClientE2EE === right.requireApprovedClientE2EE &&
     left.suiteRegistry.length === right.suiteRegistry.length &&
@@ -278,13 +333,14 @@ export function e2eePolicyRefusesInFlightHandshake(
 
 // ─── the durable record ─────────────────────────────────────────────────────
 
-/** Two booleans, a small integer array, and an envelope, plus room for a newer binary's fields. */
+/** One closed mode and an envelope, plus room for a newer binary's fields. */
 const MAX_POLICY_STATE_BYTES = 8 * 1024;
 
 const KNOWN_KEYS: ReadonlySet<string> = new Set([
   "version",
   "revision",
   "generation",
+  "mode",
   "requireE2EE",
   "requireApprovedClientE2EE",
   "suiteRegistry",
@@ -297,19 +353,19 @@ const FORBIDDEN_FORWARD_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 export interface NodeE2eePolicyRecordFile {
-  readonly version: 1;
+  readonly version: 2;
   readonly revision: number;
   /** §5.7. Strictly increasing across every committed change; never silently reset. */
   readonly generation: number;
-  readonly requireE2EE: boolean;
-  readonly requireApprovedClientE2EE: boolean;
-  readonly suiteRegistry: readonly E2eeSuiteId[];
+  /** §18.8. The compatibility booleans and suite registry are derived, never stored. */
+  readonly mode: NodeE2eeAdmissionPolicyMode;
 }
 
 interface StoredPolicyFile {
   readonly record: NodeE2eePolicyRecordFile;
   /** Top-level keys a newer binary wrote, preserved verbatim across this binary's writes. */
   readonly forwardFields: Readonly<Record<string, unknown>>;
+  readonly migrationRequired: boolean;
 }
 
 /**
@@ -322,58 +378,118 @@ interface StoredPolicyFile {
  */
 export function initialNodeE2eePolicyRecord(): NodeE2eePolicyRecordFile {
   return {
-    version: 1,
+    version: 2,
     revision: 0,
     generation: 0,
-    requireE2EE: false,
-    requireApprovedClientE2EE: false,
-    suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
+    mode: "compatibility",
   };
 }
 
-function parseSuiteRegistry(value: unknown): readonly E2eeSuiteId[] {
+const POLICY_MODES: ReadonlySet<string> = new Set([
+  "compatibility",
+  "require-e2ee",
+  "require-native-e2ee",
+  "require-locally-approved-native-e2ee",
+]);
+
+function legacyMode(value: {
+  readonly requireE2EE: boolean;
+  readonly requireApprovedClientE2EE: boolean;
+}): NodeE2eeAdmissionPolicyMode {
+  if (value.requireApprovedClientE2EE) return "require-locally-approved-native-e2ee";
+  if (value.requireE2EE) return "require-e2ee";
+  return "compatibility";
+}
+
+function sameSuites(left: readonly E2eeSuiteId[], right: readonly E2eeSuiteId[]): boolean {
+  return left.length === right.length && left.every((suite, index) => suite === right[index]);
+}
+
+/** Translate new enum and deprecated boolean/API inputs through one deterministic boundary. */
+export function resolveNodeE2eePolicyProposal(
+  current: EffectiveNodeE2eePolicy,
+  proposal: NodeE2eePolicyProposal,
+): NodeE2eeAdmissionPolicy {
+  let mode = proposal.mode ?? current.mode;
+  const hasLegacyBooleans =
+    proposal.requireE2EE !== undefined || proposal.requireApprovedClientE2EE !== undefined;
+  if (proposal.mode === undefined && hasLegacyBooleans) {
+    mode = legacyMode({
+      requireE2EE: proposal.requireE2EE ?? current.advertised.requireE2EE,
+      requireApprovedClientE2EE:
+        proposal.requireApprovedClientE2EE ?? current.advertised.requireApprovedClientE2EE,
+    });
+  }
   if (
-    !Array.isArray(value) ||
-    value.length === 0 ||
-    value.length > E2EE_SUITE_REGISTRY_MAX_ENTRIES
+    proposal.mode === undefined &&
+    proposal.suiteRegistry?.length === 1 &&
+    proposal.suiteRegistry[0] === E2EE_SUITE_25519_CHACHAPOLY_SHA256
   ) {
-    return stateError("policy_state_corrupt");
+    mode = "require-locally-approved-native-e2ee";
   }
-  // Every entry must be a suite THIS binary can run. A registry naming one it
-  // cannot is not readable-with-a-warning: advertising it would make the node
-  // accept a hello selecting a construction it has no implementation for. The
-  // consequence is that a downgrade past a future suite fails closed and loudly
-  // rather than advertising something it cannot serve, which is the direction
-  // §12.4 chooses everywhere else.
-  const suites = value.map((entry) => {
-    if (typeof entry !== "number" || !isE2eeSuiteId(entry)) {
-      return stateError("policy_state_corrupt");
-    }
-    return entry;
-  });
-  // Strictly ascending, so one registry has exactly one encoding and the §12.6
-  // subset test never has to normalize before comparing.
-  for (let index = 1; index < suites.length; index += 1) {
-    if (suites[index - 1]! >= suites[index]!) return stateError("policy_state_corrupt");
+  if (!POLICY_MODES.has(mode)) return stateError("policy_state_operation_failed");
+  const projected = nodeE2eeAdmissionPolicyForMode(mode);
+  if (
+    (proposal.requireE2EE !== undefined && proposal.requireE2EE !== projected.requireE2EE) ||
+    (proposal.requireApprovedClientE2EE !== undefined &&
+      proposal.requireApprovedClientE2EE !== projected.requireApprovedClientE2EE) ||
+    (proposal.suiteRegistry !== undefined &&
+      !sameSuites(proposal.suiteRegistry, projected.suiteRegistry))
+  ) {
+    return stateError("policy_state_operation_failed");
   }
-  return suites;
+  return projected;
 }
 
 function parseFile(value: unknown): StoredPolicyFile {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return stateError("policy_state_corrupt");
   }
-  const candidate = value as Partial<NodeE2eePolicyRecordFile> & Record<string, unknown>;
+  const candidate = value as Record<string, unknown>;
   if (
-    candidate.version !== 1 ||
+    (candidate.version !== 1 && candidate.version !== 2) ||
     !Number.isSafeInteger(candidate.revision) ||
     Number(candidate.revision) < 0 ||
     !Number.isSafeInteger(candidate.generation) ||
-    Number(candidate.generation) < 0 ||
-    typeof candidate.requireE2EE !== "boolean" ||
-    typeof candidate.requireApprovedClientE2EE !== "boolean"
+    Number(candidate.generation) < 0
   ) {
     return stateError("policy_state_corrupt");
+  }
+  let mode: NodeE2eeAdmissionPolicyMode;
+  const migrationRequired = candidate.version === 1;
+  if (migrationRequired) {
+    if (
+      Object.prototype.hasOwnProperty.call(candidate, "mode") ||
+      typeof candidate.requireE2EE !== "boolean" ||
+      typeof candidate.requireApprovedClientE2EE !== "boolean" ||
+      !Array.isArray(candidate.suiteRegistry) ||
+      candidate.suiteRegistry.length < 1 ||
+      candidate.suiteRegistry.length > E2EE_SUITE_REGISTRY_MAX_ENTRIES ||
+      !candidate.suiteRegistry.every(
+        (suite, index, suites) =>
+          typeof suite === "number" &&
+          suite === E2EE_SUITE_25519_CHACHAPOLY_SHA256 &&
+          isE2eeSuiteId(suite) &&
+          (index === 0 || Number(suites[index - 1]) < suite),
+      )
+    ) {
+      return stateError("policy_state_corrupt");
+    }
+    mode = legacyMode({
+      requireE2EE: candidate.requireE2EE,
+      requireApprovedClientE2EE: candidate.requireApprovedClientE2EE,
+    });
+  } else {
+    if (
+      typeof candidate.mode !== "string" ||
+      !POLICY_MODES.has(candidate.mode) ||
+      Object.prototype.hasOwnProperty.call(candidate, "requireE2EE") ||
+      Object.prototype.hasOwnProperty.call(candidate, "requireApprovedClientE2EE") ||
+      Object.prototype.hasOwnProperty.call(candidate, "suiteRegistry")
+    ) {
+      return stateError("policy_state_corrupt");
+    }
+    mode = candidate.mode as NodeE2eeAdmissionPolicyMode;
   }
   const forwardFields: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(candidate)) {
@@ -382,14 +498,13 @@ function parseFile(value: unknown): StoredPolicyFile {
   }
   return {
     record: {
-      version: 1,
+      version: 2,
       revision: candidate.revision as number,
       generation: candidate.generation as number,
-      requireE2EE: candidate.requireE2EE,
-      requireApprovedClientE2EE: candidate.requireApprovedClientE2EE,
-      suiteRegistry: parseSuiteRegistry(candidate.suiteRegistry),
+      mode,
     },
     forwardFields,
+    migrationRequired,
   };
 }
 
@@ -401,8 +516,12 @@ function encodeFile(file: StoredPolicyFile): unknown {
 
 /** What a caller proposes. An absent field leaves the committed value alone. */
 export interface NodeE2eePolicyProposal {
+  readonly mode?: NodeE2eeAdmissionPolicyMode | undefined;
+  /** Deprecated compatibility input; translated to `mode`. */
   readonly requireE2EE?: boolean | undefined;
+  /** Deprecated compatibility input; translated to `mode`. */
   readonly requireApprovedClientE2EE?: boolean | undefined;
+  /** Deprecated compatibility input; `[0x01]` selects the strongest mode. */
   readonly suiteRegistry?: readonly E2eeSuiteId[] | undefined;
 }
 
@@ -477,11 +596,7 @@ const FAILURE_CODES: Readonly<Record<ProtectedStateFileFailure, NodeE2eePolicySt
 export function nodeE2eeAdmissionPolicyOf(
   record: NodeE2eePolicyRecordFile,
 ): NodeE2eeAdmissionPolicy {
-  return {
-    requireE2EE: record.requireE2EE,
-    requireApprovedClientE2EE: record.requireApprovedClientE2EE,
-    suiteRegistry: record.suiteRegistry,
-  };
+  return nodeE2eeAdmissionPolicyForMode(record.mode);
 }
 
 export async function makeNodeE2eePolicyStore(options: {
@@ -513,7 +628,11 @@ export async function makeNodeE2eePolicyStore(options: {
     // materializing it would spend a write — and, worse, make "never
     // configured" indistinguishable from "explicitly set to the defaults" for
     // any later reader.
-    return { record: initialNodeE2eePolicyRecord(), forwardFields: {} };
+    return {
+      record: initialNodeE2eePolicyRecord(),
+      forwardFields: {},
+      migrationRequired: false,
+    };
   };
 
   const write = (proposed: StoredPolicyFile): Promise<void> =>
@@ -538,9 +657,13 @@ export async function makeNodeE2eePolicyStore(options: {
 
   const read: NodeE2eePolicyStore["read"] = () =>
     file.withLock(async () => {
-      const { record } = await load();
-      await crossCheck(record);
-      return { record, policy: effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(record)) };
+      let current = await load();
+      await crossCheck(current.record);
+      current = await migrate(current);
+      return {
+        record: current.record,
+        policy: effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(current.record)),
+      };
     });
 
   /**
@@ -570,10 +693,10 @@ export async function makeNodeE2eePolicyStore(options: {
     await withAnchor(() => options.anchor.reservePolicyGeneration(next.generation));
     const record: NodeE2eePolicyRecordFile = {
       ...next,
-      version: 1,
+      version: 2,
       revision: current.record.revision + 1,
     };
-    await write({ record, forwardFields: current.forwardFields });
+    await write({ record, forwardFields: current.forwardFields, migrationRequired: false });
     await withAnchor(() => options.anchor.commitPolicyGeneration(record.generation));
     return record;
   };
@@ -590,12 +713,22 @@ export async function makeNodeE2eePolicyStore(options: {
     );
   };
 
+  const migrate = async (current: StoredPolicyFile): Promise<StoredPolicyFile> => {
+    if (!current.migrationRequired) return current;
+    const record = await commitRecord(current, {
+      generation: await nextGeneration(current.record),
+      mode: current.record.mode,
+    });
+    return { record, forwardFields: current.forwardFields, migrationRequired: false };
+  };
+
   /** The whole of §12.6 step (a), for whichever advertised policy the caller resolved. */
   const apply = async (
     current: StoredPolicyFile,
-    advertised: NodeE2eeAdmissionPolicy,
+    mode: NodeE2eeAdmissionPolicyMode,
   ): Promise<NodeE2eePolicyCommit> => {
     const previous = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(current.record));
+    const advertised = nodeE2eeAdmissionPolicyForMode(mode);
     const policy = effectiveNodeE2eePolicy(advertised);
     if (sameNodeE2eeAdmissionPolicy(advertised, previous.advertised)) {
       // No generation is spent on a no-op: §5.7 increments "whenever any
@@ -613,9 +746,7 @@ export async function makeNodeE2eePolicyStore(options: {
     }
     const record = await commitRecord(current, {
       generation: await nextGeneration(current.record),
-      requireE2EE: advertised.requireE2EE,
-      requireApprovedClientE2EE: advertised.requireApprovedClientE2EE,
-      suiteRegistry: advertised.suiteRegistry,
+      mode,
     });
     return {
       record,
@@ -628,14 +759,11 @@ export async function makeNodeE2eePolicyStore(options: {
 
   const commit: NodeE2eePolicyStore["commit"] = (proposal) =>
     file.withLock(async () => {
-      const current = await load();
+      let current = await load();
       await crossCheck(current.record);
-      return apply(current, {
-        requireE2EE: proposal.requireE2EE ?? current.record.requireE2EE,
-        requireApprovedClientE2EE:
-          proposal.requireApprovedClientE2EE ?? current.record.requireApprovedClientE2EE,
-        suiteRegistry: proposal.suiteRegistry ?? current.record.suiteRegistry,
-      });
+      current = await migrate(current);
+      const policy = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(current.record));
+      return apply(current, resolveNodeE2eePolicyProposal(policy, proposal).mode);
     });
 
   const recoverGeneration: NodeE2eePolicyStore["recoverGeneration"] = () =>
@@ -665,7 +793,7 @@ export async function makeNodeE2eePolicyStore(options: {
       const policy = effectiveNodeE2eePolicy(advertised);
       const record = await commitRecord(current, {
         generation: await nextGeneration(current.record),
-        ...advertised,
+        mode: advertised.mode,
       });
       return {
         record,

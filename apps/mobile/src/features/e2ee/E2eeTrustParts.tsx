@@ -33,7 +33,7 @@ export function E2eeChannelCard(props: {
   readonly label: string;
   readonly message: string;
 }) {
-  const verified = props.claim === "verified";
+  const verified = props.claim === "verified" || props.claim === "account-trusted";
   const iconColor = useThemeColor(verified ? "--color-success" : "--color-icon-muted");
   return (
     <View className="mx-5 mt-4 rounded-2xl border border-border bg-card p-4">

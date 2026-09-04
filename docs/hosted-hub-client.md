@@ -10,10 +10,11 @@ attachments, approvals, and relay payloads it owns.
 
 Sameness of client ends at that encryption layer, and this is the one place the difference matters.
 The browser runs the **unsigned ephemeral** tier of
-[relay payload encryption](./relay-e2ee-protocol.md) (Noise NX); the Ryco mobile app runs the
-**signed native** tier (Noise IK), and §2.2 of that specification puts the two in different rows
-with different guarantees. Everything this document says about encryption is about the browser tier
-and MUST NOT be read across to the app.
+[relay payload encryption](./relay-e2ee-protocol.md) (Noise NX). Independently distributed Desktop
+and mobile clients run signed native Noise IK: either locally verified suite `0x01`, or the automatic
+account-enrolled suite `0x02` of that specification's §18. Everything in the browser sections below
+is about NX and MUST NOT be read across to native clients. In particular, the browser never requests,
+receives, decodes, stores, or forwards a native `HubDeviceGrant`.
 
 This mode is separate from the hosted-static pairing client. It is opt-in and does not change direct
 LAN, desktop-local, saved remote, or desktop-managed SSH behavior.
@@ -68,6 +69,33 @@ transport, and Ryco-session state before closing every live environment channel.
 ceremonies abort the earlier browser operation. Denial, malformed options/responses, expired
 challenges, revoked sessions, and network loss surface bounded messages that do not reflect response
 bodies.
+
+### Native account enrollment boundary
+
+After a native Hub login, the shared client runtime automatically ensures the installation's public
+hardware identity and client agreement-prekey certificate, then idempotently enrolls those public
+values under the DPoP-bound account session. Private identity, agreement, DPoP, Noise, and session keys
+never leave the native device. Enrollment and directory refresh run in parallel where their inputs
+permit; directory success alone never makes a node channel ready.
+
+For an eligible online node, the native relay-ticket response includes the same single-use ticket plus
+the exact signed grant, grant digest, public ticket id, selected node capability statement/digest,
+keyset generation, capability, effective role, and common expiry. The client validates the grant with
+the separately fetched authenticated Hub verifier keyset before constructing suite-`0x02` message 1.
+The grant is owned by that one connection attempt, is never placed in shared UI state or persistence,
+and is discarded with the ticket. There is no second per-node HTTP request.
+
+Trust selection is deterministic: Local Trusted Introduction or a matching verified pin uses suite
+`0x01`; otherwise an eligible enrollment uses suite `0x02`; otherwise native access fails closed and
+offers explicit secure recovery. A grant never replaces a verified pin. The user may inspect keys,
+fingerprints, safety numbers, reported backing, enrollment history, and revocation state without
+performing an onboarding ceremony. Connection labels are **Encrypted · Verified locally**,
+**Encrypted · Account trusted**, **Encrypted web**, and **Legacy connection**.
+
+Account Security may list, rename, and revoke public device enrollments. Revoking the current device
+invalidates its hosted connection generation immediately; the Hub stops ticket/grant issuance and
+closes its relay channels, while nodes retire matching ephemeral leases. These controls are account
+operations, not node-owned durable approval records.
 
 ## Independent state models
 
@@ -182,11 +210,13 @@ The existing `WsTransport` and Effect RPC client accept a WebSocket-compatible h
 feature components do not know whether their ordered bytes use the direct WebSocket, desktop-local
 transport, or Hub relay.
 
-For every connection attempt the adapter requests a new short-lived ticket over authenticated Hub
-HTTP. A ticket exists only in a per-tab in-memory attempt object, is consumed once, and is discarded
-before another attempt. The relay WebSocket has no query credentials, cookies added by application
-code, or Authorization header. Its first binary frame is canonical protocol 1.2 client
-authentication and must complete within five seconds.
+For every browser connection attempt the adapter requests the existing grant-free short-lived ticket
+over authenticated Hub HTTP. A ticket exists only in a per-tab in-memory attempt object, is consumed
+once, and is discarded before another attempt. Cookie/browser sessions cannot request native ticket
+mode, and a response that mixes browser and native fields is rejected. The relay WebSocket has no
+query credentials, cookies added by application code, or Authorization header. Its first binary frame
+is canonical protocol 1.2 client authentication and must complete within five seconds. Native
+account-grant attempts negotiate relay 1.3 through the separate DPoP-bound API described above.
 
 The adapter consumes canonical `ready`, authorized `channel.open`, `channel.accept/reject`, data,
 flow pause/resume, ping/pong, error, and close frames. Relay frames, relay ordering, and the RPC
@@ -459,6 +489,10 @@ an explicit allowlist of immutable shell assets and a static offline document. L
 authentication, API, RPC, relay, WebSocket, attachment, project, file, terminal, conversation, and
 other node-owned responses remain network-only.
 
+Native enrollment, grant-verification keyset, native relay-ticket/grant, device-list/rename/revoke,
+and revocation-event routes are always network-only even if a future route name resembles a static
+asset. Request method and response headers do not relax that denylist.
+
 ## Mobile installation and updates
 
 On Android Chrome, Ryco exposes **Install Ryco** when the browser supplies its native install
@@ -474,7 +508,7 @@ does not reload active work automatically.
 Navigation remains network-first. If the network is unavailable, the worker returns a static
 offline document containing no account, node, project, or conversation data. Returning online does
 not make stale browser state authoritative: hosted mutations remain disabled until Ryco validates
-the current session, refreshes the authorized node directory and grant, establishes a fresh relay
+the current session, refreshes the authorized node directory and role, establishes a fresh relay
 generation, and accepts the current node snapshot or replay point.
 
 Installing Ryco changes nothing about who can read what crosses the relay: an installed tab gets the
@@ -505,7 +539,8 @@ by **Relay payload encryption in the browser** above, and on a legacy channel th
 readable payload itself.
 
 Do not add passwords, cookies, Authorization headers, CSRF values, WebAuthn challenges/responses,
-invitation secrets, tickets, node proofs, encryption key material, handshake or session-key state,
+invitation secrets, tickets, native device grants, Hub keysets, node proofs, encryption key material,
+handshake or session-key state,
 session verification codes, provider data, source code, conversations, terminal output, files,
 attachments, or relay payloads to errors, diagnostics, metrics, exports, or persistence.
 

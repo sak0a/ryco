@@ -47,6 +47,7 @@ import {
   E2EE_INNER_TYPE_ERROR,
   E2EE_INNER_TYPE_RPC,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+  E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
   e2eeAeadNonce,
   e2eeAeadNonceFromHeader,
   e2eeEnvelopeAad,
@@ -211,6 +212,7 @@ const countingAead = (): CountingAead => {
 };
 
 interface PairOptions {
+  readonly suite?: 1 | 2;
   /** Applied to the client's send state and the node's receive state (`c2n`). */
   readonly c2n?: E2eeSyntheticDirectionState;
   /** Applied to the node's send state and the client's receive state (`n2c`). */
@@ -224,9 +226,10 @@ const sessionPair = (
   options: PairOptions = {},
 ): { client: E2eeRecordSession; node: E2eeRecordSession } => {
   const plaintextCeiling = options.plaintextCeiling ?? 1_024;
+  const suite = options.suite ?? E2EE_SUITE_25519_CHACHAPOLY_SHA256;
   const client = new E2eeRecordSession({
     secrets: freshSecrets(),
-    suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+    suite,
     sessionBindingHash: bytes(SESSION_BINDING_HASH),
     sendDirection: E2EE_DIRECTION_CLIENT_TO_NODE,
     plaintextCeiling,
@@ -236,7 +239,7 @@ const sessionPair = (
   });
   const node = new E2eeRecordSession({
     secrets: freshSecrets(),
-    suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+    suite,
     sessionBindingHash: bytes(SESSION_BINDING_HASH),
     sendDirection: E2EE_DIRECTION_NODE_TO_CLIENT,
     plaintextCeiling,
@@ -458,6 +461,18 @@ describe("relay E2EE record protection (§9.1)", () => {
     });
   });
 
+  it("uses the same record primitives under the registered account-grant suite id", async () => {
+    const { client, node } = sessionPair({
+      suite: E2EE_SUITE_ACCOUNT_GRANT_25519_CHACHAPOLY_SHA256,
+    });
+    const sent = await send(client, E2EE_INNER_TYPE_RPC, utf8ToBytes("account-enrolled"));
+    expect(sent.envelope?.[2]).toBe(0x02);
+    expect(node.unprotect(sent.envelope!)).toMatchObject({
+      kind: "authenticated",
+      body: utf8ToBytes("account-enrolled"),
+    });
+  });
+
   it("pins the node-to-client AAD and protects the reverse direction with no prior traffic", async () => {
     const { client, node } = sessionPair();
     const sent = await send(node, E2EE_INNER_TYPE_RPC, utf8ToBytes("hello"));
@@ -582,7 +597,7 @@ describe("relay E2EE record protection (§9.1)", () => {
     expect(versionAead.calls).toEqual({ select: 0, seal: 0, open: 0 });
 
     const badSuite = Uint8Array.from(envelope);
-    badSuite[2] = 0x02;
+    badSuite[2] = 0x03;
     const suiteAead = countingAead();
     expect(sessionPair({ nodeAead: suiteAead.factory }).node.unprotect(badSuite)).toEqual({
       kind: "fatal",
