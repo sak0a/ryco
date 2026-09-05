@@ -21,6 +21,129 @@ const RELEASE_BASE = "https://github.com/saka-gg/ryco/releases/tag";
  */
 export const CHANGELOG_RELEASES: ChangelogRelease[] = [
   {
+    version: "0.1.21",
+    date: "September 5, 2026",
+    dateTime: "2026-09-05",
+    summary:
+      "Account login now establishes end-to-end encrypted device connections automatically whenever the client can support them.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.21`,
+    highlights: [
+      {
+        title: "Encrypted without manual pairing",
+        summary:
+          "Desktop, mobile, and supported web clients enroll after account login, receive Hub-signed device grants, and negotiate the strongest available E2EE mode without asking users to transfer a code.",
+      },
+      {
+        title: "Trust stays visible",
+        summary:
+          "Verification codes, key hashes, device enrollment, and connection security remain inspectable so automatic setup never turns trust into a hidden black box.",
+      },
+      {
+        title: "Startup and recovery are fail-safe",
+        summary:
+          "Initialized node policy, bounded retries, isolated grants, and protected relay bootstrap buffering keep automatic connections reliable while failing closed on invalid or unsupported security state.",
+      },
+      {
+        title: "OpenCode and ACP show more of the work",
+        summary:
+          "OpenCode now reports token usage, todos, permission types, and retries more faithfully, while ACP-backed providers normalize reasoning chunks and file diffs into shared runtime events.",
+      },
+    ],
+  },
+  {
+    version: "0.1.20",
+    date: "September 3, 2026",
+    dateTime: "2026-09-03",
+    summary: "The model picker becomes quieter and lets the available models speak for themselves.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.20`,
+    highlights: [
+      {
+        title: "No more temporary model badges",
+        summary:
+          "The model-level NEW label and its supporting catalog metadata are removed, keeping model selection consistent as remote catalogs evolve.",
+      },
+    ],
+  },
+  {
+    version: "0.1.19",
+    date: "September 3, 2026",
+    dateTime: "2026-09-03",
+    summary:
+      "Claude models can evolve between app releases while local logs and activity history stay bounded.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.19`,
+    highlights: [
+      {
+        title: "Claude Fable 5.1 arrives",
+        summary:
+          "The Claude catalog adds Fable 5.1 with its supported effort levels, aliases, context options, and a clear upgrade prompt when the installed CLI is too old.",
+      },
+      {
+        title: "Model updates no longer require an app release",
+        summary:
+          "A validated remote manifest can refresh Claude model metadata, with last-known-good caching and the bundled catalog as safe fallbacks.",
+      },
+      {
+        title: "User data growth stays controlled",
+        summary:
+          "Old provider logs are swept, native and canonical streams rotate independently, and oversized activity payloads are bounded before reaching persistent history.",
+      },
+    ],
+  },
+  {
+    version: "0.1.18",
+    date: "August 31, 2026",
+    dateTime: "2026-08-31",
+    summary:
+      "A calmer Inbox uses less work while idle and can safely settle inactive tasks for you.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.18`,
+    highlights: [
+      {
+        title: "Less rendering when nothing changes",
+        summary:
+          "The Inbox reduces compositor and off-screen rendering work, improving efficiency without relying on constant polling.",
+      },
+      {
+        title: "Optional automatic settling",
+        summary:
+          "A shared web and native setting can settle inactive tasks after a chosen delay, with centralized safeguards and exact boundary scheduling.",
+      },
+    ],
+  },
+  {
+    version: "0.1.17",
+    date: "August 30, 2026",
+    dateTime: "2026-08-30",
+    summary: "macOS releases now focus on the Apple Silicon systems Ryco actively supports.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.17`,
+    highlights: [
+      {
+        title: "A simpler macOS release path",
+        summary:
+          "Intel builds and universal updater merging are removed, while local packaging, downloads, and support guidance consistently target Apple Silicon.",
+      },
+    ],
+  },
+  {
+    version: "0.1.16",
+    date: "August 30, 2026",
+    dateTime: "2026-08-30",
+    summary:
+      "Local projects resolve to one clear device target, and interrupted diagnostics explain themselves without sounding like failures.",
+    releaseUrl: `${RELEASE_BASE}/v0.1.16`,
+    highlights: [
+      {
+        title: "One canonical local workspace",
+        summary:
+          "Desktop remains the source of truth for local projects and This device execution, preventing a Hub alias from creating duplicate workspaces or connections.",
+      },
+      {
+        title: "Interruptions are not failures",
+        summary:
+          "Interrupted diagnostic spans remain visible with neutral presentation instead of inheriting stale causes or alarming failure styling.",
+      },
+    ],
+  },
+  {
     version: "0.1.15",
     date: "August 30, 2026",
     dateTime: "2026-08-30",

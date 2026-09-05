@@ -6,6 +6,8 @@
 
 **Design:** `docs/superpowers/specs/2026-08-29-cross-node-trust-readiness-and-parity-design.md`
 
+**Update (September 5, 2026):** The login-only, account-enrolled native E2EE flow shipped in `v0.1.21` and supersedes the one-scan default proposed in Wave 1. Verification codes and hashes remain available for inspection and recovery without being required for routine device setup. See `docs/superpowers/plans/2026-09-04-automatic-account-native-e2ee.md` and `docs/superpowers/specs/2026-09-04-automatic-account-native-e2ee-design.md`.
+
 ## Wave 1: Trust and identity
 
 ### Task 1: Add the shared native trust-onboarding state machine
