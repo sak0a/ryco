@@ -131,6 +131,42 @@ function detachRelayFrameBytes(frame: RelayFrame): RelayFrame {
   }
 }
 
+const MAX_PENDING_POST_READY_FRAMES = 16;
+
+function clearRelayFrameBytes(frame: RelayFrame): void {
+  switch (frame.type) {
+    case "auth":
+      if (frame.peer === "node") {
+        frame.nonce.fill(0);
+        frame.signature.fill(0);
+      } else {
+        frame.relayTicket.fill(0);
+      }
+      break;
+    case "data":
+      frame.payload.fill(0);
+      break;
+    case "channel.open":
+      frame.accountGrantContext?.[2].fill(0);
+      frame.accountGrantContext?.[3].fill(0);
+      break;
+    case "node.e2ee.statement":
+      frame.statement.fill(0);
+      frame.statementDigest.fill(0);
+      break;
+    case "node.e2ee.statement.ack":
+      frame.statementDigest.fill(0);
+      break;
+    case "e2ee.verifier-keys":
+      for (const key of frame.keys) key.publicKey.fill(0);
+      break;
+    case "ping":
+    case "pong":
+      frame.nonce.fill(0);
+      break;
+  }
+}
+
 export class RelayConnectionSession {
   readonly #identity: HubIdentityRuntimeShape;
   readonly #transport: HubRelayTransport;
@@ -143,6 +179,8 @@ export class RelayConnectionSession {
   #offeredProtocolMinor: number | undefined;
   #timer: unknown;
   #pendingAuthBytes: Uint8Array | undefined;
+  #pendingPostReadyFrames: RelayFrame[] = [];
+  #frameDeliveryActive = false;
   #settled = false;
   #closed = false;
   #listeners:
@@ -299,6 +337,15 @@ export class RelayConnectionSession {
           resolve(frame);
           return;
         }
+        if (!this.#frameDeliveryActive) {
+          if (this.#pendingPostReadyFrames.length >= MAX_PENDING_POST_READY_FRAMES) {
+            clearRelayFrameBytes(frame);
+            fail(new RelayConnectionError("protocol_invalid"));
+            return;
+          }
+          this.#pendingPostReadyFrames.push(frame);
+          return;
+        }
         this.#onFrame(frame);
       };
       const onError = () => fail(new RelayConnectionError("network"));
@@ -320,6 +367,24 @@ export class RelayConnectionSession {
     });
   }
 
+  /**
+   * Start routing frames received after `ready` to the connector.
+   *
+   * The Hub may send connection-scoped state in the same network turn as
+   * `ready`. Keep those frames bounded and ordered until the connector has
+   * installed every generation-owned consumer, then release them exactly once.
+   */
+  activateFrameDelivery(): void {
+    if (this.#ready === undefined || this.#closed) {
+      throw new RelayConnectionError("network");
+    }
+    if (this.#frameDeliveryActive) return;
+    this.#frameDeliveryActive = true;
+    const pending = this.#pendingPostReadyFrames;
+    this.#pendingPostReadyFrames = [];
+    for (const frame of pending) this.#onFrame(frame);
+  }
+
   send(frame: RelayFrame): void {
     if (this.#ready === undefined || this.#closed || this.#socket === undefined) {
       throw new RelayConnectionError("network");
@@ -337,6 +402,8 @@ export class RelayConnectionSession {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    for (const frame of this.#pendingPostReadyFrames) clearRelayFrameBytes(frame);
+    this.#pendingPostReadyFrames = [];
     this.#clearPendingAuthentication();
     if (this.#timer !== undefined) this.#scheduler.clearTimeout(this.#timer);
     this.#timer = undefined;

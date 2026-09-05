@@ -557,6 +557,12 @@ export class HubConnector {
       });
       this.#sendQueue = sendQueue;
       this.#registry = registry;
+      session.activateFrameDelivery();
+      await this.#frameChain;
+      if (!this.#state.isCurrent(generation) || this.#stopping) {
+        session.close();
+        return;
+      }
       try {
         const authenticatedState = await this.#identity.readState();
         // Assigned unconditionally, including to undefined: a read that reports
