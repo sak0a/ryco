@@ -120,6 +120,9 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
   return (
     <Menu>
       <MenuTrigger
+        openOnHover
+        delay={150}
+        closeDelay={200}
         render={
           <Button
             size="xs"

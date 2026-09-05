@@ -553,6 +553,7 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
           onAttachFile={props.onAttachFile}
         />
         <ProviderModelPicker
+          openOnHover
           compact={props.isFooterCompact}
           activeInstanceId={props.selectedInstanceId}
           model={props.selectedModel}
