@@ -1,3 +1,4 @@
+import { useServerConfig } from "~/rpc/serverState";
 import { autoAnimate, type AnimationController } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -312,6 +313,7 @@ export default function Sidebar() {
     },
     [clearSelection, setOpen, setSidebarMode, sidebarMode],
   );
+  const inboxServerConfig = useServerConfig();
   const inboxEnvironments = useMemo<ReadonlyArray<InboxSidebarEnvironment>>(() => {
     const knownEnvironmentIds = new Set<EnvironmentId>();
     for (const project of projects) knownEnvironmentIds.add(project.environmentId);
@@ -425,10 +427,19 @@ export default function Sidebar() {
         shellCurrent: !stale,
       });
     }
-    return [...byEnvironmentId.values()].toSorted((left, right) =>
-      left.label.localeCompare(right.label),
-    );
+    return [...byEnvironmentId.values()]
+      .map((environment) =>
+        Object.assign(environment, {
+          providers:
+            (environment.environmentId === primaryEnvironmentId
+              ? inboxServerConfig
+              : savedEnvironmentRuntimeById[environment.environmentId]?.serverConfig
+            )?.providers ?? [],
+        }),
+      )
+      .toSorted((left, right) => left.label.localeCompare(right.label));
   }, [
+    inboxServerConfig,
     desktopWorkspace,
     environmentStateById,
     hostedWorkspace,

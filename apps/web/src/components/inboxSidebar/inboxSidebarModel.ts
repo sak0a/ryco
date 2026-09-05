@@ -1,3 +1,5 @@
+import { inboxModelName } from "./inboxContextHandoff";
+import { getModelDisplayName } from "@ryco/shared/model";
 import { deriveThreadActivityStatus } from "@ryco/client-runtime/state/threads";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { WsConnectionUiState } from "@ryco/client-runtime/rpc";
@@ -15,6 +17,8 @@ import {
 import {
   defaultInstanceIdForDriver,
   type EnvironmentId,
+  type ModelSelection,
+  type ServerProvider,
   type ProviderDriverKind,
   type SidebarAutoSettleAfterDays,
   type ThreadId,
@@ -36,6 +40,7 @@ export type InboxSidebarStatusFilter = "all" | InboxSidebarSectionKey;
 export interface InboxSidebarEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
+  readonly providers?: ReadonlyArray<ServerProvider>;
   readonly connectionState: "connected" | "connecting" | "reconnecting" | "offline" | "idle";
   readonly stale: boolean;
   readonly staleDetail?: string;
@@ -60,6 +65,9 @@ export interface InboxSidebarRow {
   readonly title: string;
   readonly machineLabel: string;
   readonly projectLabel: string;
+  readonly project: Project | null;
+  readonly isWorktree: boolean;
+  readonly rankingModelLabel: string | null;
   readonly workspaceLabel: string;
   readonly contextLabel: string;
   readonly state: InboxSidebarThreadState;
@@ -68,6 +76,7 @@ export interface InboxSidebarRow {
   readonly providerDriver: ProviderDriverKind | null;
   readonly providerLabel: string | null;
   readonly modelLabel: string | null;
+  readonly modelSelection: ModelSelection | null;
   readonly branchLabel: string | null;
   readonly changeRequestLabel: string | null;
   readonly changeRequestStateLabel: string | null;
@@ -281,6 +290,20 @@ function settlementDisabledReason(entry: ThreadInboxEntry): string | null {
   return null;
 }
 
+function modelDisplayName(
+  selection: ModelSelection | null | undefined,
+  environment: InboxSidebarEnvironment | undefined,
+): string | null {
+  if (!selection) return null;
+  const provider = environment?.providers?.find(
+    (provider) => provider.instanceId === selection.instanceId,
+  );
+  const model = provider?.models.find(
+    (model) => model.slug === selection.model || model.aliases?.includes(selection.model),
+  );
+  return model ? inboxModelName(getModelDisplayName(model), provider!.driver) : null;
+}
+
 export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSidebarModel {
   const environmentById = new Map(
     input.environments.map((environment) => [environment.environmentId, environment] as const),
@@ -335,6 +358,9 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
       title: thread.title || "Untitled task",
       machineLabel,
       projectLabel,
+      project: project ?? null,
+      isWorktree: Boolean(worktree?.worktreePath ?? thread.worktreePath),
+      rankingModelLabel: modelDisplayName(entry.focus?.ranking?.modelSelection, environment),
       workspaceLabel,
       contextLabel,
       state,
@@ -345,7 +371,8 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
         PROVIDER_OPTIONS.find((option) => option.value === providerDriver)?.label ??
         providerDriver ??
         null,
-      modelLabel: thread.modelSelection?.model ?? null,
+      modelLabel: modelDisplayName(thread.modelSelection, environment),
+      modelSelection: thread.modelSelection ?? null,
       branchLabel: worktree?.branch ?? thread.branch ?? null,
       changeRequestLabel:
         worktree?.prNumber != null
