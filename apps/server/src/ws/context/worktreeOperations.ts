@@ -19,6 +19,7 @@ import { resolveManagedWorktreesRoot, type ServerConfigShape } from "../../confi
 import type { GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import {
   canonicalizeFilesystemPath,
+  generatedWorktreeTitle,
   isCaseSensitiveFileSystem,
   partitionReconcilableProjectRoots,
   planWorktreeReconciliation,
@@ -661,6 +662,26 @@ export const makeWorktreeOperations = (deps: {
             toGitManagerError(operation, "Failed to load project sessions.", cause),
           ),
         );
+      for (const worktree of snapshot.worktrees ?? []) {
+        if (
+          worktree.projectId !== projectId ||
+          worktree.archivedAt !== null ||
+          worktree.title == null
+        )
+          continue;
+        const title = generatedWorktreeTitle(worktree);
+        if (title === null || title === worktree.title) continue;
+        yield* dispatchWorktreeCommand(
+          {
+            type: "worktree.meta.update",
+            commandId: serverCommandId("worktree-reconcile-generated-title"),
+            worktreeId: worktree.worktreeId,
+            title,
+            changedAt: new Date().toISOString(),
+          },
+          operation,
+        );
+      }
       const plan = planWorktreeReconciliation({
         canonicalizePath: canonicalizeFilesystemPath,
         caseSensitiveFileSystem: isCaseSensitiveFileSystem(),

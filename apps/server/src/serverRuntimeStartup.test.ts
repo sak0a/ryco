@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  EventId,
   type OrchestrationCommand,
+  type OrchestrationThreadActivity,
   DEFAULT_MODEL,
   type OrchestrationReadModel,
   type OrchestrationEvent,
@@ -109,6 +111,7 @@ const orphanedSessionThread = (input: {
   id: ThreadId.make(input.id),
   archivedAt: null,
   deletedAt: null,
+  activities: [] as OrchestrationThreadActivity[],
   session: {
     threadId: ThreadId.make(input.id),
     status: input.status,
@@ -677,3 +680,52 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
     assert.deepStrictEqual(yield* Ref.get(dispatchCalls), ["project.create", "thread.create"]);
   }),
 );
+
+it.effect("clears orphaned requests in inactive sessions but preserves live callbacks", () => {
+  const stale = orphanedSessionThread({ id: "stale-input", status: "ready" });
+  const live = orphanedSessionThread({ id: "live-input", status: "running" });
+  for (const thread of [stale, live]) {
+    for (const kind of ["approval", "user-input"]) {
+      thread.activities.push({
+        id: EventId.make(`${thread.id}-${kind}`),
+        kind: `${kind}.requested`,
+        payload: { requestId: `${thread.id}-${kind}` },
+        tone: "info",
+        summary: "Input needed",
+        turnId: TurnId.make("old-turn"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+    }
+  }
+  const commands: OrchestrationCommand[] = [];
+  return runOrphanedSessionReconciliation({
+    threads: [stale, live],
+    liveThreadIds: [live.id],
+    directory: {
+      getBinding: () => Effect.succeed(Option.none()),
+      upsert: () => Effect.void,
+    },
+    dispatch: (command) =>
+      Effect.sync(() => {
+        commands.push(command);
+        return { sequence: commands.length };
+      }),
+  }).pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(
+          commands.map((command) =>
+            command.type === "thread.activity.append" ? command.threadId : null,
+          ),
+          [stale.id, stale.id],
+        );
+        assert.deepStrictEqual(
+          commands.map((command) =>
+            command.type === "thread.activity.append" ? command.activity.kind : command.type,
+          ),
+          ["approval.resolved", "user-input.resolved"],
+        );
+      }),
+    ),
+  );
+});

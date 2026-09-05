@@ -783,8 +783,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE kind IN (
           'approval.requested',
           'approval.resolved',
+          'provider.approval.respond.failed',
           'user-input.requested',
           'user-input.resolved',
+          'provider.user-input.respond.failed',
           'context-handoff'
         )
         ORDER BY

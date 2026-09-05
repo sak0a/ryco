@@ -4,6 +4,7 @@ import { ProjectId, ThreadId, WorktreeId } from "@ryco/contracts";
 
 import {
   isCaseSensitiveFileSystem,
+  generatedWorktreeTitle,
   partitionReconcilableProjectRoots,
   planWorktreeReconciliation,
   type PlanWorktreeReconciliationInput,
@@ -85,6 +86,15 @@ describe("planWorktreeReconciliation", () => {
 
     expect(result.adopt[0]?.title).toBe("ios-staging");
     expect(result.adopt[0]?.branch).toBe("main");
+  });
+
+  it("preserves the generated branch label when adopting an older New Thread worktree", () => {
+    const worktreePath = "/worktrees/ryco-1234abcd__abcde";
+    const result = plan({
+      gitWorktreePaths: [worktreePath],
+      threads: [makeThread({ id: "thread-1", branch: "ryco/fix-inbox", worktreePath })],
+    });
+    expect(result.adopt[0]?.title).toBe("ryco/fix-inbox");
   });
 
   it("groups every session in the same directory under one adoption", () => {
@@ -255,5 +265,19 @@ describe("isCaseSensitiveFileSystem", () => {
     expect(isCaseSensitiveFileSystem("darwin")).toBe(false);
     expect(isCaseSensitiveFileSystem("win32")).toBe(false);
     expect(isCaseSensitiveFileSystem("linux")).toBe(true);
+  });
+});
+
+describe("generatedWorktreeTitle", () => {
+  const input = { branch: "ryco/fix-inbox", worktreePath: "/worktrees/ryco-1234abcd__abcde" };
+  it("repairs an already-adopted generated directory label", () => {
+    expect(generatedWorktreeTitle({ ...input, title: "ryco-1234abcd__abcde" })).toBe(input.branch);
+  });
+  it("preserves custom titles, normal worktree names and temporary branches", () => {
+    expect(generatedWorktreeTitle({ ...input, title: "My feature" })).toBeNull();
+    expect(
+      generatedWorktreeTitle({ ...input, worktreePath: "/worktrees/ryco-feature" }),
+    ).toBeNull();
+    expect(generatedWorktreeTitle({ ...input, branch: "ryco/1234abcd" })).toBeNull();
   });
 });

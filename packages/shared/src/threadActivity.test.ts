@@ -3,6 +3,7 @@ import { EventId } from "@ryco/contracts";
 import {
   capThreadActivitiesPreservingMilestones,
   derivePendingThreadRequestState,
+  derivePendingThreadRequests,
   isContextCompactionActivity,
   isTerminalContextHandoffActivity,
   isThreadActivityMilestone,
@@ -162,4 +163,32 @@ describe("threadActivity", () => {
       hasPendingUserInput: false,
     });
   });
+});
+
+it("keeps pending request ownership by turn and applies resolution in sequence order", () => {
+  expect(
+    derivePendingThreadRequests([
+      {
+        kind: "user-input.resolved",
+        payload: { requestId: "old" },
+        turnId: "old-turn",
+        sequence: 3,
+        createdAt: "2026-01-01",
+      },
+      {
+        kind: "user-input.requested",
+        payload: { requestId: "old" },
+        turnId: "old-turn",
+        sequence: 1,
+        createdAt: "2026-01-01",
+      },
+      {
+        kind: "approval.requested",
+        payload: { requestId: "new" },
+        turnId: "new-turn",
+        sequence: 2,
+        createdAt: "2026-01-01",
+      },
+    ]),
+  ).toEqual([{ kind: "approval", requestId: "new", turnId: "new-turn" }]);
 });

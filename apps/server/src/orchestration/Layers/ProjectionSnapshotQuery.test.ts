@@ -1,3 +1,4 @@
+import { derivePendingThreadRequestState } from "@ryco/shared/threadActivity";
 import {
   CheckpointRef,
   EventId,
@@ -1498,6 +1499,26 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           (${ORCHESTRATION_PROJECTOR_NAMES.checkpoints}, 3, '2026-04-03T00:00:40.000Z')
       `;
 
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json, sequence, created_at
+        ) VALUES (
+          'activity-approval-stale', 'thread-1', 'turn-running', 'info',
+          'provider.approval.respond.failed', 'Request no longer exists',
+          '{"requestId":"approval-1","detail":"Unknown pending approval request"}',
+          6, '2026-04-03T00:00:33.000Z'
+        ), (
+          'activity-input-requested', 'thread-1', 'turn-running', 'info',
+          'user-input.requested', 'Question', '{"requestId":"input-1"}',
+          7, '2026-04-03T00:00:34.000Z'
+        ), (
+          'activity-input-stale', 'thread-1', 'turn-running', 'info',
+          'provider.user-input.respond.failed', 'Request no longer exists',
+          '{"requestId":"input-1","detail":"Stale pending user-input request"}',
+          8, '2026-04-03T00:00:35.000Z'
+        )
+      `;
+
       const commandReadModel = yield* snapshotQuery.getCommandReadModel();
       assert.equal(commandReadModel.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
       assert.equal(commandReadModel.threads[0]?.latestTurn?.state, "running");
@@ -1507,7 +1528,23 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       );
       assert.deepEqual(
         commandReadModel.threads[0]?.activities.map((activity) => activity.id),
-        [asEventId("activity-approval-requested")],
+        [
+          "activity-approval-requested",
+          "activity-approval-stale",
+          "activity-input-requested",
+          "activity-input-stale",
+        ].map(asEventId),
+      );
+
+      assert.equal(
+        derivePendingThreadRequestState(commandReadModel.threads[0]!.activities)
+          .hasPendingApprovals,
+        false,
+      );
+      assert.equal(
+        derivePendingThreadRequestState(commandReadModel.threads[0]!.activities)
+          .hasPendingUserInput,
+        false,
       );
 
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();

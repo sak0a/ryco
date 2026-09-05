@@ -1,3 +1,4 @@
+import { derivePendingThreadRequestState } from "@ryco/shared/threadActivity";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -325,6 +326,7 @@ describe("ProviderRuntimeIngestion", () => {
     return {
       engine,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
+      readShell: () => Effect.runPromise(snapshotQuery.getShellSnapshot()),
       emit: provider.emit,
       setProviderSession: provider.setSession,
       drain,
@@ -372,6 +374,74 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
   });
+
+  it.each(["turn.completed", "turn.aborted"] as const)(
+    "clears abandoned requests on %s and allows settlement",
+    async (type) => {
+      const harness = await createHarness();
+      const threadId = ThreadId.make("thread-1");
+      const turnId = TurnId.make("turn-pending");
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId("pending-start"),
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        turnId,
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      await harness.drain();
+      for (const kind of ["approval", "user-input"]) {
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.activity.append",
+            commandId: CommandId.make(`pending-${kind}`),
+            threadId,
+            activity: {
+              id: asEventId(`pending-${kind}`),
+              kind: `${kind}.requested`,
+              payload: { requestId: `request-${kind}`, requestKind: "command" },
+              tone: "info",
+              summary: "Input needed",
+              turnId,
+              createdAt: "2026-01-01T00:00:02.000Z",
+            },
+            createdAt: "2026-01-01T00:00:02.000Z",
+          }),
+        );
+      }
+      harness.emit({
+        type,
+        eventId: asEventId("pending-complete"),
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        turnId,
+        createdAt: "2026-01-01T00:00:03.000Z",
+        payload: type === "turn.completed" ? { state: "completed" } : { reason: "interrupted" },
+      });
+      await harness.drain();
+      const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId)!;
+      expect(derivePendingThreadRequestState(thread.activities)).toMatchObject({
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      });
+      expect(
+        (await harness.readShell()).threads.find((entry) => entry.id === threadId),
+      ).toMatchObject({
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+      });
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make("settle-after-abandoned-input"),
+          threadId,
+        }),
+      );
+      expect(
+        (await harness.readModel()).threads.find((entry) => entry.id === threadId)?.settledOverride,
+      ).toBe("settled");
+    },
+  );
 
   it("rejects an untargeted turn completion when no turn is active", async () => {
     const harness = await createHarness();

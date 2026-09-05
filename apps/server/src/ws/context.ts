@@ -12,6 +12,7 @@ import {
   type ThreadId,
   SourceControlProviderError,
   WsRpcGroup,
+  WorktreeId,
 } from "@ryco/contracts";
 import { RpcGroup } from "effect/unstable/rpc";
 
@@ -533,6 +534,32 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
               branch: worktree.worktree.refName,
               worktreePath: targetWorktreePath,
             });
+            const worktreeProjectId = targetProjectId ?? bootstrapProject?.id;
+            if (worktreeProjectId !== undefined) {
+              const worktreeId = WorktreeId.make(`worktree-${crypto.randomUUID()}`);
+              const createdAt = new Date().toISOString();
+              yield* orchestrationEngine.dispatch({
+                type: "worktree.create",
+                commandId: serverCommandId("bootstrap-worktree-create"),
+                worktreeId,
+                projectId: worktreeProjectId,
+                branch: worktree.worktree.refName,
+                worktreePath: targetWorktreePath,
+                origin: "branch",
+                prNumber: null,
+                issueNumber: null,
+                prTitle: null,
+                issueTitle: null,
+                createdAt,
+              });
+              yield* orchestrationEngine.dispatch({
+                type: "thread.attach-to-worktree",
+                commandId: serverCommandId("bootstrap-worktree-attach"),
+                threadId: command.threadId,
+                worktreeId,
+                attachedAt: createdAt,
+              });
+            }
             yield* refreshGitStatus(targetWorktreePath);
           }
 

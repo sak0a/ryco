@@ -1,5 +1,7 @@
+import { derivePendingThreadRequests } from "@ryco/shared/threadActivity";
 import {
   CommandId,
+  EventId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ModelSelection,
@@ -7,6 +9,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@ryco/contracts";
 import {
   Data,
@@ -565,6 +568,30 @@ export const reconcileOrphanedProviderSessions = Effect.gen(function* () {
 
   const liveThreadIds = new Set(liveSessionsExit.value.map((session) => session.threadId));
   const snapshot = yield* projectionSnapshotQuery.getCommandReadModel();
+  // Provider callbacks are process-local. Even ready/error sessions can retain
+  // requests from an earlier process; resolve them through normal events so the
+  // inbox summary, conversation and settlement policy all recover together.
+  for (const thread of snapshot.threads) {
+    if (thread.deletedAt !== null || liveThreadIds.has(thread.id)) continue;
+    for (const request of derivePendingThreadRequests(thread.activities)) {
+      const createdAt = new Date().toISOString();
+      yield* orchestrationEngine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make(`server:startup-request-reconciliation:${crypto.randomUUID()}`),
+        threadId: thread.id,
+        activity: {
+          id: EventId.make(crypto.randomUUID()),
+          kind: `${request.kind}.resolved`,
+          tone: "info",
+          summary: "Pending request cleared because its provider session is no longer running",
+          payload: { requestId: request.requestId },
+          turnId: request.turnId === null ? null : TurnId.make(request.turnId),
+          createdAt,
+        },
+        createdAt,
+      });
+    }
+  }
   const orphanedThreads = snapshot.threads.filter(
     (thread) =>
       thread.session !== null &&

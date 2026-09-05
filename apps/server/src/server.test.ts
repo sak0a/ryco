@@ -6011,12 +6011,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           ),
         );
 
-        assert.equal(response.sequence, 5);
+        assert.equal(response.sequence, 7);
         assert.deepEqual(
           dispatchedCommands.map((command) => command.type),
           [
             "thread.create",
             "thread.meta.update",
+            "worktree.create",
+            "thread.attach-to-worktree",
             "thread.activity.append",
             "thread.activity.append",
             "thread.turn.start",
@@ -6048,7 +6050,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           setupActivities.map((command) => command.activity.kind),
           ["setup-script.requested", "setup-script.started"],
         );
-        const finalCommand = dispatchedCommands[4];
+        const worktreeCommand = dispatchedCommands[2];
+        assertTrue(worktreeCommand?.type === "worktree.create");
+        if (worktreeCommand?.type === "worktree.create") {
+          assert.equal(worktreeCommand.branch, "ryco/bootstrap-refName");
+          assert.equal(worktreeCommand.worktreePath, "/tmp/bootstrap-worktree");
+          assert.equal(worktreeCommand.projectId, defaultProjectId);
+          assert.equal(dispatchedCommands[3]?.type, "thread.attach-to-worktree");
+        }
+        const finalCommand = dispatchedCommands[6];
         assertTrue(finalCommand?.type === "thread.turn.start");
         if (finalCommand?.type === "thread.turn.start") {
           assert.equal(finalCommand.bootstrap, undefined);
@@ -6132,10 +6142,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
-      assert.equal(response.sequence, 4);
+      assert.equal(response.sequence, 6);
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.meta.update", "thread.activity.append", "thread.turn.start"],
+        [
+          "thread.create",
+          "thread.meta.update",
+          "worktree.create",
+          "thread.attach-to-worktree",
+          "thread.activity.append",
+          "thread.turn.start",
+        ],
       );
       const setupFailureActivity = dispatchedCommands.find(
         (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
@@ -6249,10 +6266,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
-      assert.equal(response.sequence, 4);
+      assert.equal(response.sequence, 6);
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.meta.update", "thread.activity.append", "thread.turn.start"],
+        [
+          "thread.create",
+          "thread.meta.update",
+          "worktree.create",
+          "thread.attach-to-worktree",
+          "thread.activity.append",
+          "thread.turn.start",
+        ],
       );
       const setupActivities = dispatchedCommands.filter(
         (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>

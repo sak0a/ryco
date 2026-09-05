@@ -1,3 +1,4 @@
+import { derivePendingThreadRequests } from "@ryco/shared/threadActivity";
 import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
@@ -2516,6 +2517,43 @@ const make = Effect.gen(function* () {
           });
         }
         yield* clearSubagentMessageBuffersForThread(thread.id);
+      }
+
+      if (
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted" ||
+        event.type === "session.exited"
+      ) {
+        const detailedThread = yield* getLoadedThreadDetail();
+        const finishedTurnId = toTurnId(event.turnId);
+        for (const request of derivePendingThreadRequests(detailedThread?.activities ?? [])) {
+          // A delayed completion for an older turn must not clear a new prompt.
+          if (
+            event.type !== "session.exited" &&
+            (finishedTurnId === undefined || request.turnId !== finishedTurnId)
+          )
+            continue;
+          yield* orchestrationEngine.dispatch({
+            type: "thread.activity.append",
+            commandId: providerCommandId(
+              event,
+              `request-resolved:${request.kind}:${request.requestId}`,
+            ),
+            threadId: thread.id,
+            activity: {
+              id: EventId.make(
+                `${event.eventId}:request-resolved:${request.kind}:${request.requestId}`,
+              ),
+              kind: `${request.kind}.resolved`,
+              tone: "info",
+              summary: "Pending request cleared because its provider work ended",
+              payload: { requestId: request.requestId },
+              turnId: request.turnId === null ? null : TurnId.make(request.turnId),
+              createdAt: now,
+            },
+            createdAt: now,
+          });
+        }
       }
 
       if (event.type === "session.exited") {

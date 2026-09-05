@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 
 import type { ProjectId, ThreadId, WorktreeId } from "@ryco/contracts";
+import { isTemporaryWorktreeBranch } from "@ryco/shared/git";
 
 /**
  * Reconciles what git reports on disk with what the orchestration projection
@@ -100,6 +101,24 @@ export interface PlanWorktreeReconciliationInput {
   readonly worktrees: ReadonlyArray<ReconcilableWorktree>;
 }
 
+/** Only replace a generated directory label; user-chosen titles remain authoritative. */
+export function generatedWorktreeTitle(input: {
+  readonly branch: string;
+  readonly worktreePath: string | null;
+  readonly title?: string | null | undefined;
+}): string | null {
+  if (input.worktreePath === null) return null;
+  const directoryName = path.basename(input.worktreePath);
+  if (
+    !/^ryco-[0-9a-f]{8}(?:__[a-z]{5})?$/.test(directoryName) ||
+    !input.branch.startsWith("ryco/") ||
+    isTemporaryWorktreeBranch(input.branch) ||
+    (input.title != null && input.title !== directoryName)
+  )
+    return null;
+  return input.branch;
+}
+
 export function planWorktreeReconciliation(
   input: PlanWorktreeReconciliationInput,
 ): WorktreeReconciliationPlan {
@@ -184,11 +203,15 @@ export function planWorktreeReconciliation(
     if (worktreePath === undefined) {
       continue;
     }
-    const title = path.basename(worktreePath);
+    const directoryName = path.basename(worktreePath);
+    const branch = threads.find((thread) => thread.branch !== null)?.branch ?? directoryName;
+    // Older New Thread worktrees were not registered until reconciliation. Their
+    // generated directory is stable, while the branch receives the useful name.
+    const title = generatedWorktreeTitle({ branch, worktreePath }) ?? directoryName;
     adopt.push({
       // Only threads know which ref the directory was checked out on when they
       // ran; `refreshWorktreeSourceControlState` corrects it afterwards.
-      branch: threads.find((thread) => thread.branch !== null)?.branch ?? title,
+      branch,
       threadIds: threads.map((thread) => thread.id),
       title,
       worktreePath,

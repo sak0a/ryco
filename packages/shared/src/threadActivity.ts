@@ -67,6 +67,7 @@ interface PendingThreadRequestActivity {
   readonly id?: string | undefined;
   readonly activityId?: string | undefined;
   readonly sequence?: number | undefined;
+  readonly turnId?: string | null | undefined;
 }
 
 export interface PendingThreadRequestState {
@@ -119,18 +120,22 @@ function comparePendingRequestActivities(
   return (left.id ?? left.activityId ?? "").localeCompare(right.id ?? right.activityId ?? "");
 }
 
-export function derivePendingThreadRequestState(
+export function derivePendingThreadRequests(
   activities: ReadonlyArray<PendingThreadRequestActivity>,
-): PendingThreadRequestState {
-  const approvalIds = new Set<string>();
-  const userInputIds = new Set<string>();
+): ReadonlyArray<{
+  readonly requestId: string;
+  readonly kind: "approval" | "user-input";
+  readonly turnId: string | null;
+}> {
+  const approvalIds = new Map<string, string | null>();
+  const userInputIds = new Map<string, string | null>();
 
   for (const activity of activities.toSorted(comparePendingRequestActivities)) {
     const requestId = activityRequestId(activity.payload);
     if (requestId === null) continue;
 
     if (activity.kind === "approval.requested") {
-      approvalIds.add(requestId);
+      approvalIds.set(requestId, activity.turnId ?? null);
     } else if (activity.kind === "approval.resolved") {
       approvalIds.delete(requestId);
     } else if (
@@ -139,7 +144,7 @@ export function derivePendingThreadRequestState(
     ) {
       approvalIds.delete(requestId);
     } else if (activity.kind === "user-input.requested") {
-      userInputIds.add(requestId);
+      userInputIds.set(requestId, activity.turnId ?? null);
     } else if (activity.kind === "user-input.resolved") {
       userInputIds.delete(requestId);
     } else if (
@@ -150,10 +155,30 @@ export function derivePendingThreadRequestState(
     }
   }
 
+  return [
+    ...Array.from(approvalIds, ([requestId, turnId]) => ({
+      requestId,
+      turnId,
+      kind: "approval" as const,
+    })),
+    ...Array.from(userInputIds, ([requestId, turnId]) => ({
+      requestId,
+      turnId,
+      kind: "user-input" as const,
+    })),
+  ];
+}
+
+export function derivePendingThreadRequestState(
+  activities: ReadonlyArray<PendingThreadRequestActivity>,
+): PendingThreadRequestState {
+  const requests = derivePendingThreadRequests(activities);
+  const pendingApprovalCount = requests.filter((request) => request.kind === "approval").length;
+  const pendingUserInputCount = requests.length - pendingApprovalCount;
   return {
-    pendingApprovalCount: approvalIds.size,
-    pendingUserInputCount: userInputIds.size,
-    hasPendingApprovals: approvalIds.size > 0,
-    hasPendingUserInput: userInputIds.size > 0,
+    pendingApprovalCount,
+    pendingUserInputCount,
+    hasPendingApprovals: pendingApprovalCount > 0,
+    hasPendingUserInput: pendingUserInputCount > 0,
   };
 }
