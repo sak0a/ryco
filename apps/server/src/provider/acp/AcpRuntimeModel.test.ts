@@ -469,6 +469,16 @@ describe("AcpRuntimeModel", () => {
     ]);
   });
 
+  it("propagates zero context usage for Cursor and Grok", () => {
+    const result = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: { sessionUpdate: "usage_update", used: 0, size: 128_000 },
+    } satisfies EffectAcpSchema.SessionNotification);
+    expect(result.events).toMatchObject([
+      { _tag: "UsageUpdated", usage: { usedTokens: 0, maxTokens: 128_000 } },
+    ]);
+  });
+
   it("keeps permission request parsing compatible with loose extension payloads", () => {
     const request = parsePermissionRequest({
       sessionId: "session-1",

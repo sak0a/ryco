@@ -133,7 +133,40 @@ export const mapEvent = (
             },
           },
         ];
-      case "assistant.usage":
+      case "session.usage_info":
+      case "assistant.usage": {
+        if (event.type === "session.usage_info") {
+          const { currentTokens, tokenLimit } = event.data;
+          if (
+            !Number.isSafeInteger(currentTokens) ||
+            currentTokens < 0 ||
+            !Number.isSafeInteger(tokenLimit) ||
+            tokenLimit <= 0
+          ) {
+            return [];
+          }
+          session.contextUsage = { usedTokens: currentTokens, maxTokens: tokenLimit };
+          session.lastUsage = {
+            ...session.lastUsage,
+            ...session.contextUsage,
+            lastUsedTokens: currentTokens,
+          };
+        } else {
+          // Child/background API calls are not the main conversation's context.
+          if (
+            event.data.parentToolCallId ||
+            event.data.initiator ||
+            (event.data.interactionType &&
+              !["conversation-agent", "conversation-user"].includes(event.data.interactionType))
+          ) {
+            return [];
+          }
+          session.lastUsage = {
+            ...normalizeUsage(event),
+            ...session.contextUsage,
+            ...(session.contextUsage ? { lastUsedTokens: session.contextUsage.usedTokens } : {}),
+          };
+        }
         return [
           {
             ...eventBase({
@@ -145,9 +178,10 @@ export const mapEvent = (
               raw,
             }),
             type: "thread.token-usage.updated",
-            payload: { usage: normalizeUsage(event) },
+            payload: { usage: session.lastUsage },
           },
         ];
+      }
       case "session.idle": {
         const readyEventId = yield* deps.nextEventId;
         return [

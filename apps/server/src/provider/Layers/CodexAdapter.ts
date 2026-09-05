@@ -273,7 +273,7 @@ function normalizeCodexTokenUsage(
 ): ThreadTokenUsageSnapshot | undefined {
   const totalProcessedTokens = usage.total.totalTokens;
   const usedTokens = usage.last.totalTokens;
-  if (usedTokens === undefined || usedTokens <= 0) {
+  if (usedTokens === undefined || usedTokens < 0) {
     return undefined;
   }
 

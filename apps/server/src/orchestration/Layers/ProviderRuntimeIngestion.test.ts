@@ -3890,6 +3890,26 @@ describe("ProviderRuntimeIngestion", () => {
     expect(checkpoint?.checkpointRef).toBe("provider-diff:evt-turn-diff-updated");
   });
 
+  it("projects an explicit zero context reset", async () => {
+    const harness = await createHarness();
+    const eventId = asEventId("evt-context-reset");
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId,
+      provider: ProviderDriverKind.make("copilot"),
+      createdAt: new Date().toISOString(),
+      threadId: asThreadId("thread-1"),
+      payload: { usage: { usedTokens: 0, maxTokens: 128_000 } },
+    });
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some((activity: ProviderRuntimeTestActivity) => activity.id === eventId),
+    );
+    expect(
+      thread.activities.find((activity: ProviderRuntimeTestActivity) => activity.id === eventId)
+        ?.payload,
+    ).toMatchObject({ usedTokens: 0, maxTokens: 128_000 });
+  });
+
   it("projects context window updates into normalized thread activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
