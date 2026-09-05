@@ -116,4 +116,50 @@ describe("contextWindow", () => {
     expect(snapshot?.usedTokens).toBe(81_659);
     expect(snapshot?.totalProcessedTokens).toBe(748_126);
   });
+
+  it("falls back to the selected model's context limit when usage has none", () => {
+    const usage = deriveContextWindowUsage(
+      [makeActivity("activity-1", "context-window.updated", { usedTokens: 32_000 })],
+      null,
+      1_000_000,
+    );
+
+    expect(usage.usedTokens).toBe(32_000);
+    expect(usage.maxTokens).toBe(1_000_000);
+    expect(usage.remainingTokens).toBe(968_000);
+    expect(usage.usedPercentage).toBe(3.2);
+    expect(usage.remainingPercentage).toBe(96.8);
+  });
+
+  it("seeds an initial usage from the model limit before any turn", () => {
+    const usage = deriveContextWindowUsage([], null, 128_000);
+
+    expect(usage.maxTokens).toBe(128_000);
+    expect(usage.usedTokens).toBe(0);
+    expect(usage.remainingTokens).toBe(128_000);
+    expect(usage.usedPercentage).toBe(0);
+  });
+
+  it("keeps a real provider max over the model fallback", () => {
+    const usage = deriveContextWindowUsage(
+      [
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 1_000,
+          maxTokens: 2_000,
+        }),
+      ],
+      null,
+      1_000_000,
+    );
+
+    expect(usage.maxTokens).toBe(2_000);
+  });
+
+  it("ignores invalid model fallback limits", () => {
+    const activities = [makeActivity("activity-1", "context-window.updated", { usedTokens: 100 })];
+    expect(deriveContextWindowUsage(activities, null, 0).maxTokens).toBeNull();
+    expect(deriveContextWindowUsage(activities, null, -5).maxTokens).toBeNull();
+    expect(deriveContextWindowUsage(activities, null, 12.5).maxTokens).toBeNull();
+    expect(deriveContextWindowUsage(activities, null, null).maxTokens).toBeNull();
+  });
 });

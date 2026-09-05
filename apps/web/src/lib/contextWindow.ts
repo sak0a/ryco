@@ -119,13 +119,46 @@ export function deriveLatestContextWindowSnapshot(
   return null;
 }
 
+/**
+ * Fill in a missing context-window size from a fallback source (the
+ * selected model's reported `maxContextTokens`). Live usage snapshots
+ * from some drivers carry no `maxTokens`; without this they'd render as
+ * a raw token count even when the model's limit is known. Returns the
+ * input untouched when a limit is already present or the fallback is
+ * not a positive finite number.
+ */
+export function withContextWindowLimitFallback(
+  usage: ContextWindowUsage,
+  fallbackMaxTokens: number | null | undefined,
+): ContextWindowUsage {
+  if (
+    usage.maxTokens !== null ||
+    fallbackMaxTokens === null ||
+    fallbackMaxTokens === undefined ||
+    !Number.isSafeInteger(fallbackMaxTokens) ||
+    fallbackMaxTokens <= 0
+  ) {
+    return usage;
+  }
+  const usedPercentage = Math.min(100, (usage.usedTokens / fallbackMaxTokens) * 100);
+  return {
+    ...usage,
+    maxTokens: fallbackMaxTokens,
+    remainingTokens: Math.max(0, fallbackMaxTokens - usage.usedTokens),
+    usedPercentage,
+    remainingPercentage: Math.max(0, 100 - usedPercentage),
+  };
+}
+
 export function deriveContextWindowUsage(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   configuredContextWindow: string | null | undefined,
+  modelMaxContextTokens: number | null = null,
 ): ContextWindowUsage {
-  return (
+  return withContextWindowLimitFallback(
     deriveLatestContextWindowSnapshot(activities) ??
-    createInitialContextWindowUsage(parseContextWindowTokenLimit(configuredContextWindow))
+      createInitialContextWindowUsage(parseContextWindowTokenLimit(configuredContextWindow)),
+    modelMaxContextTokens,
   );
 }
 

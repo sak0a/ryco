@@ -741,13 +741,20 @@ export const ChatComposer = memo(
       composerProviderState.modelOptionsForDispatch?.find(
         (selection) => selection.id === "contextWindow",
       )?.value ?? null;
+    // Drivers that report a per-model context limit (OpenCode) fill the
+    // meter's max before the user overrides it via the contextWindow
+    // capability option or the provider sends a limit with usage.
+    const selectedModelMaxContextTokens =
+      selectedProviderStatus?.models.find((model) => model.slug === selectedModel)
+        ?.maxContextTokens ?? null;
     const contextWindowUsage = useMemo(
       () =>
         deriveContextWindowUsage(
           activeThreadActivities ?? [],
           typeof selectedContextWindow === "string" ? selectedContextWindow : null,
+          selectedModelMaxContextTokens,
         ),
-      [activeThreadActivities, selectedContextWindow],
+      [activeThreadActivities, selectedContextWindow, selectedModelMaxContextTokens],
     );
     const contextWindowRateLimits = selectedProviderStatus?.rateLimits;
 

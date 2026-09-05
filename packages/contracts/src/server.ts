@@ -4,6 +4,7 @@ import { ServerAuthDescriptor } from "./auth.ts";
 import {
   IsoDateTime,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -59,6 +60,10 @@ export const ServerProviderModel = Schema.Struct({
   // Alternate slugs (typed shortcuts, dated API ids) that resolve to `slug`.
   // Sourced from the model manifest for built-in models; absent on custom ones.
   aliases: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  // Model's max context window in tokens when the driver's inventory
+  // reports one (OpenCode today). Absent means unknown — consumers must
+  // fall back to their existing estimate, not treat it as zero.
+  maxContextTokens: Schema.optional(PositiveInt),
   isDefault: Schema.optional(Schema.Boolean),
   isLegacy: Schema.optional(Schema.Boolean),
   isCustom: Schema.Boolean,
@@ -139,10 +144,10 @@ export const ServerProviderRateLimitCredits = Schema.Struct({
 export type ServerProviderRateLimitCredits = typeof ServerProviderRateLimitCredits.Type;
 
 /**
- * Account-scoped rate-limit snapshot attached to a provider. Currently
- * populated only by the Codex driver (one snapshot per Codex provider
- * instance, since each instance can target a different `CODEX_HOME` /
- * ChatGPT account). Other drivers leave it absent.
+ * Account-scoped rate-limit snapshot attached to a provider. Populated by the
+ * drivers that can surface usage limits (Codex, Claude, and OpenCode Go);
+ * each instance yields one snapshot since accounts differ per instance.
+ * Other drivers leave it absent.
  */
 export const ServerProviderRateLimits = Schema.Struct({
   limitId: Schema.optional(TrimmedNonEmptyString),
@@ -150,6 +155,8 @@ export const ServerProviderRateLimits = Schema.Struct({
   planType: Schema.optional(TrimmedNonEmptyString),
   primary: Schema.optional(ServerProviderRateLimitWindow),
   secondary: Schema.optional(ServerProviderRateLimitWindow),
+  // Third window for providers with three usage caps (OpenCode Go monthly).
+  tertiary: Schema.optional(ServerProviderRateLimitWindow),
   credits: Schema.optional(ServerProviderRateLimitCredits),
   rateLimitReachedType: Schema.optional(TrimmedNonEmptyString),
 });
@@ -231,8 +238,9 @@ export const ServerProvider = Schema.Struct({
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   // Optional and provider-driven. Populated only when the driver knows
-  // how to surface usage limits (Codex today). Consumers must treat an
-  // absent value as "no live data", not "no limits configured".
+  // how to surface usage limits (Codex, Claude, OpenCode Go today).
+  // Consumers must treat an absent value as "no live data", not "no
+  // limits configured".
   rateLimits: Schema.optional(ServerProviderRateLimits),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),

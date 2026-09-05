@@ -62,11 +62,33 @@ describe("describeRateLimitWindow", () => {
     expect(
       describeRateLimitWindow({ usedPercent: 0, windowDurationMins: 7 * 24 * 60 - 60 }),
     ).toEqual({ label: "Weekly", bucket: "week" });
+    expect(
+      describeRateLimitWindow({ usedPercent: 0, windowDurationMins: 7 * 24 * 60 + 60 }),
+    ).toEqual({ label: "Weekly", bucket: "week" });
+  });
+
+  it("labels monthly windows around 30 days instead of Weekly", () => {
+    expect(describeRateLimitWindow({ usedPercent: 0, windowDurationMins: 30 * 24 * 60 })).toEqual({
+      label: "Monthly",
+      bucket: "month",
+    });
+    expect(describeRateLimitWindow({ usedPercent: 0, windowDurationMins: 28 * 24 * 60 })).toEqual({
+      label: "Monthly",
+      bucket: "month",
+    });
+    expect(describeRateLimitWindow({ usedPercent: 0, windowDurationMins: 34 * 24 * 60 })).toEqual({
+      label: "Monthly",
+      bucket: "month",
+    });
   });
 
   it("falls back to a generic day count for in-between windows", () => {
     expect(describeRateLimitWindow({ usedPercent: 0, windowDurationMins: 2 * 24 * 60 })).toEqual({
       label: "2d",
+      bucket: "other",
+    });
+    expect(describeRateLimitWindow({ usedPercent: 0, windowDurationMins: 14 * 24 * 60 })).toEqual({
+      label: "14d",
       bucket: "other",
     });
   });

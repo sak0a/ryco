@@ -67,7 +67,9 @@ export function ContextWindowMeter(props: {
   rateLimits?: ServerProviderRateLimits | undefined;
 }) {
   const { usage, rateLimits } = props;
-  const showUsageLimits = Boolean(rateLimits && (rateLimits.primary || rateLimits.secondary));
+  const showUsageLimits = Boolean(
+    rateLimits && (rateLimits.primary || rateLimits.secondary || rateLimits.tertiary),
+  );
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
   const radius = 9.75;
@@ -186,6 +188,9 @@ export function ContextWindowMeter(props: {
               ) : null}
               {rateLimits.secondary ? (
                 <UsageLimitRow window={rateLimits.secondary} fallbackLabel="Weekly" />
+              ) : null}
+              {rateLimits.tertiary ? (
+                <UsageLimitRow window={rateLimits.tertiary} fallbackLabel="Monthly" />
               ) : null}
             </div>
           </div>
