@@ -2495,7 +2495,8 @@ export default function ChatView(props: ChatViewProps) {
 
   const stopTimelineLiveFollow = useCallback(() => {
     setTimelineLiveFollowEnabled(false);
-  }, []);
+    readComposer()?.collapseForReading();
+  }, [readComposer]);
   const resumeTimelineLiveFollow = useCallback(() => {
     setTimelineLiveFollowEnabled(true);
   }, []);

@@ -210,6 +210,7 @@ function revokeUnreferencedStashPreviewUrls(images: ReadonlyArray<ComposerImageA
 // --------------------------------------------------------------------------
 
 export interface ChatComposerHandle {
+  collapseForReading: () => void;
   focusAtEnd: () => void;
   focusAt: (cursor: number) => void;
   openModelPicker: () => void;
@@ -775,6 +776,8 @@ export const ChatComposer = memo(
     const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
     const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
     const [isComposerFocused, setIsComposerFocused] = useState(false);
+    const [isComposerHovered, setIsComposerHovered] = useState(false);
+    const [isReadingChat, setIsReadingChat] = useState(false);
     const [isStashPickerOpen, setIsStashPickerOpen] = useState(false);
     // The collapse-to-pill behavior follows the presentation tier (not the
     // old <640 px query), so 640-767 px viewports and coarse-pointer
@@ -2082,9 +2085,6 @@ export const ChatComposer = memo(
       void onImplementPlanInNewThread();
     }, [onImplementPlanInNewThread]);
     const scheduleComposerCollapseCheck = useCallback(() => {
-      if (!isMobileViewport) {
-        return;
-      }
       if (composerBlurFrameRef.current !== null) {
         window.cancelAnimationFrame(composerBlurFrameRef.current);
       }
@@ -2113,7 +2113,7 @@ export const ChatComposer = memo(
         }
         setIsComposerFocused(false);
       });
-    }, [isMobileViewport]);
+    }, []);
 
     useEffect(() => {
       return () => {
@@ -2129,10 +2129,21 @@ export const ChatComposer = memo(
     useImperativeHandle(
       ref,
       () => ({
+        collapseForReading: () => {
+          if (
+            !isMobileViewport &&
+            !isInsideComposerFloatingLayer(document.activeElement ?? document.body)
+          ) {
+            setIsReadingChat(true);
+            setIsComposerHovered(false);
+          }
+        },
         focusAtEnd: () => {
+          setIsReadingChat(false);
           composerEditorRef.current?.focusAtEnd();
         },
         focusAt: (cursor: number) => {
+          setIsReadingChat(false);
           composerEditorRef.current?.focusAt(cursor);
         },
         openModelPicker: () => {
@@ -2262,6 +2273,14 @@ export const ChatComposer = memo(
       ],
     );
 
+    const isComposerCompact =
+      !isMobileViewport &&
+      activeThreadStarted &&
+      (isReadingChat || (!isComposerFocused && !isComposerHovered)) &&
+      !isComposerModelPickerOpen &&
+      !composerMenuOpen &&
+      !isDragOverComposer;
+
     // Render
     // ------------------------------------------------------------------
     return (
@@ -2313,6 +2332,16 @@ export const ChatComposer = memo(
         >
           <div
             ref={composerSurfaceRef}
+            data-chat-composer-compact={!isMobileViewport ? String(isComposerCompact) : undefined}
+            onPointerEnter={(event) => {
+              if (event.pointerType === "mouse") {
+                setIsComposerHovered(true);
+                setIsReadingChat(false);
+              }
+            }}
+            onPointerLeave={() => setIsComposerHovered(false)}
+            onPointerDownCapture={() => setIsReadingChat(false)}
+            onKeyDownCapture={() => setIsReadingChat(false)}
             data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
             className={cn(
               // The fill never changes on hover or focus. This is a persistent
@@ -2354,6 +2383,7 @@ export const ChatComposer = memo(
                 composerBlurFrameRef.current = null;
               }
               setIsComposerFocused(true);
+              setIsReadingChat(false);
             }}
             onBlurCapture={() => {
               scheduleComposerCollapseCheck();
