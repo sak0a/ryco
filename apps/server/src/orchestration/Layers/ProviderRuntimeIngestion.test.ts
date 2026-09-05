@@ -363,6 +363,13 @@ describe("ProviderRuntimeIngestion", () => {
             history: {
               messages: [
                 {
+                  id: MessageId.make("user:remote-prompt"),
+                  turnId,
+                  role: "user",
+                  text: "question",
+                  createdAt: at,
+                },
+                {
                   id: MessageId.make("assistant:partial"),
                   turnId,
                   role: "assistant",
@@ -384,6 +391,22 @@ describe("ProviderRuntimeIngestion", () => {
           }),
         ),
     });
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("recovery-user-start"),
+        threadId,
+        message: {
+          messageId: MessageId.make("local-prompt"),
+          role: "user",
+          text: "question",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-09-05T09:59:59.900Z",
+      }),
+    );
     const before = (await harness.readModel()).threads[0]!;
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -432,6 +455,7 @@ describe("ProviderRuntimeIngestion", () => {
     await harness.reconcileThread(threadId);
     const recovered = (await harness.readModel()).threads[0]!;
     expect(recovered.messages.map((message) => message.text)).toEqual([
+      "question",
       "complete response",
       "previously missing",
     ]);

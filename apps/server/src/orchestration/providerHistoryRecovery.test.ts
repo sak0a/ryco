@@ -25,6 +25,54 @@ const thread = (messages: readonly OrchestrationMessage[] = []) => ({
 });
 
 describe("provider history message recovery", () => {
+  it("matches a null-turn local prompt through the persisted turn association", () => {
+    const user = {
+      ...message,
+      id: MessageId.make("local-user"),
+      role: "user" as const,
+      turnId: null,
+      text: "question",
+      streaming: false,
+      updatedAt: at,
+    };
+    const recovered = {
+      ...history,
+      messages: [
+        {
+          ...message,
+          id: MessageId.make("user:remote"),
+          role: "user" as const,
+          text: "injected context\nquestion",
+        },
+        message,
+      ],
+    };
+    const restored = historyMessagesToRestore(
+      thread([user]),
+      recovered,
+      at,
+      new Map([[turnId, user.id]]),
+    );
+    expect(restored.map((entry) => entry.role)).toEqual(["assistant"]);
+    expect(
+      historyMessagesToRestore(
+        thread([user, ...restored]),
+        recovered,
+        at,
+        new Map([[turnId, user.id]]),
+      ),
+    ).toEqual([]);
+    // An unrelated turn must still recover its prompt, even if its text repeats.
+    expect(
+      historyMessagesToRestore(
+        thread([user]),
+        recovered,
+        at,
+        new Map([[TurnId.make("other-turn"), user.id]]),
+      ),
+    ).toHaveLength(2);
+  });
+
   it("orders recovered replies after their user prompt despite coarse provider timestamps", () => {
     const user = {
       ...message,

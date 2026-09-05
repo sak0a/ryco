@@ -63,6 +63,7 @@ function getSelectedTraits(
   prompt: string,
   modelOptions: ProviderOptions | null | undefined,
   allowPromptInjectedEffort: boolean,
+  hideAgent: boolean,
 ) {
   const caps = getProviderModelCapabilities(models, model, provider);
   const descriptors = getProviderOptionDescriptors({
@@ -71,7 +72,7 @@ function getSelectedTraits(
   });
   const selectDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "select" }> =>
-      descriptor.type === "select",
+      descriptor.type === "select" && !(hideAgent && descriptor.id === "agent"),
   );
   const booleanDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "boolean" }> =>
@@ -137,6 +138,7 @@ function getTraitsSectionVisibility(input: {
   prompt: string;
   modelOptions: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
+  hideAgent?: boolean;
 }) {
   const selected = getSelectedTraits(
     input.provider,
@@ -145,6 +147,7 @@ function getTraitsSectionVisibility(input: {
     input.prompt,
     input.modelOptions,
     input.allowPromptInjectedEffort ?? true,
+    input.hideAgent ?? false,
   );
 
   const showEffort = selected.primarySelectDescriptor !== null;
@@ -171,6 +174,7 @@ export function shouldRenderTraitsControls(input: {
   prompt: string;
   modelOptions: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
+  hideAgent?: boolean;
 }): boolean {
   return getTraitsSectionVisibility(input).hasAnyControls;
 }
@@ -184,6 +188,7 @@ export interface TraitsMenuContentProps {
   onPromptChange: (prompt: string) => void;
   modelOptions?: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
+  hideAgent?: boolean;
   /**
    * Renders the disabled presentation and blocks every option change. The
    * traits-side equivalent of `ProviderModelPicker`'s `disabled`: call sites
@@ -210,6 +215,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   onPromptChange,
   modelOptions,
   allowPromptInjectedEffort = true,
+  hideAgent = false,
   disabled = false,
   disabledReason,
   ...persistence
@@ -248,6 +254,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     prompt,
     modelOptions,
     allowPromptInjectedEffort,
+    hideAgent,
   });
   const boundedReason = disabled && disabledReason ? boundedDisabledReason(disabledReason) : null;
   const updateDescriptors = (nextDescriptors: ReadonlyArray<ProviderOptionDescriptor>) => {
@@ -373,6 +380,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   onPromptChange,
   modelOptions,
   allowPromptInjectedEffort = true,
+  hideAgent = false,
   disabled = false,
   disabledReason,
   triggerSize,
@@ -389,6 +397,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       prompt,
       modelOptions,
       allowPromptInjectedEffort,
+      hideAgent,
     });
   if (
     !shouldRenderTraitsControls({
@@ -398,6 +407,7 @@ export const TraitsPicker = memo(function TraitsPicker({
       prompt,
       modelOptions,
       allowPromptInjectedEffort,
+      hideAgent,
     })
   ) {
     return null;
@@ -473,6 +483,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           onPromptChange={onPromptChange}
           modelOptions={modelOptions}
           allowPromptInjectedEffort={allowPromptInjectedEffort}
+          hideAgent={hideAgent}
           disabled={disabled}
           {...(disabledReason ? { disabledReason } : {})}
           {...persistence}
