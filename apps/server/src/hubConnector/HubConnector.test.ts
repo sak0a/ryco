@@ -394,6 +394,25 @@ describe("HubConnector", () => {
         limits: RELAY_INITIAL_LIMITS,
       }),
     } as MessageEvent);
+    // The Hub sends its verifier keyset immediately after `ready`. The
+    // connector must retain this frame until its generation-scoped E2EE state
+    // and channel registry are installed.
+    socket.emit("message", {
+      data: encoded({
+        type: "e2ee.verifier-keys",
+        protocolMajor: 1,
+        protocolMinor: 3,
+        generation: 1,
+        keys: [
+          {
+            keyId: `hgk_${"K".repeat(22)}`,
+            publicKey: ed25519PublicKey(),
+            notBefore: 900_000,
+            notAfter: 1_100_000,
+          },
+        ],
+      } as unknown as RelayFrame),
+    } as MessageEvent);
     await starting;
 
     const published = socket.sent
@@ -423,22 +442,6 @@ describe("HubConnector", () => {
     await settle();
     expect(connector.e2eeSnapshot().acknowledgedStatementDigest).toBeUndefined();
 
-    socket.emit("message", {
-      data: encoded({
-        type: "e2ee.verifier-keys",
-        protocolMajor: 1,
-        protocolMinor: 3,
-        generation: 1,
-        keys: [
-          {
-            keyId: `hgk_${"K".repeat(22)}`,
-            publicKey: ed25519PublicKey(),
-            notBefore: 900_000,
-            notAfter: 1_100_000,
-          },
-        ],
-      } as unknown as RelayFrame),
-    } as MessageEvent);
     socket.emit("message", {
       data: encoded({
         type: "node.e2ee.statement.ack",

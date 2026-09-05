@@ -219,7 +219,7 @@ describe("RelayConnectionSession", () => {
     expect(relayErrorKind(frame("protocol_unsupported"))).toBe("version_incompatible");
   });
 
-  it("sends canonical auth first, accepts exact ready, and routes later binary frames", async () => {
+  it("buffers post-ready frames until the connector activates ordered delivery", async () => {
     const socket = new FakeSocket();
     const routed: RelayFrame[] = [];
     const terminal: RelayConnectionError[] = [];
@@ -244,8 +244,6 @@ describe("RelayConnectionSession", () => {
         limits: RELAY_INITIAL_LIMITS,
       }),
     } as MessageEvent);
-    await expect(authenticating).resolves.toMatchObject({ type: "ready" });
-
     const ping = {
       type: "ping",
       protocolMajor: 1,
@@ -253,10 +251,54 @@ describe("RelayConnectionSession", () => {
       nonce: new Uint8Array(8).fill(7),
     } as const;
     socket.emit("message", { data: encoded(ping) } as MessageEvent);
+    expect(routed).toHaveLength(0);
+
+    await expect(authenticating).resolves.toMatchObject({ type: "ready" });
+    session.activateFrameDelivery();
     expect(routed).toHaveLength(1);
     expect(routed[0]).toMatchObject({ type: "ping" });
     expect(routed[0]?.type === "ping" && routed[0].nonce).toEqual(new Uint8Array(8).fill(7));
     expect(terminal).toHaveLength(0);
+  });
+
+  it("fails closed when the bounded post-ready frame buffer overflows", async () => {
+    const socket = new FakeSocket();
+    const terminal: RelayConnectionError[] = [];
+    const session = new RelayConnectionSession({
+      identity: identity(),
+      transport: { open: () => socket },
+      hubOrigin: "https://relay.example",
+      onFrame: () => undefined,
+      onTerminal: (error) => terminal.push(error),
+    });
+    const authenticating = session.authenticate();
+    await Promise.resolve();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await authenticating;
+
+    for (let index = 0; index < 17; index += 1) {
+      socket.emit("message", {
+        data: encoded({
+          type: "ping",
+          protocolMajor: 1,
+          protocolMinor: 2,
+          nonce: new Uint8Array(8).fill(index),
+        }),
+      } as MessageEvent);
+    }
+
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]?.kind).toBe("protocol_invalid");
+    expect(socket.closeCalls).toBe(1);
+    expect(() => session.activateFrameDelivery()).toThrow("Hub relay connection failed.");
   });
 
   it("negotiates minor 2 when a minor-3 node meets an older Hub", async () => {
@@ -281,6 +323,7 @@ describe("RelayConnectionSession", () => {
       }),
     } as MessageEvent);
     await expect(authenticating).resolves.toMatchObject({ protocolMinor: 2 });
+    session.activateFrameDelivery();
 
     socket.emit("message", {
       data: encoded({
@@ -338,6 +381,7 @@ describe("RelayConnectionSession", () => {
       }),
     } as MessageEvent);
     await authenticating;
+    session.activateFrameDelivery();
 
     socket.emit("message", {
       data: encoded({
