@@ -330,6 +330,82 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("worktree operations", () => {
+    it.effect(
+      "fetches origin branches and creates from the fresh remote instead of the local base",
+      () =>
+        Effect.gen(function* () {
+          const remote = yield* makeTmpDir();
+          const { initialBranch } = yield* initRepoWithCommit(remote);
+          const cwd = yield* makeTmpDir();
+          yield* git(cwd, ["clone", remote, "."]);
+          yield* configureTestGitCommitIdentity(cwd, git);
+          yield* git(cwd, ["commit", "--allow-empty", "-m", "local-only commit"]);
+          const localHead = yield* git(cwd, ["rev-parse", "HEAD"]);
+          yield* git(remote, ["branch", "remote-only"]);
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          const refs = yield* driver.listRefs({ cwd, fetchOrigin: true, originOnly: true });
+          assert.isTrue(refs.refs.some((ref) => ref.name === `origin/${initialBranch}`));
+          assert.isTrue(refs.refs.some((ref) => ref.name === "origin/remote-only"));
+          assert.isTrue(refs.refs.every((ref) => ref.isRemote && ref.remoteName === "origin"));
+          // Origin moves after the picker loaded. Creation must fetch again.
+          yield* git(remote, ["commit", "--allow-empty", "-m", "new remote commit"]);
+          const remoteHead = yield* git(remote, ["rev-parse", "HEAD"]);
+          const pathService = yield* Path.Path;
+          const root = yield* makeTmpDir();
+          const created = yield* driver.createWorktree({
+            cwd,
+            path: pathService.join(root, "fresh"),
+            refName: `origin/${initialBranch}`,
+            newRefName: "feature/custom",
+            fetchOrigin: true,
+          });
+          assert.equal(yield* git(created.worktree.path, ["rev-parse", "HEAD"]), remoteHead);
+          assert.equal(yield* git(cwd, ["rev-parse", "HEAD"]), localHead);
+          assert.equal(
+            yield* git(created.worktree.path, ["branch", "--show-current"]),
+            "feature/custom",
+          );
+          // Resolve the remote default even when no origin/HEAD symbolic ref exists.
+          yield* git(cwd, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+          const automatic = yield* driver.createWorktree({
+            cwd,
+            path: pathService.join(root, "default"),
+            refName: "origin/HEAD",
+            newRefName: "feature/default",
+            fetchOrigin: true,
+          });
+          assert.equal(yield* git(automatic.worktree.path, ["rev-parse", "HEAD"]), remoteHead);
+          const local = yield* driver.createWorktree({
+            cwd,
+            path: pathService.join(root, "local"),
+            refName: initialBranch,
+            newRefName: "feature/local",
+            fetchOrigin: false,
+          });
+          assert.equal(yield* git(local.worktree.path, ["rev-parse", "HEAD"]), localHead);
+          yield* git(remote, ["branch", "-D", "remote-only"]);
+          const pruned = yield* driver.listRefs({ cwd, fetchOrigin: true, originOnly: true });
+          assert.isFalse(pruned.refs.some((ref) => ref.name === "origin/remote-only"));
+        }),
+    );
+    it.effect("does not create a worktree when fetching origin fails", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const result = yield* driver
+          .createWorktree({
+            cwd,
+            path: null,
+            refName: initialBranch,
+            newRefName: "must-not-exist",
+            fetchOrigin: true,
+          })
+          .pipe(Effect.result);
+        assert.equal(result._tag, "Failure");
+        assert.equal(yield* git(cwd, ["branch", "--list", "must-not-exist"]), "");
+      }),
+    );
     it.effect("creates and removes a worktree for a new refName", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

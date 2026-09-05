@@ -1,3 +1,4 @@
+import { newWorktreeBaseBranch } from "./chat/NewThreadWorkLocation.logic";
 import {
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
@@ -3138,6 +3139,7 @@ export default function ChatView(props: ChatViewProps) {
       const createWorktree = api.git.createWorktreeForProject;
       if (!pendingWorktreeSource || !createWorktree || !activeProject) return null;
       const created = await createWorktree({
+        fetchOrigin: draftThread?.fetchOrigin ?? true,
         projectId: activeProject.id,
         intent:
           pendingWorktreeSource.kind === "pr"
@@ -3168,14 +3170,6 @@ export default function ChatView(props: ChatViewProps) {
       };
     };
 
-    // In worktree mode, require an explicit base branch so we don't silently
-    // fall back to local execution when branch selection is missing. A recorded
-    // source supplies its own base, so it is exempt.
-    if (shouldCreateWorktree && !activeThreadBranch && !pendingWorktreeSource) {
-      setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
-      return false;
-    }
-
     await executeChatSendTurn({
       ...(messageId !== undefined ? { messageId } : {}),
       composer: composerSnapshot,
@@ -3201,7 +3195,16 @@ export default function ChatView(props: ChatViewProps) {
           }
         : {
             shouldMaterializeLegacyBranchWorktree,
-            baseBranchForWorktree,
+            baseBranchForWorktree:
+              shouldCreateWorktree && !shouldMaterializeLegacyBranchWorktree
+                ? newWorktreeBaseBranch(activeThreadBranch, draftThread?.fetchOrigin ?? true)
+                : baseBranchForWorktree,
+            ...(shouldCreateWorktree && !shouldMaterializeLegacyBranchWorktree
+              ? {
+                  fetchOrigin: draftThread?.fetchOrigin ?? true,
+                  worktreeBranchName: draftThread?.worktreeBranchName ?? null,
+                }
+              : {}),
             shouldCreateWorktree,
           },
       settings: effectiveSettingsSnapshot,

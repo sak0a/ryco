@@ -1885,8 +1885,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       Effect.map((trimmed) => (trimmed.length > 0 ? trimmed : null)),
     );
 
+  const fetchOrigin = (cwd: string) =>
+    runGit("GitVcsDriver.fetchOrigin", cwd, [
+      "fetch",
+      "--prune",
+      "--no-tags",
+      "origin",
+      "+refs/heads/*:refs/remotes/origin/*",
+    ]);
+
   const listRefs: GitVcsDriver.GitVcsDriverShape["listRefs"] = Effect.fn("listRefs")(
     function* (input) {
+      if (input.fetchOrigin) yield* fetchOrigin(input.cwd);
       const branchRecencyPromise = readBranchRecency(input.cwd).pipe(
         Effect.catch(() => Effect.succeed(new Map<string, number>())),
       );
@@ -2101,7 +2111,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
       const refs = paginateBranches({
         refs: filterBranchesForListQuery(
-          dedupeRemoteBranchesWithLocalMatches([...localBranches, ...remoteBranches]),
+          input.originOnly
+            ? remoteBranches.filter((ref) => ref.remoteName === "origin")
+            : dedupeRemoteBranchesWithLocalMatches([...localBranches, ...remoteBranches]),
           input.query,
         ),
         cursor: input.cursor,
@@ -2121,13 +2133,37 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const createWorktree: GitVcsDriver.GitVcsDriverShape["createWorktree"] = Effect.fn(
     "createWorktree",
   )(function* (input) {
-    const targetBranch = input.newRefName ?? input.refName;
+    let baseRef = input.refName;
+    if (input.fetchOrigin) {
+      yield* fetchOrigin(input.cwd);
+      if (baseRef === "origin/HEAD") {
+        const head = yield* runGitStdout("GitVcsDriver.originHead", input.cwd, [
+          "ls-remote",
+          "--symref",
+          "origin",
+          "HEAD",
+        ]);
+        const defaultBranch = /^ref: refs\/heads\/(.+)\tHEAD$/m.exec(head)?.[1];
+        if (!defaultBranch) {
+          return yield* createGitCommandError(
+            "GitVcsDriver.originHead",
+            input.cwd,
+            ["ls-remote", "--symref", "origin", "HEAD"],
+            "Origin has no default branch.",
+          );
+        }
+        baseRef = `origin/${defaultBranch}`;
+      }
+      // Fully qualified refs prevent a same-named local branch from winning.
+      baseRef = `refs/remotes/${baseRef.startsWith("origin/") ? baseRef : `origin/${baseRef}`}`;
+    }
+    const targetBranch = input.newRefName ?? baseRef;
     const sanitizedBranch = targetBranch.replace(/\//g, "-");
     const repoName = path.basename(input.cwd);
     const worktreePath = input.path ?? path.join(worktreesDir, repoName, sanitizedBranch);
     const args = input.newRefName
-      ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
-      : ["worktree", "add", worktreePath, input.refName];
+      ? ["worktree", "add", "-b", input.newRefName, worktreePath, baseRef]
+      : ["worktree", "add", worktreePath, baseRef];
 
     yield* executeGit("GitVcsDriver.createWorktree", input.cwd, args, {
       fallbackErrorMessage: "git worktree add failed",

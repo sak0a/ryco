@@ -868,6 +868,35 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(draftByKey(draftId)).toBeUndefined();
   });
 
+  it("keeps worktree creation preferences in the draft and clears the name on project change", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.setDraftThreadContext(draftId, {
+      fetchOrigin: false,
+      worktreeBranchName: "feature/custom",
+    });
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
+      fetchOrigin: false,
+      worktreeBranchName: "feature/custom",
+    });
+    store.setDraftThreadContext(draftId, { branch: "main" });
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
+      fetchOrigin: false,
+      worktreeBranchName: "feature/custom",
+    });
+    const options = useComposerDraftStore.persist.getOptions();
+    const snapshot = options.partialize!(useComposerDraftStore.getState());
+    const hydrated = options.merge!(snapshot, useComposerDraftStore.getState());
+    expect(Object.values(hydrated.draftThreadsByThreadKey)[0]).toMatchObject({
+      fetchOrigin: false,
+      worktreeBranchName: "feature/custom",
+    });
+    store.setDraftThreadContext(draftId, {
+      projectRef: scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("other")),
+    });
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)?.worktreeBranchName).toBeNull();
+  });
+
   it("updates branch context on an existing draft thread", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, {

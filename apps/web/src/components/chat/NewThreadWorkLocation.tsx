@@ -23,6 +23,7 @@ import {
 } from "../ui/combobox";
 import {
   branchSlotPreposition,
+  newWorktreeBaseBranch,
   resolveWorkLocation,
   showsBranchSlot,
   workLocationDraftPatch,
@@ -125,7 +126,15 @@ export function NewThreadWorkLocation({
   const showEnvironment = availableEnvironments.length > 1 && onEnvironmentChange !== undefined;
   const canEdit = draftId !== undefined && !envLocked;
   const worktreeSource = draftThread?.worktreeSource ?? null;
-  const sourceLabel = worktreeSource?.label ?? draftThread?.branch?.trim() ?? "Select a source";
+  const fetchOrigin = draftThread?.fetchOrigin ?? true;
+  const selectedBranch = draftThread?.branch?.trim();
+  const sourceLabel =
+    worktreeSource?.label ??
+    (selectedBranch
+      ? newWorktreeBaseBranch(selectedBranch, fetchOrigin)
+      : fetchOrigin
+        ? "origin’s default branch"
+        : "the current branch");
   const sourceKind = worktreeSource
     ? worktreeSource.kind
     : draftThread?.branch?.trim()
@@ -201,6 +210,18 @@ export function NewThreadWorkLocation({
               environmentId={environmentId}
               projectId={projectId}
               cwd={cwd}
+              fetchOrigin={fetchOrigin}
+              onFetchOriginChange={(enabled) => {
+                if (draftId) setDraftThreadContext(draftId, { fetchOrigin: enabled, branch: null });
+              }}
+              branchName={draftThread?.worktreeBranchName ?? null}
+              onBranchNameChange={(name) => {
+                if (draftId)
+                  setDraftThreadContext(draftId, {
+                    worktreeBranchName: name,
+                    worktreeSource: null,
+                  });
+              }}
               onSelect={handleSelectSource}
             />
           ) : (
@@ -216,6 +237,12 @@ export function NewThreadWorkLocation({
             />
           )}
         </>
+      ) : null}
+
+      {location.kind === "newWorktree" && draftThread?.worktreeBranchName && !worktreeSource ? (
+        <span className="px-1 text-muted-foreground">
+          as <span className="font-mono text-foreground/85">{draftThread.worktreeBranchName}</span>
+        </span>
       ) : null}
 
       {showEnvironment && onEnvironmentChange ? (

@@ -157,6 +157,8 @@ const PersistedDraftThreadState = Schema.Struct({
   tokenMode: Schema.optionalKey(AgentTokenMode),
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  fetchOrigin: Schema.optionalKey(Schema.Boolean),
+  worktreeBranchName: Schema.optionalKey(Schema.NullOr(Schema.String)),
   // Optional so drafts persisted before sources existed still decode.
   worktreeSource: Schema.optionalKey(
     Schema.NullOr(
@@ -737,6 +739,14 @@ function normalizePersistedDraftThreads(
         tokenMode: isAgentTokenMode(candidateDraftThread.tokenMode)
           ? candidateDraftThread.tokenMode
           : DEFAULT_AGENT_TOKEN_MODE,
+        fetchOrigin:
+          typeof candidateDraftThread.fetchOrigin === "boolean"
+            ? candidateDraftThread.fetchOrigin
+            : true,
+        worktreeBranchName:
+          typeof candidateDraftThread.worktreeBranchName === "string"
+            ? candidateDraftThread.worktreeBranchName
+            : null,
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
@@ -1195,6 +1205,8 @@ export function toHydratedDraftThreadState(
     runtimeMode: persistedDraftThread.runtimeMode,
     interactionMode: persistedDraftThread.interactionMode,
     tokenMode: persistedDraftThread.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
+    fetchOrigin: persistedDraftThread.fetchOrigin ?? true,
+    worktreeBranchName: persistedDraftThread.worktreeBranchName ?? null,
     branch: persistedDraftThread.branch,
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,

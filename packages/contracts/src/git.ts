@@ -132,6 +132,8 @@ export const GitRunStackedActionInput = Schema.Struct({
 export type GitRunStackedActionInput = typeof GitRunStackedActionInput.Type;
 
 export const VcsListRefsInput = Schema.Struct({
+  fetchOrigin: Schema.optional(Schema.Boolean),
+  originOnly: Schema.optional(Schema.Boolean),
   cwd: TrimmedNonEmptyStringSchema,
   query: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(256))),
   cursor: Schema.optional(NonNegativeInt),
@@ -142,6 +144,7 @@ export const VcsListRefsInput = Schema.Struct({
 export type VcsListRefsInput = typeof VcsListRefsInput.Type;
 
 export const VcsCreateWorktreeInput = Schema.Struct({
+  fetchOrigin: Schema.optional(Schema.Boolean),
   cwd: TrimmedNonEmptyStringSchema,
   refName: TrimmedNonEmptyStringSchema,
   newRefName: Schema.optional(TrimmedNonEmptyStringSchema),

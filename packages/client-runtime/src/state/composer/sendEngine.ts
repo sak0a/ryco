@@ -17,6 +17,8 @@ import type { ComposerAttachment } from "../../platform/index.ts";
 
 export interface SendTurnBootstrapInput {
   readonly isLocalDraftThread: boolean;
+  readonly fetchOrigin?: boolean | undefined;
+  readonly worktreeBranchName?: string | null | undefined;
   readonly baseBranchForWorktree: string | null;
   readonly shouldMaterializeLegacyBranchWorktree: boolean;
   readonly projectId: ProjectId;
@@ -47,6 +49,7 @@ export type SendTurnBootstrap =
       readonly prepareWorktree?: {
         readonly projectCwd: string;
         readonly baseBranch: string;
+        readonly fetchOrigin?: boolean;
         readonly branch?: string;
       };
       readonly runSetupScript?: boolean;
@@ -82,9 +85,10 @@ export function buildSendTurnBootstrap(input: SendTurnBootstrapInput): SendTurnB
           prepareWorktree: {
             projectCwd: input.projectCwd,
             baseBranch: input.baseBranchForWorktree,
+            ...(input.fetchOrigin !== undefined ? { fetchOrigin: input.fetchOrigin } : {}),
             ...(input.shouldMaterializeLegacyBranchWorktree
               ? {}
-              : { branch: buildTemporaryWorktreeBranchName() }),
+              : { branch: input.worktreeBranchName || buildTemporaryWorktreeBranchName() }),
           },
           runSetupScript: true,
         }

@@ -73,6 +73,8 @@ export interface SendTurnThreadContext {
 }
 
 export interface SendTurnWorktreePlan {
+  fetchOrigin?: boolean;
+  worktreeBranchName?: string | null;
   shouldMaterializeLegacyBranchWorktree: boolean;
   baseBranchForWorktree: string | null;
   shouldCreateWorktree: boolean;
@@ -426,6 +428,8 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
     const bootstrap = buildSendTurnBootstrap({
       isLocalDraftThread: thread.isLocalDraftThread,
       baseBranchForWorktree: worktree.baseBranchForWorktree,
+      fetchOrigin: worktree.fetchOrigin,
+      worktreeBranchName: worktree.worktreeBranchName,
       shouldMaterializeLegacyBranchWorktree: worktree.shouldMaterializeLegacyBranchWorktree,
       projectId: project.projectId,
       projectCwd: project.projectCwd,

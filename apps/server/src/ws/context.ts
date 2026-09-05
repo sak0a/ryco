@@ -516,6 +516,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
             const worktree = yield* gitWorkflow.createWorktree({
               cwd: bootstrap.prepareWorktree.projectCwd,
               refName: bootstrap.prepareWorktree.baseBranch,
+              fetchOrigin: bootstrap.prepareWorktree.fetchOrigin,
               newRefName: bootstrap.prepareWorktree.branch,
               path: resolveWorktreeCheckoutPath({
                 location: undefined,

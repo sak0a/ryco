@@ -151,6 +151,8 @@ export interface DraftSessionState {
   envMode: DraftThreadEnvMode;
   /** Set only in `worktree` mode when the base is not a plain branch. */
   worktreeSource?: DraftWorktreeSource | null;
+  fetchOrigin?: boolean;
+  worktreeBranchName?: string | null;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -239,6 +241,8 @@ export interface ComposerDraftStoreState<TImage extends ComposerDraftImage = Com
       branch?: string | null;
       worktreePath?: string | null;
       worktreeSource?: DraftWorktreeSource | null;
+      fetchOrigin?: boolean;
+      worktreeBranchName?: string | null;
       projectRef?: ScopedProjectRef;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
@@ -661,6 +665,8 @@ function createDraftThreadState(
     branch?: string | null;
     worktreePath?: string | null;
     worktreeSource?: DraftWorktreeSource | null;
+    fetchOrigin?: boolean;
+    worktreeBranchName?: string | null;
     createdAt?: string;
     envMode?: DraftThreadEnvMode;
     runtimeMode?: RuntimeMode;
@@ -694,6 +700,12 @@ function createDraftThreadState(
     interactionMode:
       options?.interactionMode ?? existingThread?.interactionMode ?? DEFAULT_INTERACTION_MODE,
     tokenMode: options?.tokenMode ?? existingThread?.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
+    fetchOrigin: options?.fetchOrigin ?? existingThread?.fetchOrigin ?? true,
+    worktreeBranchName: projectChanged
+      ? null
+      : options?.worktreeBranchName === undefined
+        ? (existingThread?.worktreeBranchName ?? null)
+        : options.worktreeBranchName,
     branch: nextBranch,
     worktreePath: nextWorktreePath,
     // A source belongs to the repository it was picked from, so it is dropped
@@ -1060,6 +1072,12 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
                 runtimeMode: options.runtimeMode ?? existing.runtimeMode,
                 interactionMode: options.interactionMode ?? existing.interactionMode,
                 tokenMode: options.tokenMode ?? existing.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
+                fetchOrigin: options.fetchOrigin ?? existing.fetchOrigin ?? true,
+                worktreeBranchName: projectChanged
+                  ? null
+                  : options.worktreeBranchName === undefined
+                    ? (existing.worktreeBranchName ?? null)
+                    : options.worktreeBranchName,
                 branch: nextBranch,
                 worktreePath: nextWorktreePath,
                 worktreeSource: nextWorktreeSource,
@@ -1080,6 +1098,8 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
                 nextDraftThread.runtimeMode === existing.runtimeMode &&
                 nextDraftThread.interactionMode === existing.interactionMode &&
                 nextDraftThread.tokenMode === existing.tokenMode &&
+                nextDraftThread.fetchOrigin === (existing.fetchOrigin ?? true) &&
+                nextDraftThread.worktreeBranchName === (existing.worktreeBranchName ?? null) &&
                 nextDraftThread.branch === existing.branch &&
                 nextDraftThread.worktreePath === existing.worktreePath &&
                 Equal.equals(nextDraftThread.worktreeSource, existing.worktreeSource ?? null) &&
