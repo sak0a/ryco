@@ -1,5 +1,6 @@
 import {
   MessageId,
+  type TurnId,
   type OrchestrationMessage,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
@@ -11,6 +12,7 @@ export function historyMessagesToRestore(
   thread: Pick<OrchestrationThread, "id" | "createdAt" | "messages">,
   history: ProviderThreadHistory,
   now: string,
+  userMessageIdsByTurn: ReadonlyMap<TurnId, MessageId> = new Map(),
 ): OrchestrationMessage[] {
   const restored: OrchestrationMessage[] = [];
   const byId = new Map(thread.messages.map((message) => [message.id, message]));
@@ -20,7 +22,12 @@ export function historyMessagesToRestore(
     const existing = byId.get(message.id) ?? byId.get(recoveredId);
     const existingUser =
       message.role === "user"
-        ? thread.messages.find((entry) => entry.role === "user" && entry.turnId === message.turnId)
+        ? thread.messages.find(
+            (entry) =>
+              entry.role === "user" &&
+              (entry.turnId === message.turnId ||
+                entry.id === userMessageIdsByTurn.get(message.turnId)),
+          )
         : undefined;
     if (
       message.role === "user" &&

@@ -44,6 +44,7 @@ type Persistence =
     };
 
 export type TraitsChipsProps = {
+  hideAgent?: boolean;
   provider: ProviderDriverKind;
   instanceId?: ProviderInstanceId;
   models: ReadonlyArray<ServerProviderModel>;
@@ -124,7 +125,7 @@ export const TraitsChips = memo(function TraitsChips(props: TraitsChipsProps) {
   const fastMode = findBoolean("fastMode");
   const contextWindow = findSelect("contextWindow");
   const thinking = findBoolean("thinking");
-  const agent = findSelect("agent");
+  const agent = props.hideAgent ? undefined : findSelect("agent");
 
   // Any select descriptor we don't have a dedicated chip for (e.g.
   // OpenCode's "variant") renders via GenericSelectChip. Booleans without

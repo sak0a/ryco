@@ -2769,7 +2769,18 @@ const make = Effect.gen(function* () {
       )
         return;
       const now = new Date(Math.max(Date.now(), Date.parse(thread.updatedAt) + 1)).toISOString();
-      const messages = historyMessagesToRestore(thread, input.history, now);
+      // User messages are persisted before the provider assigns a turn ID.
+      // The turn projection owns that association; message.turnId stays null.
+      const userMessageIdsByTurn = new Map<TurnId, MessageId>();
+      if (input.history.messages.some((message) => message.role === "user")) {
+        const turns = yield* projectionTurnRepository.listByThreadId({ threadId: thread.id });
+        for (const turn of turns) {
+          if (turn.turnId !== null && turn.pendingMessageId !== null) {
+            userMessageIdsByTurn.set(turn.turnId, turn.pendingMessageId);
+          }
+        }
+      }
+      const messages = historyMessagesToRestore(thread, input.history, now, userMessageIdsByTurn);
       const activities = missingHistoryActivities(
         thread.activities,
         input.history.items.flatMap((event) => runtimeEventToActivities(event)),

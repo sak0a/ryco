@@ -57,6 +57,33 @@ describe("TraitsChips", () => {
     document.body.innerHTML = "";
   });
 
+  it("hides the agent chip while keeping other OpenCode options available", async () => {
+    mounted = await render(
+      <TraitsChips
+        provider={ProviderDriverKind.make("opencode")}
+        hideAgent
+        model="test-model"
+        models={[
+          modelWith([
+            selectDescriptor("agent", "Agent", [
+              { id: "build", label: "Build", isDefault: true },
+              { id: "plan", label: "Plan" },
+            ]),
+            selectDescriptor("variant", "Variant", [
+              { id: "high", label: "High", isDefault: true },
+            ]),
+          ]),
+        ]}
+        prompt=""
+        modelOptions={[{ id: "agent", value: "plan" }]}
+        onPromptChange={() => {}}
+        onModelOptionsChange={() => {}}
+      />,
+    );
+    await expect.element(page.getByRole("button", { name: /agent/i })).not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: /variant/i })).toBeInTheDocument();
+  });
+
   it("renders Reasoning + Fast + Context chips when all capabilities are present", async () => {
     const onModelOptionsChange = vi.fn();
     mounted = await render(

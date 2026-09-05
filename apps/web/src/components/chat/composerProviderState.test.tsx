@@ -227,6 +227,27 @@ describe("getComposerProviderState", () => {
 });
 
 describe("provider traits render guards", () => {
+  it("hides the provider agent selector when build mode is enforced", () => {
+    const args = {
+      provider: ProviderDriverKind.make("opencode"),
+      draftId: DraftId.make("build-mode"),
+      model: MODEL,
+      models: modelWith([
+        selectDescriptor("agent", [
+          { id: "build", label: "Build", isDefault: true },
+          { id: "plan", label: "Plan" },
+        ]),
+      ]),
+      modelOptions: selections(["agent", "plan"]),
+      prompt: "",
+      onPromptChange: () => {},
+    };
+    expect(renderProviderTraitsChips({ ...args, hideAgent: true })).toBeNull();
+    expect(renderProviderTraitsMenuContent({ ...args, hideAgent: true })).toBeNull();
+    expect(isValidElement(renderProviderTraitsChips(args))).toBe(true);
+    expect(isValidElement(renderProviderTraitsMenuContent(args))).toBe(true);
+  });
+
   it("returns null when no thread target is provided", () => {
     const models = modelWith([
       selectDescriptor("effort", [{ id: "high", label: "High", isDefault: true }]),

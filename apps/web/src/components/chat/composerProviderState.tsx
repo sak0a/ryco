@@ -36,6 +36,7 @@ export type ComposerProviderState = {
 };
 
 type TraitsRenderInput = {
+  hideAgent?: boolean;
   provider: ProviderDriverKind;
   instanceId?: ProviderInstanceId;
   threadRef?: ScopedThreadRef;
@@ -100,12 +101,20 @@ export function renderProviderTraitsMenuContent(input: TraitsRenderInput): React
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   if (
     !hasTarget ||
-    !shouldRenderTraitsControls({ provider, models, model, modelOptions, prompt })
+    !shouldRenderTraitsControls({
+      provider,
+      models,
+      model,
+      modelOptions,
+      prompt,
+      hideAgent: input.hideAgent ?? false,
+    })
   ) {
     return null;
   }
   return (
     <TraitsMenuContent
+      hideAgent={input.hideAgent ?? false}
       disabled={disabled ?? false}
       {...(disabledReason ? { disabledReason } : {})}
       provider={provider}
@@ -138,12 +147,20 @@ export function renderProviderTraitsChips(input: TraitsRenderInput): ReactNode {
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   if (
     !hasTarget ||
-    !shouldRenderTraitsControls({ provider, models, model, modelOptions, prompt })
+    !shouldRenderTraitsControls({
+      provider,
+      models,
+      model,
+      modelOptions,
+      prompt,
+      hideAgent: input.hideAgent ?? false,
+    })
   ) {
     return null;
   }
   return (
     <TraitsChips
+      hideAgent={input.hideAgent ?? false}
       disabled={disabled ?? false}
       {...(disabledReason ? { disabledReason } : {})}
       provider={provider}

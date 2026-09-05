@@ -976,6 +976,7 @@ export const ChatComposer = memo(
     const traitsDisabledReason = traitsMutationCapability.reason;
 
     const providerTraitsMenuContent = renderProviderTraitsMenuContent({
+      hideAgent: enforceBuildMode,
       provider: selectedProvider,
       instanceId: selectedInstanceId,
       ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
@@ -989,6 +990,7 @@ export const ChatComposer = memo(
       disabledReason: traitsDisabledReason,
     });
     const providerTraitsChips = renderProviderTraitsChips({
+      hideAgent: enforceBuildMode,
       provider: selectedProvider,
       instanceId: selectedInstanceId,
       ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
