@@ -65,6 +65,7 @@ import {
   findSidebarProposedPlan,
   findLatestProposedPlan,
   hasActionableProposedPlan,
+  isPlanFollowUpReady,
   isLatestTurnSettled,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
@@ -1557,11 +1558,12 @@ export default function ChatView(props: ChatViewProps) {
     [activeLatestTurn, activeThread?.id, latestTurnSettled, threadPlanCatalog],
   );
   const planSidebarLabel = "Overview";
-  const showPlanFollowUpPrompt =
-    pendingUserInputs.length === 0 &&
-    interactionMode === "plan" &&
-    latestTurnSettled &&
-    hasActionableProposedPlan(activeProposedPlan);
+  const showPlanFollowUpPrompt = isPlanFollowUpReady({
+    hasPendingUserInput: pendingUserInputs.length > 0,
+    interactionMode,
+    latestTurnSettled,
+    hasActionableProposedPlan: hasActionableProposedPlan(activeProposedPlan),
+  });
   const activePendingApproval = pendingApprovals[0] ?? null;
   const {
     beginLocalDispatch,

@@ -2520,6 +2520,7 @@ const make = Effect.gen(function* () {
       }
 
       if (
+        (event.type === "turn.started" && shouldApplyThreadLifecycle) ||
         event.type === "turn.completed" ||
         event.type === "turn.aborted" ||
         event.type === "session.exited"
@@ -2527,8 +2528,16 @@ const make = Effect.gen(function* () {
         const detailedThread = yield* getLoadedThreadDetail();
         const finishedTurnId = toTurnId(event.turnId);
         for (const request of derivePendingThreadRequests(detailedThread?.activities ?? [])) {
-          // A delayed completion for an older turn must not clear a new prompt.
-          if (
+          // New turns supersede requests owned by previous turns. Requests for
+          // the new turn (or with unknown ownership) remain actionable.
+          if (event.type === "turn.started") {
+            if (
+              finishedTurnId === undefined ||
+              request.turnId === null ||
+              request.turnId === finishedTurnId
+            )
+              continue;
+          } else if (
             event.type !== "session.exited" &&
             (finishedTurnId === undefined || request.turnId !== finishedTurnId)
           )
@@ -2546,7 +2555,7 @@ const make = Effect.gen(function* () {
               ),
               kind: `${request.kind}.resolved`,
               tone: "info",
-              summary: "Pending request cleared because its provider work ended",
+              summary: "Pending request cleared because its provider turn ended or was superseded",
               payload: { requestId: request.requestId },
               turnId: request.turnId === null ? null : TurnId.make(request.turnId),
               createdAt: now,

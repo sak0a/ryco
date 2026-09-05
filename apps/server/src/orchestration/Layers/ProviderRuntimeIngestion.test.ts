@@ -333,6 +333,48 @@ describe("ProviderRuntimeIngestion", () => {
     };
   }
 
+  it("expires previous-turn requests on turn start while retaining current requests", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    for (const [requestId, turnId] of [
+      ["old-input", "old-turn"],
+      ["current-input", "new-turn"],
+    ]) {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make(`seed-${requestId}`),
+          threadId,
+          activity: {
+            id: asEventId(`seed-${requestId}`),
+            kind: "user-input.requested",
+            turnId: asTurnId(turnId!),
+            payload: { requestId },
+            tone: "info",
+            summary: "Question",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+      );
+    }
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("superseding-turn"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId,
+      turnId: asTurnId("new-turn"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+    await harness.drain();
+    const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId)!;
+    const resolutions = thread.activities.filter(
+      (activity) => activity.kind === "user-input.resolved",
+    );
+    expect(resolutions.map((activity) => activity.payload)).toEqual([{ requestId: "old-input" }]);
+    expect(derivePendingThreadRequestState(thread.activities).pendingUserInputCount).toBe(1);
+  });
+
   it("maps turn started/completed events into thread session updates", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

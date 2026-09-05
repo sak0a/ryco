@@ -1,3 +1,4 @@
+import { deriveThreadActivityStatus } from "./threadActivityStatus.ts";
 import type {
   EnvironmentId,
   ProjectId,
@@ -200,7 +201,8 @@ function settlementInput(input: {
     latestTurnCompletedAt: input.thread.latestTurn?.completedAt ?? null,
     latestUserMessageAt: input.thread.latestUserMessageAt,
     hasPendingApprovals: input.thread.hasPendingApprovals,
-    hasPendingUserInput: input.thread.hasPendingUserInput || input.thread.hasActionableProposedPlan,
+    hasPendingUserInput:
+      input.thread.hasPendingUserInput || deriveThreadActivityStatus(input.thread) === "plan-ready",
     hasLocalQueuedMessage: input.hasLocalQueuedMessage,
     deliveryUnknown: input.deliveryUnknown,
     prState: input.worktree?.prState ?? null,
