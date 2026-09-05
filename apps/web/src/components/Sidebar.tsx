@@ -64,7 +64,6 @@ import { useModelPickerOpen } from "../modelPickerOpenState";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -125,6 +124,7 @@ import { useDesktopWorkspaceState } from "../platform/desktopWorkspace";
 import { useHostedWorkspaceState } from "../hostedHub/hostedConnectionCoordinator";
 import { useWsConnectionStatus } from "../rpc/wsConnectionState";
 import { useMessageQueueStore } from "../messageQueueStore";
+import { useSidebarThreadPrewarm } from "./sidebar/hooks/useSidebarThreadPrewarm";
 
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
@@ -1039,17 +1039,7 @@ export default function Sidebar() {
     [prewarmedSidebarThreadKeys],
   );
 
-  useEffect(() => {
-    const releases = prewarmedSidebarThreadRefs.map((ref) =>
-      retainThreadDetailSubscription(ref.environmentId, ref.threadId),
-    );
-
-    return () => {
-      for (const release of releases) {
-        release();
-      }
-    };
-  }, [prewarmedSidebarThreadRefs]);
+  useSidebarThreadPrewarm(sidebarMode === "projects", prewarmedSidebarThreadRefs);
 
   useEffect(() => {
     updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);
@@ -1312,11 +1302,7 @@ export default function Sidebar() {
         onClick={startNewThreadFromSidebar}
       />
 
-      <div
-        aria-hidden={sidebarMode !== "projects"}
-        className={sidebarMode === "projects" ? "contents" : "hidden"}
-        inert={sidebarMode !== "projects"}
-      >
+      {sidebarMode === "projects" ? (
         <SidebarProjectDialogProvider
           projectGroupingSettings={projectGroupingSettings}
           updateSettings={updateSettings}
@@ -1367,12 +1353,7 @@ export default function Sidebar() {
             )}
           />
         </SidebarProjectDialogProvider>
-      </div>
-      <div
-        aria-hidden={sidebarMode !== "inbox"}
-        className={sidebarMode === "inbox" ? "contents" : "hidden"}
-        inert={sidebarMode !== "inbox"}
-      >
+      ) : (
         <InboxSidebar
           activeThreadKey={activeRouteThreadKey}
           aiFocusEnabled={aiFocusEnabled}
@@ -1386,7 +1367,7 @@ export default function Sidebar() {
           threads={sidebarThreads}
           worktrees={sidebarWorktrees}
         />
-      </div>
+      )}
 
       <SidebarSeparator />
       <SidebarChromeFooter />
