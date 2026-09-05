@@ -407,7 +407,7 @@ describe("openCodexThread", () => {
     ]);
   });
 
-  it("falls back to thread/start when resume fails recoverably", async () => {
+  it("preserves thread identity when a stored thread cannot be resumed", async () => {
     const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
     const started = makeThreadOpenResponse("fresh-thread");
     const client = {
@@ -428,7 +428,7 @@ describe("openCodexThread", () => {
       },
     };
 
-    const opened = await Effect.runPromise(
+    const error = await Effect.runPromise(
       openCodexThread({
         client,
         threadId: ThreadId.make("thread-1"),
@@ -437,13 +437,13 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: "stale-thread",
-      }),
+      }).pipe(Effect.flip),
     );
 
-    assert.equal(opened.thread.id, "fresh-thread");
+    assert.equal(error.message, "thread not found");
     assert.deepStrictEqual(
       calls.map((call) => call.method),
-      ["thread/resume", "thread/start"],
+      ["thread/resume"],
     );
   });
 

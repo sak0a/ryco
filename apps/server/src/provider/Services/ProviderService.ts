@@ -33,7 +33,7 @@ import { Context } from "effect";
 import type { Effect, Option, Stream } from "effect";
 
 import type { ProviderServiceError } from "../Errors.ts";
-import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
+import type { ProviderAdapterCapabilities, ProviderThreadHistory } from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
 import type { ProviderRuntimeBinding } from "./ProviderSessionDirectory.ts";
 
@@ -65,6 +65,14 @@ export interface ProviderRuntimeEventSummary {
  * ProviderServiceShape - Service API for provider session and turn orchestration.
  */
 export interface ProviderServiceShape {
+  /** Read-only history recovery, stamped with the binding that authorized the read. */
+  readonly readThreadHistory?: (threadId: ThreadId) => Effect.Effect<
+    Option.Option<{
+      readonly binding: ProviderRuntimeBinding;
+      readonly history: ProviderThreadHistory;
+    }>,
+    ProviderServiceError
+  >;
   /**
    * Start a provider session.
    */

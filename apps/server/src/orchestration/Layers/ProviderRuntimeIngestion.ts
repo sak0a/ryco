@@ -20,7 +20,10 @@ import {
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
 } from "@ryco/contracts";
-import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
+import { Cache, Cause, Deferred, Duration, Effect, Layer, Option, Semaphore, Stream } from "effect";
+import type { ProviderRuntimeBinding } from "../../provider/Services/ProviderSessionDirectory.ts";
+import type { ProviderThreadHistory } from "../../provider/Services/ProviderAdapter.ts";
+import { historyMessagesToRestore, missingHistoryActivities } from "../providerHistoryRecovery.ts";
 import { makeDrainableWorker } from "@ryco/shared/DrainableWorker";
 import { losslessBackpressureQueuePolicy } from "@ryco/shared/QueuePolicy";
 import { readEnv } from "@ryco/shared/runtimeEnv";
@@ -137,6 +140,14 @@ type TurnStartRequestedDomainEvent = Extract<
 >;
 
 type RuntimeIngestionInput =
+  | {
+      source: "history";
+      threadId: ThreadId;
+      expectedUpdatedAt: string;
+      binding: ProviderRuntimeBinding;
+      history: ProviderThreadHistory;
+      done: Deferred.Deferred<void>;
+    }
   | {
       source: "runtime";
       event: ProviderRuntimeEvent;
@@ -1955,6 +1966,21 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      if (
+        event.turnId &&
+        ((event.type === "content.delta" && event.payload.streamKind === "assistant_text") ||
+          ((event.type === "item.started" ||
+            event.type === "item.completed" ||
+            event.type === "item.updated") &&
+            event.payload.itemType === "assistant_message")) &&
+        Option.isSome(
+          yield* Cache.getOption(
+            restoredTurns,
+            `${event.threadId}:${event.runtimeSessionId}:${event.turnId}`,
+          ),
+        )
+      )
+        return;
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 
@@ -2724,16 +2750,94 @@ const make = Effect.gen(function* () {
 
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
 
+  const restoredTurns = yield* Cache.make<string, true>({
+    capacity: 10_000,
+    timeToLive: "120 minutes",
+    lookup: () => Effect.succeed(true as const),
+  });
+
+  const processHistory = (input: Extract<RuntimeIngestionInput, { source: "history" }>) =>
+    Effect.gen(function* () {
+      const thread = yield* resolveThreadDetail(input.threadId);
+      if (
+        !thread ||
+        thread.updatedAt !== input.expectedUpdatedAt ||
+        !input.binding.runtimeSessionId ||
+        !input.binding.providerInstanceId ||
+        thread.session?.runtimeSessionId !== input.binding.runtimeSessionId ||
+        thread.session.providerInstanceId !== input.binding.providerInstanceId
+      )
+        return;
+      const now = new Date(Math.max(Date.now(), Date.parse(thread.updatedAt) + 1)).toISOString();
+      const messages = historyMessagesToRestore(thread, input.history, now);
+      const activities = missingHistoryActivities(
+        thread.activities,
+        input.history.items.flatMap((event) => runtimeEventToActivities(event)),
+      );
+      for (const request of derivePendingThreadRequests(thread.activities)) {
+        if (
+          request.turnId === null ||
+          !input.history.completedTurnIds.includes(TurnId.make(request.turnId))
+        )
+          continue;
+        activities.push({
+          id: EventId.make(`history:${thread.id}:resolved:${request.kind}:${request.requestId}`),
+          kind: `${request.kind}.resolved`,
+          tone: "info",
+          summary: "Pending request cleared because its provider turn ended",
+          payload: { requestId: request.requestId },
+          turnId: TurnId.make(request.turnId),
+          createdAt: now,
+        });
+      }
+      const settlesTurn =
+        thread.session.activeTurnId !== null &&
+        input.history.completedTurnIds.includes(thread.session.activeTurnId);
+      if (messages.length > 0 || activities.length > 0 || settlesTurn)
+        yield* orchestrationEngine.dispatch({
+          type: "thread.history.restore",
+          commandId: CommandId.make(`history:${crypto.randomUUID()}`),
+          threadId: thread.id,
+          providerInstanceId: input.binding.providerInstanceId,
+          runtimeSessionId: input.binding.runtimeSessionId,
+          expectedUpdatedAt: thread.updatedAt,
+          messages,
+          activities,
+          completedTurnIds: input.history.completedTurnIds,
+          failedTurnIds: input.history.failedTurnIds,
+          createdAt: now,
+        });
+      // This worker also owns live buffers. Retire only confirmed completed
+      // turns after the durable repair, so delayed flushes cannot duplicate it.
+      for (const turnId of input.history.completedTurnIds) {
+        yield* Cache.set(
+          restoredTurns,
+          `${thread.id}:${input.binding.runtimeSessionId}:${turnId}`,
+          true,
+        );
+        const ids = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
+        yield* Effect.forEach(ids, clearAssistantMessageState, { discard: true });
+        yield* clearAssistantMessageIdsForTurn(thread.id, turnId);
+        yield* clearAssistantSegmentStateForTurn(thread.id, turnId);
+        for (const [key, buffer] of liveAssistantDeltaBuffers) {
+          if (buffer.threadId === thread.id && buffer.turnId === turnId)
+            liveAssistantDeltaBuffers.delete(key);
+        }
+      }
+    }).pipe(Effect.ensuring(Deferred.succeed(input.done, undefined)));
+
   const processInput = (input: RuntimeIngestionInput) =>
-    input.source === "runtime"
-      ? processRuntimeEvent(input.event)
-      : input.source === "domain"
-        ? processDomainEvent(input.event)
-        : flushLiveAssistantDeltaBuffer({
-            key: input.key,
-            generation: input.generation,
-            commandTag: "assistant-delta-coalesced-interval",
-          }).pipe(Effect.asVoid);
+    input.source === "history"
+      ? processHistory(input)
+      : input.source === "runtime"
+        ? processRuntimeEvent(input.event)
+        : input.source === "domain"
+          ? processDomainEvent(input.event)
+          : flushLiveAssistantDeltaBuffer({
+              key: input.key,
+              generation: input.generation,
+              commandTag: "assistant-delta-coalesced-interval",
+            }).pipe(Effect.asVoid);
 
   const processInputSafely = (input: RuntimeIngestionInput) =>
     processInput(input).pipe(
@@ -2743,9 +2847,11 @@ const make = Effect.gen(function* () {
         }
         return Effect.logWarning("provider runtime ingestion failed to process event", {
           source: input.source,
-          ...(input.source === "liveAssistantFlush"
-            ? { flushKey: input.key, flushGeneration: input.generation }
-            : { eventId: input.event.eventId, eventType: input.event.type }),
+          ...(input.source === "history"
+            ? { threadId: input.threadId }
+            : input.source === "liveAssistantFlush"
+              ? { flushKey: input.key, flushGeneration: input.generation }
+              : { eventId: input.event.eventId, eventType: input.event.type }),
           cause: Cause.pretty(cause),
         });
       }),
@@ -2759,6 +2865,52 @@ const make = Effect.gen(function* () {
     process: processInputSafely,
   });
   enqueueRuntimeInput = worker.enqueue;
+
+  const historyAdmission = yield* Semaphore.make(2);
+  const historyReads = new Set<ThreadId>();
+  const historyLastRead = yield* Cache.make<ThreadId, number>({
+    capacity: 1_000,
+    timeToLive: "30 seconds",
+    lookup: () => Effect.succeed(0),
+  });
+  const reconcileThread = (threadId: ThreadId) =>
+    Effect.suspend(() => {
+      if (!providerService.readThreadHistory || historyReads.has(threadId)) return Effect.void;
+      historyReads.add(threadId);
+      return Effect.gen(function* () {
+        if (Option.isSome(yield* Cache.getOption(historyLastRead, threadId))) return;
+        yield* historyAdmission
+          .withPermit(
+            Effect.gen(function* () {
+              const thread = yield* resolveThreadShell(threadId);
+              if (!thread?.session) return;
+              const snapshot = yield* providerService.readThreadHistory!(threadId);
+              if (Option.isNone(snapshot)) return;
+              const done = yield* Deferred.make<void>();
+              yield* worker.enqueue({
+                source: "history",
+                threadId,
+                expectedUpdatedAt: thread.updatedAt,
+                ...snapshot.value,
+                done,
+              });
+              yield* Deferred.await(done);
+            }),
+          )
+          .pipe(
+            Effect.timeoutOption("25 seconds"),
+            Effect.asVoid,
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : Effect.logWarning("Provider history recovery failed; preserving local thread", {
+                    threadId,
+                  }),
+            ),
+            Effect.ensuring(Cache.set(historyLastRead, threadId, Date.now())),
+          );
+      }).pipe(Effect.ensuring(Effect.sync(() => historyReads.delete(threadId))));
+    });
 
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
@@ -2778,6 +2930,7 @@ const make = Effect.gen(function* () {
     });
 
   return {
+    reconcileThread,
     start,
     // Drain pending runtime work, flush any remaining live assistant text,
     // then drain again for scheduled flush inputs that landed during shutdown.

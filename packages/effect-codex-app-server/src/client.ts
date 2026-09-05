@@ -18,6 +18,9 @@ import {
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
 
 export interface CodexAppServerClientOptions {
+  readonly onTermination?: CodexProtocol.CodexAppServerPatchedProtocolOptions["onTermination"];
+  readonly requestTimeoutMs?: number;
+  readonly onNotificationError?: (method: string) => Effect.Effect<void>;
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
   readonly logger?: (
@@ -151,7 +154,13 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
         Effect.flatMap((decoded) =>
           Effect.forEach(handlers, (handler) => handler(decoded), { discard: true }),
         ),
-        Effect.catch(() => Effect.void),
+        Effect.catch(() =>
+          Effect.logWarning("Codex notification could not be processed", {
+            method: notification.method,
+          }).pipe(
+            Effect.andThen(options.onNotificationError?.(notification.method) ?? Effect.void),
+          ),
+        ),
       );
     }
 
@@ -188,6 +197,10 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
     ...(options.logIncoming !== undefined ? { logIncoming: options.logIncoming } : {}),
     ...(options.logOutgoing !== undefined ? { logOutgoing: options.logOutgoing } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
+    ...(options.onTermination ? { onTermination: options.onTermination } : {}),
+    ...(options.requestTimeoutMs !== undefined
+      ? { requestTimeoutMs: options.requestTimeoutMs }
+      : {}),
     onNotification: dispatchNotification,
     onRequest: dispatchRequest,
   });
