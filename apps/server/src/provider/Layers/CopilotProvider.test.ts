@@ -2,7 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { CopilotSettings } from "@ryco/contracts";
 import { Schema } from "effect";
 
-import { getCopilotFallbackModels } from "./CopilotProvider.ts";
+import type { ModelInfo } from "@github/copilot-sdk";
+
+import { mapCopilotModel, getCopilotFallbackModels } from "./CopilotProvider.ts";
 
 describe("getCopilotFallbackModels", () => {
   it("exposes built-in Copilot models with reasoning effort capabilities", () => {
@@ -42,4 +44,23 @@ describe("getCopilotFallbackModels", () => {
       "custom-copilot-model",
     ]);
   });
+});
+
+describe("mapCopilotModel", () => {
+  it.each([128_000, 1_000_000, 0, -1, Number.NaN, 1.5])(
+    "maps only valid context limits: %s",
+    (limit) => {
+      const model = mapCopilotModel({
+        id: "test-model",
+        name: "Test Model",
+        capabilities: {
+          supports: { vision: false, reasoningEffort: false },
+          limits: { max_context_window_tokens: limit },
+        },
+      } as ModelInfo);
+      expect(model.maxContextTokens).toBe(
+        Number.isSafeInteger(limit) && limit > 0 ? limit : undefined,
+      );
+    },
+  );
 });

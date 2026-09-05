@@ -162,4 +162,47 @@ describe("contextWindow", () => {
     expect(deriveContextWindowUsage(activities, null, 12.5).maxTokens).toBeNull();
     expect(deriveContextWindowUsage(activities, null, null).maxTokens).toBeNull();
   });
+  it("preserves the configured limit after usage arrives without a maximum", () => {
+    expect(
+      deriveContextWindowUsage(
+        [makeActivity("usage", "context-window.updated", { usedTokens: 50_000 })],
+        "200k",
+        1_000_000,
+      ),
+    ).toMatchObject({ usedTokens: 50_000, maxTokens: 200_000, usedPercentage: 25 });
+  });
+
+  it("uses the latest snapshot, including a zero reset, rather than accumulating usage", () => {
+    const activities = [
+      makeActivity("old", "context-window.updated", { usedTokens: 90_000, maxTokens: 100_000 }),
+      makeActivity("new", "context-window.updated", { usedTokens: 20_000, maxTokens: 100_000 }),
+    ];
+    expect(deriveContextWindowUsage(activities, null)).toMatchObject({
+      usedTokens: 20_000,
+      usedPercentage: 20,
+    });
+    activities.push(
+      makeActivity("reset", "context-window.updated", { usedTokens: 0, maxTokens: 100_000 }),
+    );
+    expect(deriveContextWindowUsage(activities, null)).toMatchObject({
+      usedTokens: 0,
+      maxTokens: 100_000,
+      usedPercentage: 0,
+    });
+  });
+
+  it("uses a model fallback for invalid live limits and clamps only the percentage", () => {
+    expect(
+      deriveContextWindowUsage(
+        [makeActivity("usage", "context-window.updated", { usedTokens: 120_000, maxTokens: 0 })],
+        null,
+        100_000,
+      ),
+    ).toMatchObject({
+      usedTokens: 120_000,
+      maxTokens: 100_000,
+      remainingTokens: 0,
+      usedPercentage: 100,
+    });
+  });
 });

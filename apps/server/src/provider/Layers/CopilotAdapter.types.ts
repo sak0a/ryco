@@ -94,6 +94,8 @@ export interface ActiveCopilotSession {
   activeTurnId: TurnId | undefined;
   activeMessageId: string | undefined;
   lastUsage: ThreadTokenUsageSnapshot | undefined;
+  /** Authoritative session gauge, independent of per-call billing usage. */
+  contextUsage?: Pick<ThreadTokenUsageSnapshot, "usedTokens" | "maxTokens">;
   stopped: boolean;
 }
 

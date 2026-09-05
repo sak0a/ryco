@@ -866,13 +866,13 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
       break;
     }
     case "usage_update": {
-      if (upd.used > 0) {
+      if (Number.isSafeInteger(upd.used) && upd.used >= 0) {
         events.push({
           _tag: "UsageUpdated",
           usage: {
             usedTokens: upd.used,
             lastUsedTokens: upd.used,
-            ...(upd.size > 0 ? { maxTokens: upd.size } : {}),
+            ...(Number.isSafeInteger(upd.size) && upd.size > 0 ? { maxTokens: upd.size } : {}),
           },
           rawPayload: params,
         });

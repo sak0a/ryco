@@ -741,7 +741,7 @@ export const ChatComposer = memo(
       composerProviderState.modelOptionsForDispatch?.find(
         (selection) => selection.id === "contextWindow",
       )?.value ?? null;
-    // Drivers that report a per-model context limit (OpenCode) fill the
+    // Drivers that report a per-model context limit (OpenCode, Copilot) fill the
     // meter's max before the user overrides it via the contextWindow
     // capability option or the provider sends a limit with usage.
     const selectedModelMaxContextTokens =

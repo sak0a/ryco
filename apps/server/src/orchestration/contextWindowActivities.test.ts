@@ -30,11 +30,18 @@ describe("pruneStaleContextWindowActivities", () => {
 
   it("removes unusable context gauges when no valid value exists", () => {
     const result = pruneStaleContextWindowActivities([
-      activity("1", "context-window.updated", { usedTokens: 0 }),
+      activity("1", "context-window.updated", { usedTokens: -1 }),
       activity("2", "context-window.updated", { usedTokens: Number.NaN }),
       activity("3", "tool.completed", {}),
     ]);
 
     expect(result.map((entry) => entry.id)).toEqual(["3"]);
+  });
+  it("retains an explicit zero reset instead of stale usage", () => {
+    const result = pruneStaleContextWindowActivities([
+      activity("1", "context-window.updated", { usedTokens: 100 }),
+      activity("2", "context-window.updated", { usedTokens: 0, maxTokens: 128_000 }),
+    ]);
+    expect(result.map((entry) => entry.id)).toEqual(["2"]);
   });
 });

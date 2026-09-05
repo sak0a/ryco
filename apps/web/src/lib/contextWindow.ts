@@ -82,11 +82,15 @@ export function deriveLatestContextWindowSnapshot(
 
     const payload = asRecord(activity.payload);
     const usedTokens = asFiniteNumber(payload?.usedTokens);
-    if (usedTokens === null || usedTokens <= 0) {
+    if (usedTokens === null || usedTokens < 0) {
       continue;
     }
 
-    const maxTokens = asFiniteNumber(payload?.maxTokens);
+    const reportedMaxTokens = asFiniteNumber(payload?.maxTokens);
+    const maxTokens =
+      reportedMaxTokens !== null && Number.isSafeInteger(reportedMaxTokens) && reportedMaxTokens > 0
+        ? reportedMaxTokens
+        : null;
     const usedPercentage =
       maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
     const remainingTokens =
@@ -121,7 +125,7 @@ export function deriveLatestContextWindowSnapshot(
 
 /**
  * Fill in a missing context-window size from a fallback source (the
- * selected model's reported `maxContextTokens`). Live usage snapshots
+ * configured context window or selected model's `maxContextTokens`). Live usage snapshots
  * from some drivers carry no `maxTokens`; without this they'd render as
  * a raw token count even when the model's limit is known. Returns the
  * input untouched when a limit is already present or the fallback is
@@ -155,10 +159,12 @@ export function deriveContextWindowUsage(
   configuredContextWindow: string | null | undefined,
   modelMaxContextTokens: number | null = null,
 ): ContextWindowUsage {
+  const fallbackMaxTokens =
+    parseContextWindowTokenLimit(configuredContextWindow) ?? modelMaxContextTokens;
   return withContextWindowLimitFallback(
     deriveLatestContextWindowSnapshot(activities) ??
-      createInitialContextWindowUsage(parseContextWindowTokenLimit(configuredContextWindow)),
-    modelMaxContextTokens,
+      createInitialContextWindowUsage(fallbackMaxTokens),
+    fallbackMaxTokens,
   );
 }
 

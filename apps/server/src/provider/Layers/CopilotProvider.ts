@@ -83,12 +83,14 @@ function mapCopilotModelCapabilities(model: ModelInfo): ModelCapabilities {
   });
 }
 
-function mapCopilotModel(model: ModelInfo): ServerProviderModel {
+export function mapCopilotModel(model: ModelInfo): ServerProviderModel {
+  const maxContextTokens = model.capabilities.limits?.max_context_window_tokens;
   return {
     slug: model.id,
     name: model.name,
     isCustom: false,
     capabilities: mapCopilotModelCapabilities(model),
+    ...(Number.isSafeInteger(maxContextTokens) && maxContextTokens > 0 ? { maxContextTokens } : {}),
   };
 }
 

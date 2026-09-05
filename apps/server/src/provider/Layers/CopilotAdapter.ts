@@ -30,7 +30,6 @@ import {
   type PendingUserInputRequest,
   approvalDecisionToPermissionResult,
   eventBase,
-  normalizeUsage,
   requestDetailFromPermissionRequest,
   requestTypeFromPermissionRequest,
   selectionTargetsCopilotInstance,
@@ -204,10 +203,6 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       event.type === "session.error"
     ) {
       session.turns.at(-1)?.items.push(event);
-    }
-
-    if (event.type === "assistant.usage") {
-      session.lastUsage = normalizeUsage(event);
     }
 
     if (event.type === "session.error") {

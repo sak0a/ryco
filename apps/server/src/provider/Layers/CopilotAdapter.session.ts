@@ -306,6 +306,8 @@ export const makeStartSession =
         attachSession: (nextSession) => {
           record.unsubscribe();
           record.session = nextSession;
+          delete record.contextUsage;
+          record.lastUsage = undefined;
           record.unsubscribe = nextSession.on((event) => {
             if (event.type === "assistant.turn_start") {
               activeTurn = TurnId.make(event.data.turnId);
