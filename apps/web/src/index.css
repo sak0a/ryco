@@ -2015,3 +2015,26 @@ label:has(> select#reasoning-effort) select {
     -webkit-text-fill-color: currentColor;
   }
 }
+
+/* Keep the desktop draft mounted while reclaiming transcript space at rest. */
+[data-chat-composer-compact] [data-testid="composer-editor"] {
+  transition:
+    min-height 220ms ease,
+    max-height 220ms ease;
+}
+
+[data-chat-composer-compact="true"] [data-testid="composer-editor"] {
+  min-height: 1.625rem;
+  max-height: 1.625rem;
+  overflow: hidden;
+}
+
+[data-chat-composer-compact="true"] [data-testid="composer-editor"] + div {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-chat-composer-compact] [data-testid="composer-editor"] {
+    transition: none;
+  }
+}

@@ -3122,6 +3122,59 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("shrinks the desktop composer at rest and while reading, then expands without losing the draft", async () => {
+    const mounted = await mountChatView({
+      viewport: WIDE_FOOTER_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-compact-composer" as MessageId,
+        targetText: "compact composer",
+      }),
+    });
+
+    try {
+      const editor = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="composer-editor"]'),
+        "Unable to find the composer editor.",
+      );
+      const surface = editor.closest<HTMLElement>("[data-chat-composer-compact]")!;
+      (document.activeElement as HTMLElement | null)?.blur();
+      await vi.waitFor(() => expect(editor.getBoundingClientRect().height).toBeCloseTo(26, 0));
+
+      surface.dispatchEvent(
+        new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }),
+      );
+      await vi.waitFor(() => expect(editor.getBoundingClientRect().height).toBeGreaterThan(60));
+      surface.dispatchEvent(
+        new PointerEvent("pointerout", {
+          bubbles: true,
+          pointerType: "mouse",
+          relatedTarget: document.body,
+        }),
+      );
+      await vi.waitFor(() => expect(editor.getBoundingClientRect().height).toBeCloseTo(26, 0));
+
+      editor.focus();
+      await vi.waitFor(() => expect(editor.getBoundingClientRect().height).toBeGreaterThan(60));
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Keep this draft");
+      await vi.waitFor(() => expect(editor.textContent).toContain("Keep this draft"));
+      const timelineRow = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-message-id]"),
+        "Unable to find a timeline message.",
+      );
+      const scrollContainer = findScrollableAncestor(timelineRow)!;
+      scrollContainer.dispatchEvent(new WheelEvent("wheel", { deltaY: -240, bubbles: true }));
+      await vi.waitFor(() => expect(editor.getBoundingClientRect().height).toBeCloseTo(26, 0));
+      expect(document.activeElement).toBe(editor);
+      expect(editor.textContent).toContain("Keep this draft");
+
+      editor.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+      await vi.waitFor(() => expect(editor.getBoundingClientRect().height).toBeGreaterThan(60));
+      expect(document.querySelector('[data-testid="composer-editor"]')).toBe(editor);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps the active-thread composer on its stable outer width while phones remain full width", async () => {
     const mounted = await mountChatView({
       viewport: WIDE_FOOTER_VIEWPORT,
