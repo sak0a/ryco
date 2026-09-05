@@ -1,3 +1,4 @@
+import { InboxContextHandoffPreview } from "./InboxContextHandoffPreview";
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type {
   Project,
@@ -12,6 +13,7 @@ import {
   ChevronRightIcon,
   FolderIcon,
   GitBranchIcon,
+  GitForkIcon,
   GitPullRequestIcon,
   LoaderCircleIcon,
   InfoIcon,
@@ -25,6 +27,7 @@ import { readEnvironmentApi } from "../../environmentApi";
 import { newCommandId } from "../../lib/utils";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { PROVIDER_ICON_BY_PROVIDER } from "../chat/providerIconUtils";
+import { ProjectFavicon } from "../ProjectFavicon";
 import { Input } from "../ui/input";
 import { SidebarContent } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
@@ -88,9 +91,24 @@ function InboxThreadRow(props: {
   readonly onSetSettlement: (row: InboxSidebarRow, settled: boolean) => Promise<boolean>;
 }) {
   const [pending, setPending] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const ProviderIcon = props.row.providerDriver
     ? (PROVIDER_ICON_BY_PROVIDER[props.row.providerDriver] ?? null)
     : null;
+  const WorkspaceIcon = props.row.isWorktree ? GitForkIcon : GitBranchIcon;
+  const locationLabel = props.row.isWorktree ? "Worktree" : "Original directory";
+  const projectIcon = props.row.project ? (
+    <ProjectFavicon
+      key={`${props.row.environmentId}:${props.row.project.id}:${props.row.project.customAvatarContentHash ?? ""}`}
+      environmentId={props.row.environmentId}
+      cwd={props.row.project.cwd}
+      projectId={props.row.project.id}
+      customAvatarContentHash={props.row.project.customAvatarContentHash ?? null}
+      className="size-4 shrink-0"
+    />
+  ) : (
+    <FolderIcon aria-hidden className="size-4 shrink-0 opacity-60" />
+  );
   const actionLabel = props.row.settled ? "Move to Active" : "Settle";
   const actionEnabled = props.row.settlementActionEnabled && !pending;
   const actionTitle = actionEnabled
@@ -99,6 +117,7 @@ function InboxThreadRow(props: {
   const timestamp = props.row.settled
     ? (props.row.effectiveSettlementTimestamp ?? props.row.updatedAt)
     : props.row.updatedAt;
+  const showPopupStatus = props.row.state !== "idle";
   const focusExplanation = props.row.focus ? describeInboxFocus(props.row.focus) : null;
   const handleSettlement = async () => {
     if (!actionEnabled) return;
@@ -119,7 +138,7 @@ function InboxThreadRow(props: {
     >
       {props.row.settled ? (
         <>
-          <FolderIcon aria-hidden className="size-3.5 shrink-0 opacity-60" />
+          {projectIcon}
           <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{props.row.title}</span>
           {ProviderIcon ? <ProviderIcon className="size-3.5 shrink-0 opacity-65" /> : null}
           <span className="shrink-0 tabular-nums text-[10px] opacity-60 transition-opacity group-hover/inbox-row:opacity-0 group-focus-within/inbox-row:opacity-0">
@@ -130,15 +149,15 @@ function InboxThreadRow(props: {
         <>
           <div className="flex w-full min-w-0 items-center gap-2 text-[10px] leading-4 text-muted-foreground/70">
             <span className="flex min-w-0 flex-1 items-center gap-1.5">
-              <ServerIcon aria-hidden className="size-3 shrink-0 opacity-70" />
+              {projectIcon}
               <span className="truncate">
-                <span className="font-medium text-sidebar-foreground/75">
-                  {props.row.machineLabel}
+                <span className="text-xs font-medium text-sidebar-foreground/85">
+                  {props.row.projectLabel}
                 </span>
                 <span aria-hidden className="px-1 text-muted-foreground/40">
                   ·
                 </span>
-                <span>{props.row.projectLabel}</span>
+                <span>{props.row.machineLabel}</span>
               </span>
             </span>
             <span className="shrink-0 tabular-nums text-muted-foreground/60 transition-opacity group-hover/inbox-row:opacity-0 group-focus-within/inbox-row:opacity-0">
@@ -158,8 +177,12 @@ function InboxThreadRow(props: {
               {props.row.statusLabel}
             </span>
             <span aria-hidden className="h-3 w-px shrink-0 bg-sidebar-border/60" />
-            <span className="flex min-w-0 flex-1 items-center gap-1 text-muted-foreground/70">
-              <GitBranchIcon aria-hidden className="size-3 shrink-0 opacity-70" />
+            <span
+              title={locationLabel}
+              aria-label={`${locationLabel}: ${props.row.workspaceLabel}`}
+              className="flex min-w-0 flex-1 items-center gap-1 text-muted-foreground/70"
+            >
+              <WorkspaceIcon aria-hidden className="size-3 shrink-0 opacity-70" />
               <span className="truncate">{props.row.workspaceLabel}</span>
             </span>
             {props.row.trustLabel ? (
@@ -196,28 +219,46 @@ function InboxThreadRow(props: {
       className={`group/inbox-row relative [content-visibility:auto] ${props.row.settled ? "[contain-intrinsic-block-size:auto_2rem]" : "[contain-intrinsic-block-size:auto_4.75rem]"}`}
       data-testid="inbox-thread-row-shell"
     >
-      <Tooltip>
+      <Tooltip onOpenChange={setPreviewOpen}>
         <TooltipTrigger closeDelay={80} delay={140} render={navigationButton} />
-        <TooltipPopup align="start" className="w-72 p-2" side="right" sideOffset={8}>
+        <TooltipPopup align="start" className="w-80 p-2.5" side="right" sideOffset={8}>
           <div className="space-y-1.5 text-left">
-            <p className="whitespace-normal text-sm font-semibold leading-5 text-popover-foreground">
-              {props.row.title}
-            </p>
+            <div className="flex min-w-0 items-center gap-3">
+              <p
+                className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-popover-foreground"
+                data-testid="inbox-preview-title"
+              >
+                {props.row.title}
+              </p>
+              <span
+                className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[10px] leading-5 tabular-nums ${showPopupStatus ? statusTone(props.row.state) : "text-muted-foreground"}`}
+                data-testid="inbox-preview-status"
+              >
+                {showPopupStatus ? (
+                  <span aria-hidden className="size-1.5 rounded-full bg-current opacity-80" />
+                ) : null}
+                {showPopupStatus ? props.row.statusLabel : formatRelativeTimeLabel(timestamp)}
+              </span>
+            </div>
             <div className="space-y-1 text-[11px] leading-4 text-muted-foreground">
               <div className="flex items-center gap-2">
-                <FolderIcon aria-hidden className="size-3.5 shrink-0" />
+                {projectIcon}
                 <span className="truncate">{props.row.projectLabel}</span>
               </div>
               <div className="flex items-center gap-2">
                 <ServerIcon aria-hidden className="size-3.5 shrink-0" />
                 <span className="truncate">{props.row.machineLabel}</span>
               </div>
-              {props.row.branchLabel ? (
-                <div className="flex items-center gap-2">
-                  <GitBranchIcon aria-hidden className="size-3.5 shrink-0" />
-                  <span className="truncate">{props.row.branchLabel}</span>
-                </div>
-              ) : null}
+              <div className="flex items-center gap-2">
+                <WorkspaceIcon
+                  aria-label={locationLabel}
+                  role="img"
+                  className="size-3.5 shrink-0"
+                />
+                <span className="truncate">
+                  {props.row.branchLabel ?? props.row.workspaceLabel}
+                </span>
+              </div>
               {props.row.providerLabel ? (
                 <div className="flex items-center gap-2">
                   {ProviderIcon ? (
@@ -242,11 +283,13 @@ function InboxThreadRow(props: {
                   </span>
                 </div>
               ) : null}
-              {props.row.statusLabel !== "Idle" ? (
-                <div className={`flex items-center gap-2 ${statusTone(props.row.state)}`}>
-                  <span aria-hidden className="size-1.5 rounded-full bg-current" />
-                  <span>{props.row.statusLabel}</span>
-                </div>
+              {previewOpen && props.row.modelSelection ? (
+                <InboxContextHandoffPreview
+                  key={`${props.row.key}:${props.row.modelSelection.instanceId}:${props.row.modelSelection.model}:${props.row.updatedAt}`}
+                  environmentId={props.row.environmentId}
+                  threadId={props.row.threadId}
+                  selection={props.row.modelSelection}
+                />
               ) : null}
               {focusExplanation ? (
                 <div className="mt-1 border-t border-border/60 pt-1.5">
@@ -259,7 +302,7 @@ function InboxThreadRow(props: {
                   </div>
                   {focusExplanation.aiGenerated && props.row.focus?.ranking ? (
                     <div className="ml-5 mt-1 whitespace-normal text-[10px] text-muted-foreground/75">
-                      {props.row.focus.ranking.modelSelection.model} · ranked{" "}
+                      {props.row.rankingModelLabel ? `${props.row.rankingModelLabel} · ` : ""}ranked{" "}
                       {formatRelativeTimeLabel(props.row.focus.ranking.rankedAt)}
                     </div>
                   ) : null}

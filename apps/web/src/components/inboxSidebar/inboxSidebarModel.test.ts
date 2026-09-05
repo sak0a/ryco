@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { ServerProvider } from "@ryco/contracts";
 import { resolveThreadStatusPill } from "../Sidebar.logic";
 import type {
   Project,
@@ -151,6 +153,47 @@ function build(input: {
 }
 
 describe("buildInboxSidebarSections", () => {
+  it("resolves model aliases from the owning environment and retains project identity", () => {
+    const provider = Schema.decodeUnknownSync(ServerProvider)({
+      instanceId: "claudeAgent",
+      driver: "claudeAgent",
+      enabled: true,
+      installed: true,
+      version: "1.0.0",
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-08-25T00:00:00.000Z",
+      models: [
+        {
+          slug: "claude-opus-5",
+          aliases: ["opus"],
+          name: "Claude Opus 5",
+          isCustom: false,
+          capabilities: null,
+        },
+      ],
+    });
+    const selection = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "opus" };
+    const rows = build({
+      threads: [
+        thread("local", { modelSelection: selection }),
+        thread("worktree", { modelSelection: selection, worktreePath: "/repo/worktrees/task" }),
+        thread("remote", { environmentId: ENV_B, modelSelection: selection }),
+      ],
+      environments: [environment(ENV_A, { providers: [provider] }), environment(ENV_B)],
+    }).flatMap((section) => section.rows);
+    expect(rows.find((row) => row.title === "local")).toMatchObject({
+      modelLabel: "Opus 5",
+      isWorktree: false,
+      project: project(ENV_A),
+    });
+    expect(rows.find((row) => row.title === "worktree")).toMatchObject({ isWorktree: true });
+    expect(rows.find((row) => row.title === "remote")).toMatchObject({
+      modelLabel: null,
+      project: project(ENV_B),
+    });
+  });
+
   it("tracks a plan follow-up through running, connecting and settled states like the chat sidebar", () => {
     const planned = thread("plan", {
       interactionMode: "plan",
