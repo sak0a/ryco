@@ -174,7 +174,7 @@ describe("HubIdentityRuntime", () => {
       hubOrigin: "https://relay.example",
       environmentId,
       nodeId,
-      nodePolicyGeneration: 0,
+      nodePolicyGeneration: 1,
     });
     expect(localIntroduction.nodeIdentityPublicKey).toEqual(started.publicKey.publicKey);
     expect(localIntroduction.nodeIdentityFingerprint).toHaveLength(32);
