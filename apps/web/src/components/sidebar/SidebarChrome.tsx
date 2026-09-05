@@ -55,7 +55,6 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
               className={SIDEBAR_HEADER_ACTION_CLASS_NAME}
             >
               <SettingsIcon className="size-3.5" />
-              <span className="hidden text-xs @[12rem]/sidebar-header:inline">Settings</span>
             </button>
           }
         />

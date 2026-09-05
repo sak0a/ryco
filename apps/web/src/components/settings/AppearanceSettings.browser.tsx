@@ -44,7 +44,7 @@ describe("AppearanceSettingsPanel", () => {
       dispatchEvent: vi.fn(),
     }));
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
-    useUiStateStore.getState().setAlwaysUseBuildMode(false);
+    useUiStateStore.getState().setAlwaysUseBuildMode(true);
   });
 
   afterEach(async () => {
@@ -60,7 +60,7 @@ describe("AppearanceSettingsPanel", () => {
     document.getElementById(THEME_STYLE_ELEMENT_ID)?.remove();
     document.getElementById(APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID)?.remove();
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
-    useUiStateStore.getState().setAlwaysUseBuildMode(false);
+    useUiStateStore.getState().setAlwaysUseBuildMode(true);
   });
 
   it("lists built-in themes and applies a selected built-in theme", async () => {
@@ -224,18 +224,18 @@ describe("AppearanceSettingsPanel", () => {
     mounted = await render(<AppearanceSettingsPanel />);
 
     const buildModeSwitch = page.getByLabelText("Always use Build mode", { exact: true });
-    await expect.element(buildModeSwitch).not.toBeChecked();
+    await expect.element(buildModeSwitch).toBeChecked();
 
     await buildModeSwitch.click();
-    await expect.element(buildModeSwitch).toBeChecked();
-    expect(useUiStateStore.getState().alwaysUseBuildMode).toBe(true);
+    await expect.element(buildModeSwitch).not.toBeChecked();
+    expect(useUiStateStore.getState().alwaysUseBuildMode).toBe(false);
 
     await expect
       .element(page.getByRole("button", { name: "Reset always use Build mode to default" }))
       .toBeInTheDocument();
 
     await page.getByRole("button", { name: "Reset always use Build mode to default" }).click();
-    await expect.element(buildModeSwitch).not.toBeChecked();
-    expect(useUiStateStore.getState().alwaysUseBuildMode).toBe(false);
+    await expect.element(buildModeSwitch).toBeChecked();
+    expect(useUiStateStore.getState().alwaysUseBuildMode).toBe(true);
   });
 });
