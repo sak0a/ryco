@@ -1616,6 +1616,19 @@ const ThreadGoalProviderClearCommand = Schema.Struct({
 });
 
 const InternalOrchestrationCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("thread.history.restore"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    providerInstanceId: ProviderInstanceId,
+    runtimeSessionId: RuntimeSessionId,
+    expectedUpdatedAt: IsoDateTime,
+    messages: Schema.Array(OrchestrationMessage),
+    activities: Schema.Array(OrchestrationThreadActivity),
+    completedTurnIds: Schema.Array(TurnId),
+    failedTurnIds: Schema.Array(TurnId),
+    createdAt: IsoDateTime,
+  }),
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,

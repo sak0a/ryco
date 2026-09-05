@@ -17,7 +17,7 @@ import { Effect, Fiber, Stream } from "effect";
 import { assert, describe } from "vite-plus/test";
 
 import wireFixture from "../testFixtures/codexMultiAgentWire.json" with { type: "json" };
-import { makeCodexSessionRuntime } from "./CodexSessionRuntime.ts";
+import { makeCodexSessionRuntime, readStoredCodexThread } from "./CodexSessionRuntime.ts";
 
 const ROOT = wireFixture.rootThreadId;
 const [CHILD_A, CHILD_B] = wireFixture.childThreadIds as [string, string];
@@ -72,6 +72,47 @@ const scriptPath = NodePath.join(import.meta.dirname, "../testFixtures/.collab-s
 const peerPath = NodePath.join(import.meta.dirname, "../testFixtures/codexCollabMockPeer.sh");
 
 describe("CodexSessionRuntime collab integration", () => {
+  it.effect("reads stored turns without acquiring a writer or starting a turn", () =>
+    Effect.gen(function* () {
+      NodeFS.writeFileSync(
+        scriptPath,
+        JSON.stringify({
+          writerConflict: true,
+          recordRequests: true,
+          historyTurns: [
+            {
+              id: "stored-turn",
+              status: "completed",
+              startedAt: 1_700_000_000,
+              items: [{ id: "stored-item", type: "agentMessage", text: "Recovered result" }],
+            },
+          ],
+        }),
+        "utf8",
+      );
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          NodeFS.rmSync(scriptPath, { force: true });
+          NodeFS.rmSync(`${scriptPath}.requests`, { force: true });
+        }),
+      );
+      const snapshot = yield* readStoredCodexThread({
+        binaryPath: peerPath,
+        cwd: "/tmp",
+        providerThreadId: ROOT,
+        environment: { ...process.env, RYCO_CODEX_COLLAB_SCRIPT: scriptPath },
+      });
+      assert.equal(snapshot.turns[0]?.status, "completed");
+      assert.deepEqual(snapshot.turns[0]?.items, [
+        { id: "stored-item", type: "agentMessage", text: "Recovered result" },
+      ]);
+      assert.deepEqual(NodeFS.readFileSync(`${scriptPath}.requests`, "utf8").trim().split("\n"), [
+        "initialize",
+        "initialized",
+        "thread/read",
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
   it.effect("replays the captured fan-out into synthetic agent events without child leaks", () =>
     Effect.gen(function* () {
       NodeFS.writeFileSync(scriptPath, JSON.stringify(buildScript()), "utf8");

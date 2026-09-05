@@ -1375,6 +1375,75 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return unsettledEvent === null ? sessionEvent : [unsettledEvent, sessionEvent];
     }
 
+    case "thread.history.restore": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      if (
+        thread.updatedAt !== command.expectedUpdatedAt ||
+        thread.session?.providerInstanceId !== command.providerInstanceId ||
+        thread.session.runtimeSessionId !== command.runtimeSessionId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Thread changed while provider history was being read; retry recovery.",
+        });
+      }
+      const events: Array<PlannedOrchestrationEvent> = [];
+      const base = () =>
+        withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        });
+      for (const message of command.messages) {
+        events.push({
+          ...base(),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: message.id,
+            role: message.role,
+            text: message.text,
+            turnId: message.turnId,
+            streaming: false,
+            createdAt: message.createdAt,
+            updatedAt: command.createdAt,
+          },
+        });
+      }
+      for (const activity of command.activities) {
+        events.push({
+          ...base(),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity,
+          },
+        });
+      }
+      if (
+        thread.session.activeTurnId &&
+        command.completedTurnIds.includes(thread.session.activeTurnId)
+      ) {
+        const failed = command.failedTurnIds.includes(thread.session.activeTurnId);
+        events.push({
+          ...base(),
+          type: "thread.session-set",
+          payload: {
+            threadId: command.threadId,
+            session: {
+              ...thread.session,
+              status: failed ? "error" : "ready",
+              activeTurnId: null,
+              lastError: failed ? "Codex reported that the recovered turn failed." : null,
+              updatedAt: command.createdAt,
+            },
+          },
+        });
+      }
+      return events;
+    }
+
     case "thread.message.assistant.delta": {
       yield* requireThread({
         readModel,

@@ -27,6 +27,9 @@ rl.on("line", (line) => {
     return;
   }
   const { id, method } = message;
+  if (script.recordRequests) {
+    NodeFS.appendFileSync(`${process.env.RYCO_CODEX_COLLAB_SCRIPT}.requests`, `${method}\n`);
+  }
   if (method === "initialize") {
     write({
       id,
@@ -40,7 +43,20 @@ rl.on("line", (line) => {
     return;
   }
   if (method === "thread/start" || method === "thread/resume") {
+    if (script.writerConflict) {
+      write({ id, error: { code: -32600, message: "thread already has an active writer" } });
+      return;
+    }
     write({ id, result: fixture.responses.threadStart });
+    return;
+  }
+  if (method === "thread/read") {
+    write({
+      id,
+      result: {
+        thread: { ...fixture.responses.threadStart.thread, turns: script.historyTurns ?? [] },
+      },
+    });
     return;
   }
   if (method === "turn/start") {

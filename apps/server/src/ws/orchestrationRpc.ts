@@ -46,6 +46,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
     serverCommandId,
     serverSettings,
     providerService,
+    providerRuntimeIngestion,
     terminalManager,
     checkpointDiffQuery,
     orchestrationEngine,
@@ -56,6 +57,21 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
     reconcileAllWorktrees,
     threadPriorityCoordinator,
   } = ctx;
+
+  const withHistoryRecovery = <A, E, R>(threadId: ThreadId, stream: Stream.Stream<A, E, R>) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const reconcile = Option.getOrUndefined(providerRuntimeIngestion)?.reconcileThread;
+        if (reconcile) {
+          // Lifetime follows the authorized thread subscription. Reading history
+          // never resumes Codex or grants mutation authority to this connection.
+          yield* Effect.forever(
+            reconcile(threadId).pipe(Effect.andThen(Effect.sleep("30 seconds"))),
+          ).pipe(Effect.forkScoped);
+        }
+        return stream;
+      }),
+    );
 
   /**
    * The file paths a thread's persisted task activities actually reference
@@ -545,6 +561,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
             }),
             input.threadId,
           ).pipe(
+            (stream) => withHistoryRecovery(input.threadId, stream),
             Stream.tap((item) =>
               Effect.sync(() =>
                 recordServerPerfPayload("server.ws.orchestration.subscribeThread", item),
@@ -578,6 +595,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
             }),
             input.threadId,
           ).pipe(
+            (stream) => withHistoryRecovery(input.threadId, stream),
             Stream.tap((item) =>
               Effect.sync(() =>
                 recordServerPerfPayload("server.ws.orchestration.subscribeThreadWindow", item),

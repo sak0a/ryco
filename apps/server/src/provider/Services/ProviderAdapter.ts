@@ -22,6 +22,7 @@ import type {
   ProviderTurnStartResult,
   TurnId,
   ThreadGoal,
+  MessageId,
 } from "@ryco/contracts";
 import type { Effect } from "effect";
 import type { Stream } from "effect";
@@ -46,6 +47,20 @@ export interface ProviderThreadTurnSnapshot {
 export interface ProviderThreadSnapshot {
   readonly threadId: ThreadId;
   readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>;
+}
+
+/** Immutable, completed provider turns suitable for repairing a missed stream. */
+export interface ProviderThreadHistory {
+  readonly messages: ReadonlyArray<{
+    readonly id: MessageId;
+    readonly turnId: TurnId;
+    readonly role: "user" | "assistant";
+    readonly text: string;
+    readonly createdAt: string;
+  }>;
+  readonly items: ReadonlyArray<ProviderRuntimeEvent>;
+  readonly completedTurnIds: ReadonlyArray<TurnId>;
+  readonly failedTurnIds: ReadonlyArray<TurnId>;
 }
 
 export interface ProviderAdapterShape<TError> {
@@ -123,6 +138,12 @@ export interface ProviderAdapterShape<TError> {
    * Read a provider thread snapshot.
    */
   readonly readThread: (threadId: ThreadId) => Effect.Effect<ProviderThreadSnapshot, TError>;
+  /** Read stored history without resuming, acquiring a writer, or starting a turn. */
+  readonly readThreadHistory?: (input: {
+    readonly threadId: ThreadId;
+    readonly resumeCursor: unknown;
+    readonly cwd?: string;
+  }) => Effect.Effect<ProviderThreadHistory, TError>;
 
   /**
    * Roll back a provider thread by N turns.

@@ -40,6 +40,7 @@ import { StatisticsQuery } from "../statistics/StatisticsQuery.ts";
 import { UsageService, UsageServiceTest } from "../usage/UsageService.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
+import { ProviderRuntimeIngestionService } from "../orchestration/Services/ProviderRuntimeIngestion.ts";
 import * as ProviderMaintenanceRunner from "../provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "../serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "../serverRuntimeStartup.ts";
@@ -144,6 +145,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     // provide only the services their RPC under test needs. Production
     // always has ProviderService in the runtime environment.
     const providerService = yield* Effect.serviceOption(ProviderService);
+    const providerRuntimeIngestion = yield* Effect.serviceOption(ProviderRuntimeIngestionService);
     const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -748,6 +750,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       terminalManager,
       providerRegistry,
       providerService,
+      providerRuntimeIngestion,
       providerMaintenanceRunner,
       config,
       lifecycleEvents,

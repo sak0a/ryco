@@ -438,11 +438,15 @@ it.live("revokes the lease when the codex process exits without a stop call", ()
         payload: { message: "process exited" },
       } as unknown as ProviderEvent);
 
-      // The event fiber consumes asynchronously; poll briefly.
-      for (let attempt = 0; attempt < 100 && revokeLease.mock.calls.length === 0; attempt += 1) {
+      // Exit now retires the dead runtime as well as revoking its lease.
+      for (let attempt = 0; attempt < 100 && (yield* adapter.hasSession(threadId)); attempt += 1) {
         yield* Effect.sleep("10 millis");
       }
-      assert.strictEqual(revokeLease.mock.calls.length, 1);
+      assert.isFalse(yield* adapter.hasSession(threadId));
+      assert.isAtLeast(revokeLease.mock.calls.length, 1);
+      for (const call of revokeLease.mock.calls) {
+        assert.deepStrictEqual(call[0], { sessionId: "session-ac", reason: "runtime-teardown" });
+      }
       yield* adapter.stopSession(threadId);
     }).pipe(Effect.provide(makeAdapterLayer({ bridge, runtimeFactory })));
   }),

@@ -170,6 +170,8 @@ export interface CodexSessionRuntimeSteerTurnInput {
 export interface CodexThreadTurnSnapshot {
   readonly id: TurnId;
   readonly items: ReadonlyArray<CodexThreadItem>;
+  readonly status?: "completed" | "failed" | "interrupted" | "inProgress";
+  readonly startedAt?: number | null;
 }
 
 export interface CodexThreadSnapshot {
@@ -615,14 +617,14 @@ export const openCodexThread = (input: {
       ...startParams,
     })
     .pipe(
-      Effect.catchIf(isRecoverableThreadResumeError, (error) =>
-        Effect.logWarning("codex app-server thread resume fell back to fresh start", {
-          threadId: input.threadId,
-          requestedRuntimeMode: input.runtimeMode,
-          resumeThreadId,
-          recoverable: true,
-          cause: error.message,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+      Effect.mapError((error) =>
+        error.message.includes("already has an active writer")
+          ? new CodexErrors.CodexAppServerRequestError({
+              code: -32600,
+              errorMessage:
+                "This Codex thread already has an active writer in another process. Its history can still be recovered. Release the thread in that process before continuing it here.",
+            })
+          : error,
       ),
     );
 };
@@ -975,9 +977,46 @@ function parseThreadSnapshot(
     turns: response.thread.turns.map((turn) => ({
       id: TurnId.make(turn.id),
       items: turn.items,
+      status: turn.status,
+      ...(turn.startedAt !== undefined ? { startedAt: turn.startedAt } : {}),
     })),
   };
 }
+
+export const readStoredCodexThread = (input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly environment?: NodeJS.ProcessEnv;
+  readonly cwd: string;
+  readonly providerThreadId: string;
+}) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const context = yield* Layer.build(
+        CodexClient.layerCommand({
+          command: input.binaryPath,
+          args: ["app-server"],
+          cwd: input.cwd,
+          env: {
+            ...(input.environment ?? process.env),
+            ...(input.homePath ? { CODEX_HOME: expandHomePath(input.homePath) } : {}),
+          },
+          requestTimeoutMs: 20_000,
+        }),
+      );
+      const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+        Effect.provide(context),
+      );
+      yield* client.request("initialize", buildCodexInitializeParams());
+      yield* client.notify("initialized", undefined);
+      return parseThreadSnapshot(
+        yield* client.request("thread/read", {
+          threadId: input.providerThreadId,
+          includeTurns: true,
+        }),
+      );
+    }),
+  );
 
 export const makeCodexSessionRuntime = (
   options: CodexSessionRuntimeOptions,
@@ -1037,10 +1076,10 @@ export const makeCodexSessionRuntime = (
         ),
       );
 
-    const clientContext = yield* CodexClient.layerChildProcess(child).pipe(
-      Layer.build,
-      Effect.provideService(Scope.Scope, runtimeScope),
-    );
+    const transportFailure = yield* Deferred.make<CodexErrors.CodexAppServerError>();
+    const clientContext = yield* CodexClient.layerChildProcess(child, {
+      onTermination: (error) => Deferred.succeed(transportFailure, error).pipe(Effect.asVoid),
+    }).pipe(Layer.build, Effect.provideService(Scope.Scope, runtimeScope));
     const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
       Effect.provide(clientContext),
     );
@@ -1084,6 +1123,33 @@ export const makeCodexSessionRuntime = (
         method,
         message,
       });
+
+    yield* Deferred.await(transportFailure).pipe(
+      Effect.flatMap((error) =>
+        Ref.get(closedRef).pipe(
+          Effect.flatMap((closed) =>
+            closed
+              ? Effect.void
+              : Effect.gen(function* () {
+                  deviceTurnActive = false;
+                  yield* updateSession(sessionRef, {
+                    status: "error",
+                    activeTurnId: undefined,
+                    lastError: "Codex connection was lost. Reopen the chat to recover its history.",
+                  });
+                  yield* emitSessionEvent(
+                    "session/exited",
+                    `Codex connection lost (${error._tag}).`,
+                  );
+                  // Only the child owned by this runtime is retired. Keep the resume
+                  // cursor so recovery cannot accidentally switch to a new thread.
+                  yield* child.kill().pipe(Effect.ignore);
+                }),
+          ),
+        ),
+      ),
+      Effect.forkIn(runtimeScope),
+    );
 
     const settlePendingApprovals = (decision: ProviderApprovalDecision) =>
       Ref.get(pendingApprovalsRef).pipe(
@@ -1835,9 +1901,12 @@ export const makeCodexSessionRuntime = (
       });
 
       const providerThreadId = opened.thread.id;
+      const activeTurn = opened.thread.turns.findLast((turn) => turn.status === "inProgress");
+      deviceTurnActive = activeTurn !== undefined;
       const session = {
         ...(yield* Ref.get(sessionRef)),
-        status: "ready",
+        status: activeTurn ? "running" : "ready",
+        activeTurnId: activeTurn ? TurnId.make(activeTurn.id) : undefined,
         cwd: opened.cwd,
         model: opened.model,
         resumeCursor: { threadId: providerThreadId },
@@ -1992,6 +2061,16 @@ export const makeCodexSessionRuntime = (
           threadId: providerThreadId,
           includeTurns: true,
         });
+        const session = yield* Ref.get(sessionRef);
+        if (
+          session.activeTurnId &&
+          response.thread.turns.some(
+            (turn) => turn.id === session.activeTurnId && turn.status !== "inProgress",
+          )
+        ) {
+          deviceTurnActive = false;
+          yield* updateSession(sessionRef, { status: "ready", activeTurnId: undefined });
+        }
         return parseThreadSnapshot(response);
       }),
       rollbackThread: (numTurns) =>

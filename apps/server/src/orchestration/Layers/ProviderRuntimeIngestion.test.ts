@@ -221,7 +221,10 @@ describe("ProviderRuntimeIngestion", () => {
     }
   });
 
-  async function createHarness(options?: { serverSettings?: Partial<ServerSettings> }) {
+  async function createHarness(options?: {
+    serverSettings?: Partial<ServerSettings>;
+    readThreadHistory?: NonNullable<ProviderServiceShape["readThreadHistory"]>;
+  }) {
     const workspaceRoot = makeTempDir("ryco-provider-project-");
     fs.mkdirSync(path.join(workspaceRoot, ".git"));
     const provider = createProviderServiceHarness();
@@ -251,7 +254,12 @@ describe("ProviderRuntimeIngestion", () => {
       // engine, and the snapshot query (reader).
       Layer.provideMerge(ThreadBackgroundLiveness.layer),
       Layer.provideMerge(SqlitePersistenceMemory),
-      Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(
+        Layer.succeed(ProviderService, {
+          ...provider.service,
+          ...(options?.readThreadHistory ? { readThreadHistory: options.readThreadHistory } : {}),
+        }),
+      ),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
@@ -324,6 +332,8 @@ describe("ProviderRuntimeIngestion", () => {
     });
 
     return {
+      reconcileThread: (threadId: ThreadId) =>
+        Effect.runPromise(ingestion.reconcileThread!(threadId)),
       engine,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       readShell: () => Effect.runPromise(snapshotQuery.getShellSnapshot()),
@@ -332,6 +342,150 @@ describe("ProviderRuntimeIngestion", () => {
       drain,
     };
   }
+
+  it("restores missed completed history through persistence and rejects stale recovery commands", async () => {
+    const threadId = asThreadId("thread-1");
+    const instanceId = ProviderInstanceId.make("codex");
+    const runtimeSessionId = RuntimeSessionId.make("recovery-runtime");
+    const turnId = TurnId.make("completed-turn");
+    const at = "2026-09-05T10:00:00.000Z";
+    const harness = await createHarness({
+      readThreadHistory: () =>
+        Effect.succeed(
+          Option.some({
+            binding: {
+              threadId,
+              provider: ProviderDriverKind.make("codex"),
+              providerInstanceId: instanceId,
+              runtimeSessionId,
+              resumeCursor: { threadId: "remote-thread" },
+            },
+            history: {
+              messages: [
+                {
+                  id: MessageId.make("assistant:partial"),
+                  turnId,
+                  role: "assistant",
+                  text: "complete response",
+                  createdAt: at,
+                },
+                {
+                  id: MessageId.make("assistant:missing"),
+                  turnId,
+                  role: "assistant",
+                  text: "previously missing",
+                  createdAt: at,
+                },
+              ],
+              items: [],
+              completedTurnIds: [turnId],
+              failedTurnIds: [],
+            },
+          }),
+        ),
+    });
+    const before = (await harness.readModel()).threads[0]!;
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        threadId,
+        commandId: CommandId.make("recovery-session"),
+        createdAt: at,
+        session: {
+          ...before.session!,
+          providerInstanceId: instanceId,
+          runtimeSessionId,
+          activeTurnId: turnId,
+          status: "running",
+          updatedAt: at,
+        },
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.message.assistant.delta",
+        threadId,
+        commandId: CommandId.make("partial-message"),
+        messageId: MessageId.make("assistant:partial"),
+        turnId,
+        delta: "complete",
+        createdAt: at,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("recovery-pending-input"),
+        threadId,
+        activity: {
+          id: asEventId("recovery-pending-input"),
+          kind: "user-input.requested",
+          turnId,
+          payload: { requestId: "abandoned-question" },
+          tone: "info",
+          summary: "Question",
+          createdAt: at,
+        },
+        createdAt: at,
+      }),
+    );
+    await harness.reconcileThread(threadId);
+    const recovered = (await harness.readModel()).threads[0]!;
+    expect(recovered.messages.map((message) => message.text)).toEqual([
+      "complete response",
+      "previously missing",
+    ]);
+    expect(recovered.messages.every((message) => !message.streaming)).toBe(true);
+    expect(recovered.session?.activeTurnId).toBeNull();
+    expect(recovered.session?.status).toBe("ready");
+    expect(derivePendingThreadRequestState(recovered.activities).pendingUserInputCount).toBe(0);
+    for (const itemId of ["partial", "missing"]) {
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId(`late-${itemId}`),
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: instanceId,
+        runtimeSessionId,
+        threadId,
+        turnId,
+        itemId: ProviderItemId.make(itemId),
+        createdAt: at,
+        payload: { streamKind: "assistant_text", delta: "late duplicate" },
+      });
+    }
+    await harness.drain();
+    expect((await harness.readModel()).threads[0]?.messages).toEqual(recovered.messages);
+    await harness.reconcileThread(threadId);
+    expect((await harness.readModel()).threads[0]?.messages).toEqual(recovered.messages);
+
+    const stale = {
+      type: "thread.history.restore" as const,
+      threadId,
+      providerInstanceId: instanceId,
+      runtimeSessionId,
+      commandId: CommandId.make("stale-history"),
+      expectedUpdatedAt: at,
+      messages: [{ ...recovered.messages[0]!, text: "stale overwrite" }],
+      activities: [],
+      completedTurnIds: [turnId],
+      failedTurnIds: [],
+      createdAt: at,
+    };
+    await expect(Effect.runPromise(harness.engine.dispatch(stale))).rejects.toThrow(
+      "Thread changed",
+    );
+    expect((await harness.readModel()).threads[0]?.messages).toEqual(recovered.messages);
+    await expect(
+      Effect.runPromise(
+        harness.engine.dispatch({
+          ...stale,
+          commandId: CommandId.make("wrong-epoch-history"),
+          expectedUpdatedAt: recovered.updatedAt,
+          runtimeSessionId: RuntimeSessionId.make("other-runtime"),
+        }),
+      ),
+    ).rejects.toThrow("Thread changed");
+  });
 
   it("expires previous-turn requests on turn start while retaining current requests", async () => {
     const harness = await createHarness();

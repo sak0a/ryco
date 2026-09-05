@@ -8,11 +8,14 @@
  */
 import { Context } from "effect";
 import type { Effect, Scope } from "effect";
+import type { ThreadId } from "@ryco/contracts";
 
 /**
  * ProviderRuntimeIngestionShape - Service API for runtime ingestion lifecycle.
  */
 export interface ProviderRuntimeIngestionShape {
+  /** Coalesced, read-only provider history recovery; failures leave local history available. */
+  readonly reconcileThread?: (threadId: ThreadId) => Effect.Effect<void>;
   /**
    * Start ingesting provider runtime events into orchestration commands.
    *

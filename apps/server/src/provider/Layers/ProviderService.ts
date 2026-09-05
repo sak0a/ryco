@@ -1635,6 +1635,21 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   );
 
   return {
+    readThreadHistory: (threadId) =>
+      Effect.gen(function* () {
+        const binding = yield* directory.getBinding(threadId);
+        if (Option.isNone(binding) || binding.value.resumeCursor == null) return Option.none();
+        const instanceId = yield* requireBindingInstanceId("readThreadHistory", binding.value);
+        const adapter = yield* registry.getByInstance(instanceId);
+        if (!adapter.readThreadHistory) return Option.none();
+        const cwd = readPersistedCwd(binding.value.runtimePayload);
+        const history = yield* adapter.readThreadHistory({
+          threadId,
+          resumeCursor: binding.value.resumeCursor,
+          ...(cwd ? { cwd } : {}),
+        });
+        return Option.some({ binding: binding.value, history });
+      }),
     startSession,
     startFreshSession,
     getSession,

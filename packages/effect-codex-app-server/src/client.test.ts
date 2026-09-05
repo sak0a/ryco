@@ -3,6 +3,8 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -11,6 +13,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 
 import * as CodexClient from "./client.ts";
+import { makeInMemoryStdio } from "./_internal/stdio.ts";
 
 const packageRoot = NodePath.join(import.meta.dirname, "..");
 
@@ -19,6 +22,42 @@ const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
 );
 
 it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
+  it.effect("reports a rejected notification without losing following valid events", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const failed = yield* Deferred.make<string>();
+      const seen = yield* Deferred.make<string>();
+      const client = yield* CodexClient.make(stdio, {
+        onNotificationError: (method) => Deferred.succeed(failed, method).pipe(Effect.asVoid),
+      });
+      yield* client.handleServerNotification("item/agentMessage/delta", (params) =>
+        Deferred.succeed(seen, params.delta).pipe(Effect.asVoid),
+      );
+      const encoder = new TextEncoder();
+      yield* Queue.offer(
+        input,
+        encoder.encode(
+          JSON.stringify({ method: "item/agentMessage/delta", params: { delta: 42 } }) + "\n",
+        ),
+      );
+      assert.equal(yield* Deferred.await(failed), "item/agentMessage/delta");
+      yield* Queue.offer(
+        input,
+        encoder.encode(
+          JSON.stringify({
+            method: "item/agentMessage/delta",
+            params: {
+              delta: "still streaming",
+              threadId: "thread",
+              turnId: "turn",
+              itemId: "item",
+            },
+          }) + "\n",
+        ),
+      );
+      assert.equal(yield* Deferred.await(seen), "still streaming");
+    }),
+  );
   const makeHandle = () =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

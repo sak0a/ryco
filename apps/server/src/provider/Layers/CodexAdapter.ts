@@ -27,6 +27,10 @@ import {
   type RuntimeTaskUsage,
   ProviderApprovalDecision,
   ThreadId,
+  TurnId,
+  MessageId,
+  EventId,
+  ProviderItemId,
   ProviderSendTurnInput,
   ProviderSteerTurnInput,
   DEFAULT_AGENT_TOKEN_MODE,
@@ -35,7 +39,18 @@ import {
   ThreadGoal as ThreadGoalSchema,
   type ThreadGoal,
 } from "@ryco/contracts";
-import { Effect, Exit, Fiber, FileSystem, Option, Queue, Schema, Scope, Stream } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Option,
+  Queue,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
@@ -64,6 +79,7 @@ import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
   makeCodexSessionRuntime,
+  readStoredCodexThread,
   type CodexAgentControlInjection,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
@@ -76,6 +92,7 @@ import {
 } from "../../agentControl/ProviderInjection.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { requireRuntimeSessionId, stampRuntimeEvent } from "../runtimeSession.ts";
+import type { ProviderThreadHistory } from "../Services/ProviderAdapter.ts";
 
 const PROVIDER = ProviderDriverKind.make("codex");
 const PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES =
@@ -1739,6 +1756,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   options?: CodexAdapterLiveOptions,
 ) {
   const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("codex");
+  const adapterScope = yield* Scope.Scope;
   const fileSystem = yield* FileSystem.FileSystem;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig);
@@ -1879,6 +1897,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         // this a child of `startSession`, and Effect interrupts a fiber's
         // children when it completes, so the consumer died on return and every
         // runtime event the session emitted afterwards was dropped.
+        let runtimeExited = false;
+        const retireRuntime = Effect.gen(function* () {
+          const current = sessions.get(input.threadId);
+          if (current?.runtime === runtime) yield* stopSessionInternal(current);
+        });
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
             yield* writeNativeEvent(event);
@@ -1916,8 +1939,41 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
             yield* runtimeEventQueueMetrics.recordEnqueued(runtimeEvents.length);
+            if (runtimeEvents.some((runtimeEvent) => runtimeEvent.type === "session.exited")) {
+              runtimeExited = true;
+              yield* retireRuntime.pipe(Effect.forkIn(adapterScope));
+            }
           }),
-        ).pipe(Effect.forkIn(sessionScope));
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : Effect.gen(function* () {
+                  runtimeExited = true;
+                  if (agentControl) yield* agentControl.revoke("runtime-teardown");
+                  yield* Effect.logWarning("Codex event consumer failed; retiring its runtime", {
+                    threadId: input.threadId,
+                  });
+                  yield* Queue.offer(runtimeEventQueue, {
+                    eventId: EventId.make(crypto.randomUUID()),
+                    provider: PROVIDER,
+                    providerInstanceId: boundInstanceId,
+                    runtimeSessionId,
+                    threadId: input.threadId,
+                    createdAt: new Date().toISOString(),
+                    type: "session.exited",
+                    payload: {
+                      reason: "Codex event stream failed. Reopen the chat to recover.",
+                      recoverable: true,
+                      exitKind: "error",
+                    },
+                  });
+                  yield* runtimeEventQueueMetrics.recordEnqueued(1);
+                  yield* retireRuntime.pipe(Effect.forkIn(adapterScope));
+                }),
+          ),
+          Effect.forkIn(sessionScope),
+        );
 
         const started = yield* runtime.start().pipe(
           Effect.mapError(
@@ -1938,8 +1994,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ),
         );
         if (
-          started.runtimeSessionId !== undefined &&
-          started.runtimeSessionId !== runtimeSessionId
+          runtimeExited ||
+          (started.runtimeSessionId !== undefined && started.runtimeSessionId !== runtimeSessionId)
         ) {
           yield* runtime.close.pipe(
             Effect.andThen(Fiber.interrupt(eventFiber)),
@@ -1949,7 +2005,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "startSession",
-            issue: `Codex runtime returned epoch '${started.runtimeSessionId}' for requested epoch '${runtimeSessionId}'.`,
+            issue: runtimeExited
+              ? "Codex runtime exited while the session was starting."
+              : `Codex runtime returned epoch '${started.runtimeSessionId}' for requested epoch '${runtimeSessionId}'.`,
           });
         }
 
@@ -2247,6 +2305,96 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       })),
     );
 
+  const readThreadHistory: NonNullable<CodexAdapterShape["readThreadHistory"]> = (input) =>
+    Effect.gen(function* () {
+      if (!Schema.is(CodexResumeCursorSchema)(input.resumeCursor)) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "readThreadHistory",
+          issue: "Missing Codex thread identity.",
+        });
+      }
+      // A separate read-only client also works when the live runtime's reader
+      // is broken or the Codex app owns the thread's writer lease.
+      const existing = sessions.get(input.threadId);
+      const liveSession =
+        existing && !existing.stopped ? yield* existing.runtime.getSession : undefined;
+      const liveSnapshot =
+        existing &&
+        liveSession &&
+        (liveSession.status === "ready" || liveSession.status === "running") &&
+        Schema.is(CodexResumeCursorSchema)(liveSession.resumeCursor) &&
+        liveSession.resumeCursor.threadId === input.resumeCursor.threadId
+          ? yield* existing.runtime.readThread.pipe(
+              Effect.timeoutOption("2 seconds"),
+              Effect.orElseSucceed(() => Option.none()),
+            )
+          : Option.none();
+      const snapshot = Option.isSome(liveSnapshot)
+        ? liveSnapshot.value
+        : yield* readStoredCodexThread({
+            binaryPath: codexConfig.binaryPath,
+            cwd: input.cwd ?? process.cwd(),
+            providerThreadId: input.resumeCursor.threadId,
+            ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+            ...(options?.environment ? { environment: options.environment } : {}),
+          }).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+            Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "thread/read", cause)),
+          );
+      const messages: Array<ProviderThreadHistory["messages"][number]> = [];
+      const items: Array<ProviderRuntimeEvent> = [];
+      const completedTurnIds: Array<TurnId> = [];
+      const failedTurnIds: Array<TurnId> = [];
+      for (const turn of snapshot.turns) {
+        // Partial snapshots must never overwrite newer streamed text.
+        if (!turn.status || turn.status === "inProgress") continue;
+        completedTurnIds.push(turn.id);
+        if (turn.status === "failed") failedTurnIds.push(turn.id);
+        const createdAt = new Date((turn.startedAt ?? 0) * 1_000).toISOString();
+        for (const item of turn.items) {
+          if (item.type === "agentMessage" || item.type === "userMessage") {
+            messages.push({
+              id: MessageId.make(
+                item.type === "agentMessage"
+                  ? `assistant:${item.id}`
+                  : (item.clientId ?? `user:${item.id}`),
+              ),
+              turnId: turn.id,
+              role: item.type === "agentMessage" ? "assistant" : "user",
+              text:
+                item.type === "agentMessage"
+                  ? item.text
+                  : item.content
+                      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+                      .join("\n"),
+              createdAt,
+            });
+          } else {
+            const event = mapItemLifecycle(
+              {
+                id: EventId.make(
+                  `history:${input.threadId}:${snapshot.threadId}:${turn.id}:${item.id}`,
+                ),
+                provider: PROVIDER,
+                threadId: input.threadId,
+                kind: "notification",
+                method: "item/completed",
+                turnId: turn.id,
+                itemId: ProviderItemId.make(item.id),
+                createdAt,
+                payload: { threadId: snapshot.threadId, turnId: turn.id, item },
+              },
+              input.threadId,
+              "item.completed",
+            );
+            if (event) items.push(event);
+          }
+        }
+      }
+      return { messages, items, completedTurnIds, failedTurnIds };
+    });
+
   const rollbackThread: CodexAdapterShape["rollbackThread"] = (threadId, numTurns) => {
     if (!Number.isInteger(numTurns) || numTurns < 1) {
       return Effect.fail(
@@ -2376,6 +2524,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     steerTurn,
     interruptTurn,
     readThread,
+    readThreadHistory,
     rollbackThread,
     setThreadGoal,
     clearThreadGoal,
