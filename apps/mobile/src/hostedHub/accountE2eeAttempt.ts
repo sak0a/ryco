@@ -258,7 +258,13 @@ export async function issueMobileRelayAttempt(input: {
     }
     throw new HostedRelayPreparationError(
       resolution.kind === "recovery-required"
-        ? { kind: "network", retryable: true }
+        ? {
+            kind: "network",
+            retryable: true,
+            ...(resolution.retryAfterMs === undefined
+              ? {}
+              : { retryAfterMs: resolution.retryAfterMs }),
+          }
         : { kind: "protocol", retryable: false, closeReason: "channel_rejected" },
     );
   }
