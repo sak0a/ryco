@@ -1,3 +1,4 @@
+import { resolveBuildModeModelSelection } from "../buildMode";
 import { newWorktreeBaseBranch } from "./chat/NewThreadWorkLocation.logic";
 import {
   DEFAULT_MODEL,
@@ -3060,6 +3061,15 @@ export default function ChatView(props: ChatViewProps) {
     if (!dispatchCapability.allowed) return false;
     const api = readEnvironmentApi(environmentId);
     if (!api || !activeThread || !activeProject) return false;
+    if (enforceBuildMode) {
+      composerSnapshot = {
+        ...composerSnapshot,
+        selectedModelSelection: resolveBuildModeModelSelection(
+          composerSnapshot.selectedProvider,
+          composerSnapshot.selectedModelSelection,
+        ),
+      };
+    }
     if (!canSendModelSelection(composerSnapshot.selectedModelSelection)) {
       notifySelectionBecameIneligible();
       return false;

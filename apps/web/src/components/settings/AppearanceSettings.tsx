@@ -675,10 +675,10 @@ export function AppearanceSettingsPanel({
             title="Always use Build mode"
             description="Hide the mode selector in the composer and send every turn in Build mode."
             resetAction={
-              alwaysUseBuildMode ? (
+              !alwaysUseBuildMode ? (
                 <SettingResetButton
                   label="always use Build mode"
-                  onClick={() => setAlwaysUseBuildMode(false)}
+                  onClick={() => setAlwaysUseBuildMode(true)}
                 />
               ) : null
             }

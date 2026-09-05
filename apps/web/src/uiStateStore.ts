@@ -18,7 +18,7 @@ const LEGACY_PERSISTED_STATE_KEYS = [
 ] as const;
 
 const DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE = true;
-const DEFAULT_ALWAYS_USE_BUILD_MODE = false;
+const DEFAULT_ALWAYS_USE_BUILD_MODE = true;
 
 export type SidebarMode = "inbox" | "projects";
 

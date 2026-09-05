@@ -53,7 +53,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadWorkEntryExpandedById: {},
     defaultAdvertisedEndpointKey: null,
     wideComposerControlsAutoCollapse: true,
-    alwaysUseBuildMode: false,
+    alwaysUseBuildMode: true,
     ...overrides,
   };
 }
@@ -1168,13 +1168,13 @@ describe("uiStateStore — composer controls", () => {
     expect(parsed.wideComposerControlsAutoCollapse).toBe(false);
   });
 
-  it("defaults always use Build mode to disabled", () => {
-    expect(makeUiState().alwaysUseBuildMode).toBe(false);
+  it("defaults always use Build mode to enabled", () => {
+    expect(readPersistedState().alwaysUseBuildMode).toBe(true);
   });
 
   it("setAlwaysUseBuildMode returns a new state with the chosen value", () => {
-    const next = setAlwaysUseBuildMode(makeUiState(), true);
-    expect(next.alwaysUseBuildMode).toBe(true);
+    const next = setAlwaysUseBuildMode(makeUiState(), false);
+    expect(next.alwaysUseBuildMode).toBe(false);
   });
 
   it("setAlwaysUseBuildMode is a no-op when value is unchanged", () => {
@@ -1183,11 +1183,11 @@ describe("uiStateStore — composer controls", () => {
   });
 
   it("persists always use Build mode and reads it back", () => {
-    const state = setAlwaysUseBuildMode(makeUiState(), true);
+    const state = setAlwaysUseBuildMode(makeUiState(), false);
     persistState(state);
     const raw = localStorageStub.getItem(PERSISTED_STATE_KEY);
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!) as PersistedUiState;
-    expect(parsed.alwaysUseBuildMode).toBe(true);
+    expect(parsed.alwaysUseBuildMode).toBe(false);
   });
 });
