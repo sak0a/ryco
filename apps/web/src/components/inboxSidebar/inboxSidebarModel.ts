@@ -1,3 +1,4 @@
+import { deriveThreadActivityStatus } from "@ryco/client-runtime/state/threads";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { WsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { PROVIDER_OPTIONS } from "@ryco/client-runtime/state/session";
@@ -172,23 +173,19 @@ function resolveThreadState(
   deliveryUnknownThreadKeys: ReadonlySet<string>,
 ): InboxSidebarThreadState {
   if (environment?.stale || environment?.connectionState === "offline") return "offline";
-  if (
-    thread.hasPendingApprovals ||
-    thread.hasPendingUserInput ||
-    thread.hasActionableProposedPlan
-  ) {
+  const activity = deriveThreadActivityStatus(thread);
+  if (activity === "approval" || activity === "input" || activity === "plan-ready")
     return "needs-input";
-  }
   if (
     environment?.deliveryUnknown ||
     deliveryUnknownThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
   ) {
     return "delivery-unknown";
   }
-  if (thread.latestTurn?.state === "running" || thread.backgroundLiveness === "working") {
+  if (activity === "working") {
     return "working";
   }
-  if (thread.session?.status === "connecting" || environment?.connectionState === "connecting") {
+  if (activity === "connecting" || environment?.connectionState === "connecting") {
     return "connecting";
   }
   if (thread.session?.status === "error" || thread.latestTurn?.state === "error") return "error";

@@ -1,3 +1,4 @@
+import { resolveThreadStatusPill } from "../Sidebar.logic";
 import type {
   Project,
   SidebarThreadSummary,
@@ -10,6 +11,7 @@ import {
   ProviderInstanceId,
   type SidebarAutoSettleAfterDays,
   ThreadId,
+  TurnId,
 } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -149,6 +151,47 @@ function build(input: {
 }
 
 describe("buildInboxSidebarSections", () => {
+  it("tracks a plan follow-up through running, connecting and settled states like the chat sidebar", () => {
+    const planned = thread("plan", {
+      interactionMode: "plan",
+      hasActionableProposedPlan: true,
+      latestTurn: {
+        turnId: TurnId.make("plan-turn"),
+        state: "completed",
+        requestedAt: "2026-08-23T10:00:00.000Z",
+        startedAt: "2026-08-23T10:00:00.000Z",
+        completedAt: "2026-08-23T10:01:00.000Z",
+        assistantMessageId: null,
+      },
+    });
+    const row = (value: SidebarThreadSummary) =>
+      build({ threads: [value] }).flatMap((section) => section.rows)[0]!;
+    expect(row(planned).state).toBe("needs-input");
+    expect(resolveThreadStatusPill({ thread: planned })?.label).toBe("Plan Ready");
+    for (const status of ["running", "connecting"] as const) {
+      const active = {
+        ...planned,
+        session: {
+          provider: ProviderDriverKind.make("codex"),
+          status,
+          orchestrationStatus: status === "running" ? ("running" as const) : ("starting" as const),
+          createdAt: planned.createdAt,
+          updatedAt: planned.createdAt,
+        },
+      };
+      expect(row(active).state).toBe(status === "running" ? "working" : "connecting");
+      expect(row(active).settlementDisabledReason).toBe("Wait for the running work to finish.");
+      expect(resolveThreadStatusPill({ thread: active })?.label).toBe(
+        status === "running" ? "Working" : "Connecting",
+      );
+      expect(row({ ...active, hasPendingUserInput: true }).state).toBe("needs-input");
+      expect(row({ ...active, hasPendingApprovals: true }).state).toBe("needs-input");
+    }
+    expect(row({ ...planned, interactionMode: "default" }).state).toBe("idle");
+    expect(row({ ...planned, interactionMode: "default" }).settlementActionEnabled).toBe(true);
+    expect(row(planned).state).toBe("needs-input");
+  });
+
   it("groups active work, required input, and recency without losing machine scope", () => {
     const sections = build({
       threads: [

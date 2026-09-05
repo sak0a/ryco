@@ -238,6 +238,21 @@ export function isLatestTurnSettled(
   return true;
 }
 
+/** The plan follow-up prompt is actionable only after work has settled in plan mode. */
+export function isPlanFollowUpReady(input: {
+  readonly interactionMode: string;
+  readonly latestTurnSettled: boolean;
+  readonly hasPendingUserInput: boolean;
+  readonly hasActionableProposedPlan: boolean;
+}): boolean {
+  return (
+    input.interactionMode === "plan" &&
+    input.latestTurnSettled &&
+    !input.hasPendingUserInput &&
+    input.hasActionableProposedPlan
+  );
+}
+
 export function deriveActiveWorkStartedAt(
   latestTurn: LatestTurnTiming | null,
   session: SessionActivityState | null,

@@ -4,6 +4,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   WorktreeId,
   ThreadPriorityBatchId,
   ThreadPriorityFingerprint,
@@ -306,6 +307,15 @@ describe("thread inbox", () => {
   it("treats an actionable proposed plan as pending input", () => {
     const thread = makeThread(environmentA, "thread-plan", {
       hasActionableProposedPlan: true,
+      interactionMode: "plan",
+      latestTurn: {
+        turnId: TurnId.make("plan-turn"),
+        state: "completed",
+        requestedAt: "2026-07-01T00:00:00.000Z",
+        startedAt: "2026-07-01T00:00:00.000Z",
+        completedAt: "2026-07-01T00:00:01.000Z",
+        assistantMessageId: null,
+      },
       latestUserMessageAt: "2026-07-01T00:00:00.000Z",
     });
     const inbox = buildThreadInbox(baseInput({ threads: [thread], autoSettleAfterDays: 7 }));

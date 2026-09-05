@@ -1,3 +1,4 @@
+import { deriveThreadActivityStatus } from "@ryco/client-runtime/state/threads";
 import type {
   Project,
   SidebarThreadSummary,
@@ -147,15 +148,17 @@ function threadState(
   // present as live activity (or as actionable), whatever the cached fields
   // claim. Sourced from Hub presence via the environment row, not WS status.
   if (environment?.stale) return "offline";
-  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "needs-input";
+  const activity = deriveThreadActivityStatus(thread);
+  if (activity === "approval" || activity === "input" || activity === "plan-ready")
+    return "needs-input";
   if (
     environment?.deliveryUnknown === true ||
     deliveryUnknownThreadIds.has(scopedKey(thread.environmentId, thread.id))
   ) {
     return "delivery-unknown";
   }
-  if (thread.latestTurn?.state === "running") return "working";
-  if (thread.session?.status === "connecting") return "connecting";
+  if (activity === "working") return "working";
+  if (activity === "connecting") return "connecting";
   if (thread.session?.status === "error" || thread.latestTurn?.state === "error") return "error";
   if (environment?.connectionState === "reconnecting") return "reconnecting";
   return "idle";
