@@ -203,19 +203,27 @@ describe("the per-channel withdrawal test (§12.6)", () => {
 });
 
 describe("the durable policy record", () => {
-  it("defaults to the §12.3/§12.4 values and writes nothing until something changes", async () => {
+  it("materializes the unchanged default at the first issued generation", async () => {
     const context = await open();
     const read = await context.store.read();
     expect(read.policy.requireE2EE).toBe(false);
     expect(read.record.generation).toBe(0);
-    // A node that has never been configured leaves no record; its absence is
-    // meaningful and materializing it would spend a write and a generation.
+    // A read alone is not startup and still leaves the sentinel unissued.
     await expect(readFile(context.path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 
     const unchanged = await context.store.commit({ requireE2EE: false });
     expect(unchanged.changed).toBe(false);
-    expect(unchanged.record.generation).toBe(0);
-    await expect(readFile(context.path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(unchanged.withdrawal).toBe(false);
+    expect(unchanged.record.generation).toBe(1);
+    expect(JSON.parse(await readFile(context.path, "utf8"))).toMatchObject({
+      generation: 1,
+      mode: "compatibility",
+    });
+    expect((await context.anchor.read())?.policyGenerationHighWater).toBe(1);
+
+    const reapplied = await context.store.commit({});
+    expect(reapplied.changed).toBe(false);
+    expect(reapplied.record.generation).toBe(1);
   });
 
   it("survives a restart and cannot be weakened by one", async () => {
