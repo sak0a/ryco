@@ -155,6 +155,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
                 "gpt-5.4": {
                   id: "gpt-5.4",
                   name: "GPT-5.4",
+                  limit: { context: 128000, output: 4096 },
                   variants: {
                     none: {},
                     low: {},
@@ -181,6 +182,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
       const model = snapshot.models.find((entry) => entry.slug === "openai/gpt-5.4");
 
       assert.ok(model);
+      assert.equal(model.maxContextTokens, 128000);
       const variantDescriptor = model.capabilities?.optionDescriptors?.find(
         (descriptor) => descriptor.id === "variant" && descriptor.type === "select",
       );
@@ -251,6 +253,47 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
+  it.effect("forwards Go usage limits from the usage probe onto the snapshot", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* checkOpenCodeProviderStatus(
+        makeOpenCodeSettings(),
+        process.cwd(),
+        process.env,
+        () =>
+          Effect.succeed({
+            limitId: "opencode-go",
+            limitName: "OpenCode Go",
+            planType: "go",
+            primary: { usedPercent: 4, windowDurationMins: 300 },
+            secondary: { usedPercent: 11, windowDurationMins: 7 * 24 * 60 },
+            tertiary: { usedPercent: 11, windowDurationMins: 30 * 24 * 60 },
+          }),
+      );
+
+      assert.deepEqual(snapshot.rateLimits, {
+        limitId: "opencode-go",
+        limitName: "OpenCode Go",
+        planType: "go",
+        primary: { usedPercent: 4, windowDurationMins: 300 },
+        secondary: { usedPercent: 11, windowDurationMins: 7 * 24 * 60 },
+        tertiary: { usedPercent: 11, windowDurationMins: 30 * 24 * 60 },
+      });
+    }),
+  );
+
+  it.effect("omits rateLimits when the usage probe finds none", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* checkOpenCodeProviderStatus(
+        makeOpenCodeSettings(),
+        process.cwd(),
+        process.env,
+        () => Effect.succeed(undefined),
+      );
+
+      assert.equal(snapshot.rateLimits, undefined);
+    }),
+  );
+
   it.effect(
     "derives a shortName by stripping the redundant subProvider prefix from the model name",
     () =>
@@ -285,6 +328,7 @@ it.layer(testLayer)("checkOpenCodeProviderStatus", (it) => {
         assert.ok(deepseek);
         assert.equal(deepseek.name, "DeepSeek V4 Pro");
         assert.equal(deepseek.shortName, "V4 Pro");
+        assert.equal(deepseek.maxContextTokens, undefined);
 
         const openai = snapshot.models.find((entry) => entry.slug === "openai/gpt-5");
         assert.ok(openai);

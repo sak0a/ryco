@@ -295,8 +295,8 @@ function ProviderUsageLimitWindowRow(props: {
 }
 
 function ProviderUsageLimitsSection(props: { readonly rateLimits: ServerProviderRateLimits }) {
-  const { primary, secondary } = props.rateLimits;
-  if (!primary && !secondary) return null;
+  const { primary, secondary, tertiary } = props.rateLimits;
+  if (!primary && !secondary && !tertiary) return null;
 
   return (
     <div className="border-t border-border/60 px-4 py-3 sm:px-5">
@@ -308,6 +308,9 @@ function ProviderUsageLimitsSection(props: { readonly rateLimits: ServerProvider
           ) : null}
           {secondary ? (
             <ProviderUsageLimitWindowRow window={secondary} fallbackLabel="Weekly" />
+          ) : null}
+          {tertiary ? (
+            <ProviderUsageLimitWindowRow window={tertiary} fallbackLabel="Monthly" />
           ) : null}
         </div>
       </div>

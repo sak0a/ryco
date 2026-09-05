@@ -15,7 +15,9 @@ import {
   providerModelsFromSettings,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import type { ServerProviderRateLimits } from "@ryco/contracts";
 import { compareCliVersions } from "../cliVersion.ts";
+import { probeOpenCodeGoUsageRateLimits } from "./OpenCodeGoUsage.ts";
 import {
   MINIMUM_OPENCODE_VERSION,
   OpenCodeRuntime,
@@ -242,6 +244,9 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
       const shortName = subProvider
         ? deriveShortNameByStrippingPrefix(name, subProvider)
         : undefined;
+      // Older OpenCode servers may omit `limit`; read defensively so the
+      // context meter just falls back to "unknown" instead of failing.
+      const maxContextTokens = model.limit?.context;
       const slug = `${provider.id}/${modelId}`;
       if (models.has(slug)) {
         continue;
@@ -251,6 +256,11 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
         name,
         ...(subProvider ? { subProvider } : {}),
         ...(shortName ? { shortName } : {}),
+        ...(typeof maxContextTokens === "number" &&
+        Number.isFinite(maxContextTokens) &&
+        maxContextTokens > 0
+          ? { maxContextTokens: Math.floor(maxContextTokens) }
+          : {}),
         isCustom: false,
         capabilities: openCodeCapabilitiesForModel({
           providerID: provider.id,
@@ -330,6 +340,9 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   openCodeSettings: OpenCodeSettings,
   cwd: string,
   environment: NodeJS.ProcessEnv = process.env,
+  probeUsage: (
+    probeEnvironment: NodeJS.ProcessEnv,
+  ) => Effect.Effect<ServerProviderRateLimits | undefined> = probeOpenCodeGoUsageRateLimits,
 ): Effect.fn.Return<ServerProviderDraft, never, OpenCodeRuntime> {
   const openCodeRuntime = yield* OpenCodeRuntime;
   const checkedAt = new Date().toISOString();
@@ -494,11 +507,14 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
   const connectedCount = new Set(inventoryExit.value.inventory.providerList.connected).size;
+  // Account-level Go usage limits; degrades to `undefined` without a Go key.
+  const rateLimits = yield* probeUsage(environment).pipe(Effect.orElseSucceed(() => undefined));
   return buildServerProvider({
     presentation: OPENCODE_PRESENTATION,
     enabled: true,
     checkedAt,
     models,
+    ...(rateLimits ? { rateLimits } : {}),
     probe: {
       installed: true,
       version,
