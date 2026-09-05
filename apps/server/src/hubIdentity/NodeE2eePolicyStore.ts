@@ -730,7 +730,8 @@ export async function makeNodeE2eePolicyStore(options: {
     const previous = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(current.record));
     const advertised = nodeE2eeAdmissionPolicyForMode(mode);
     const policy = effectiveNodeE2eePolicy(advertised);
-    if (sameNodeE2eeAdmissionPolicy(advertised, previous.advertised)) {
+    const samePolicy = sameNodeE2eeAdmissionPolicy(advertised, previous.advertised);
+    if (samePolicy && current.record.generation > 0) {
       // No generation is spent on a no-op: §5.7 increments "whenever any
       // advertised admission policy ... changes", and a restart that re-applies
       // the same configuration changes nothing. Without this every restart would
@@ -744,6 +745,14 @@ export async function makeNodeE2eePolicyStore(options: {
       // claims is closed still open.
       return { record: current.record, policy, previous, withdrawal: false, changed: false };
     }
+    // Generation 0 is the fail-closed, never-advertised sentinel. The first
+    // successful start must therefore materialize even an unchanged default
+    // policy at generation 1; otherwise a freshly enrolled node can remain
+    // permanently unable to publish its account-grant capability statement.
+    // This initialization changes no policy value and sweeps nothing, but its
+    // durable record and high-water mark are what make the first advertisement
+    // safe across restart and restore.
+    const initializing = samePolicy && current.record.generation === 0;
     const record = await commitRecord(current, {
       generation: await nextGeneration(current.record),
       mode,
@@ -752,8 +761,8 @@ export async function makeNodeE2eePolicyStore(options: {
       record,
       policy,
       previous,
-      withdrawal: e2eePolicyNarrows(previous, policy),
-      changed: true,
+      withdrawal: !initializing && e2eePolicyNarrows(previous, policy),
+      changed: !initializing,
     };
   };
 

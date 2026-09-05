@@ -163,6 +163,7 @@ describe("node E2EE policy client", () => {
 
     await context.client.start();
     expect(context.client.policy().requireE2EE).toBe(false);
+    expect(context.client.generation()).toBe(1);
   });
 
   it("applies a configured value at start and leaves an absent one alone", async () => {
