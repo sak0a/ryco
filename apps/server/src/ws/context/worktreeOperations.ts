@@ -342,6 +342,9 @@ export const makeWorktreeOperations = (deps: {
       let ownedWorktreePath: string | null = null;
       let ownedBranchName: string | null = null;
 
+      if (input.fetchOrigin && input.intent.kind === "pr") {
+        yield* gitWorkflow.listRefs({ cwd: project.workspaceRoot, fetchOrigin: true, limit: 1 });
+      }
       switch (input.intent.kind) {
         case "branch":
           refName = input.intent.branchName;
@@ -351,7 +354,7 @@ export const makeWorktreeOperations = (deps: {
           break;
         case "newBranch":
           branch = input.intent.branchName ?? `task/${randomShortId(6)}`;
-          refName = input.intent.baseBranch ?? "HEAD";
+          refName = input.intent.baseBranch ?? (input.fetchOrigin ? "origin/HEAD" : "HEAD");
           newRefName = branch;
           title = branch;
           break;
@@ -422,7 +425,7 @@ export const makeWorktreeOperations = (deps: {
                 }),
                 Effect.catch(() => Effect.succeed(generatedBranchFallback)),
               ));
-          refName = input.intent.baseBranch ?? "HEAD";
+          refName = input.intent.baseBranch ?? (input.fetchOrigin ? "origin/HEAD" : "HEAD");
           newRefName = branch;
           title = input.intent.title?.trim() || `Issue #${number}`;
           origin = "issue";
@@ -468,7 +471,7 @@ export const makeWorktreeOperations = (deps: {
               fallback: generatedBranchFallback,
               key,
             });
-            refName = input.intent.baseBranch ?? "HEAD";
+            refName = input.intent.baseBranch ?? (input.fetchOrigin ? "origin/HEAD" : "HEAD");
             newRefName = branch;
           }
           title = input.intent.title.trim();
@@ -503,6 +506,7 @@ export const makeWorktreeOperations = (deps: {
         }
         const authorizedTargetPath = yield* authorizeWorktreePath(operation, targetPath, false);
         worktreePath = (yield* gitWorkflow.createWorktree({
+          fetchOrigin: input.fetchOrigin,
           cwd: project.workspaceRoot,
           refName,
           ...(newRefName !== undefined ? { newRefName } : {}),

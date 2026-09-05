@@ -5,11 +5,20 @@ import type {
   SourceControlIssueSummary,
   WorkItemStateFilter,
   WorkItemSummary,
+  VcsListRefsResult,
 } from "@ryco/contracts";
-import { ChevronDownIcon, CircleDotIcon, GitBranchIcon, GitPullRequestIcon } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import {
+  ChevronDownIcon,
+  CircleDotIcon,
+  GitBranchIcon,
+  GitPullRequestIcon,
+  PlusIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useGitBranches } from "../../rpc/useGit";
+import { readEnvironmentApi } from "../../environmentApi";
+import { Switch } from "../ui/switch";
+import { Button } from "../ui/button";
 import { cn } from "~/lib/utils";
 import { IssuesTab } from "../projectExplorer/IssuesTab";
 import { PullRequestsTab } from "../projectExplorer/PullRequestsTab";
@@ -44,6 +53,10 @@ export interface NewThreadSourcePickerProps {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId | null;
   readonly cwd: string | null;
+  readonly fetchOrigin: boolean;
+  readonly onFetchOriginChange: (enabled: boolean) => void;
+  readonly branchName: string | null;
+  readonly onBranchNameChange: (name: string | null) => void;
   readonly onSelect: (source: NewThreadSource) => void;
 }
 
@@ -67,6 +80,10 @@ export function NewThreadSourcePicker({
   projectId,
   cwd,
   onSelect,
+  fetchOrigin,
+  onFetchOriginChange,
+  branchName,
+  onBranchNameChange,
 }: NewThreadSourcePickerProps) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<NewThreadSourceTab>("branches");
@@ -121,6 +138,11 @@ export function NewThreadSourcePicker({
         <div className="h-72 min-h-0">
           {tab === "branches" ? (
             <BranchSourceList
+              key={JSON.stringify([environmentId, cwd])}
+              fetchOrigin={fetchOrigin}
+              onFetchOriginChange={onFetchOriginChange}
+              branchName={branchName}
+              onBranchNameChange={onBranchNameChange}
               environmentId={environmentId}
               cwd={cwd}
               query={branchQuery}
@@ -209,7 +231,15 @@ function BranchSourceList({
   searchInputRef,
   onQueryChange,
   onSelect,
+  fetchOrigin,
+  onFetchOriginChange,
+  branchName,
+  onBranchNameChange,
 }: {
+  readonly fetchOrigin: boolean;
+  readonly onFetchOriginChange: (enabled: boolean) => void;
+  readonly branchName: string | null;
+  readonly onBranchNameChange: (name: string | null) => void;
   readonly environmentId: EnvironmentId;
   readonly cwd: string | null;
   readonly query: string;
@@ -218,25 +248,133 @@ function BranchSourceList({
   readonly onSelect: (branchName: string) => void;
 }) {
   const trimmedQuery = query.trim();
-  const { refs, isPending } = useGitBranches({ environmentId, cwd, query: trimmedQuery });
-  const visible = refs.slice(0, BRANCH_LIMIT);
+  const [creatingBranch, setCreatingBranch] = useState(false);
+  const [name, setName] = useState(branchName ?? "");
+  const [page, setPage] = useState<VcsListRefsResult | null>(null);
+  const [isPending, setPending] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [cursor, setCursor] = useState(0);
+  const initialFetch = useRef<{ key: string; promise: Promise<VcsListRefsResult> } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const api = readEnvironmentApi(environmentId);
+    setPending(true);
+    setPage(null);
+    setError(null);
+    if (!api || !cwd) {
+      setPending(false);
+      setError("Branches are unavailable.");
+      return;
+    }
+    const key = JSON.stringify([environmentId, cwd, fetchOrigin]);
+    if (initialFetch.current?.key !== key) {
+      initialFetch.current = {
+        key,
+        promise: api.vcs.listRefs({
+          cwd,
+          fetchOrigin,
+          originOnly: fetchOrigin,
+          limit: BRANCH_LIMIT,
+        }),
+      };
+    }
+    const promise = initialFetch.current.promise;
+    void (async () => {
+      try {
+        const initial = await promise;
+        if (cancelled) return;
+        const result =
+          !trimmedQuery && cursor === 0
+            ? initial
+            : await api.vcs.listRefs({
+                cwd,
+                originOnly: fetchOrigin,
+                ...(trimmedQuery ? { query: trimmedQuery } : {}),
+                cursor,
+                limit: BRANCH_LIMIT,
+              });
+        if (!cancelled) setPage(result);
+      } catch (cause) {
+        if (!cancelled) {
+          initialFetch.current = null;
+          setError(cause instanceof Error ? cause.message : "Could not load branches.");
+        }
+      } finally {
+        if (!cancelled) setPending(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [environmentId, cwd, fetchOrigin, trimmedQuery, cursor]);
+  const visible = page?.refs ?? [];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-border/40 border-b px-2 py-1.5">
-        <div className="relative">
+      <div className="flex items-center gap-2 border-border/40 border-b px-2 py-1.5">
+        <div className="relative min-w-0 flex-1">
           <GitBranchIcon className="-translate-y-1/2 absolute top-1/2 left-2 size-3.5 text-muted-foreground" />
           <Input
             ref={searchInputRef}
             value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
+            onChange={(event) => {
+              setCursor(0);
+              onQueryChange(event.target.value);
+            }}
             placeholder="Search branches..."
             className="h-8 pl-7 text-sm"
           />
         </div>
+        <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+          Fetch Origin
+          <Switch
+            checked={fetchOrigin}
+            onCheckedChange={(enabled) => {
+              setCursor(0);
+              onFetchOriginChange(enabled);
+            }}
+          />
+        </label>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Create a new branch"
+          onClick={() => setCreatingBranch((value) => !value)}
+        >
+          <PlusIcon className="size-4" />
+        </Button>
       </div>
+      {creatingBranch ? (
+        <form
+          className="flex items-center gap-2 border-b border-border/40 p-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onBranchNameChange(name.trim() || null);
+            setCreatingBranch(false);
+          }}
+        >
+          <Input
+            aria-label="New branch name"
+            placeholder="Automatic branch name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className="h-8 min-w-0 flex-1"
+          />
+          <Button type="submit" size="sm">
+            Use name
+          </Button>
+        </form>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {isPending && visible.length === 0 ? (
+        {error ? (
+          <p role="alert" className="px-2.5 py-2 text-sm text-destructive">
+            {error}{" "}
+            {fetchOrigin
+              ? "Turn off Fetch Origin to use local branches, or reopen to retry."
+              : "Reopen to retry."}
+          </p>
+        ) : null}
+        {error ? null : isPending && visible.length === 0 ? (
           <p className="px-2.5 py-4 text-sm text-muted-foreground">Loading branches...</p>
         ) : visible.length === 0 ? (
           <p className="px-2.5 py-4 text-sm text-muted-foreground">
@@ -264,6 +402,26 @@ function BranchSourceList({
             </button>
           ))
         )}
+        {cursor > 0 || (page?.nextCursor !== null && page?.nextCursor !== undefined) ? (
+          <div className="flex justify-between p-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isPending || cursor === 0}
+              onClick={() => setCursor(Math.max(0, cursor - BRANCH_LIMIT))}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isPending || page?.nextCursor == null}
+              onClick={() => setCursor(page?.nextCursor ?? 0)}
+            >
+              Next
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

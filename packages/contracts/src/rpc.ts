@@ -400,6 +400,7 @@ export const WS_METHODS = {
 } as const;
 
 export const GitCreateWorktreeForProjectInput = Schema.Struct({
+  fetchOrigin: Schema.optional(Schema.Boolean),
   projectId: ProjectId,
   intent: CreateWorktreeIntent,
   // "projectMetadata" preserves the legacy project-local checkout location.
