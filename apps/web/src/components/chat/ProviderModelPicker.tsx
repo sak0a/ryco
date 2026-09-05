@@ -38,6 +38,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   activeProviderIconClassName?: string;
   compact?: boolean;
+  openOnHover?: boolean;
   /**
    * Opt in to the phone-tier bottom sheet.
    *
@@ -239,6 +240,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       }}
     >
       <PopoverTrigger
+        openOnHover={props.openOnHover ?? false}
+        delay={150}
+        closeDelay={200}
         render={
           <Button
             size={props.triggerSize ?? "sm"}

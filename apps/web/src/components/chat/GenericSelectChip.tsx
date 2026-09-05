@@ -18,7 +18,7 @@ export interface GenericSelectChipProps {
 
 // Fallback chip for any select descriptor that doesn't have a dedicated
 // component (e.g. OpenCode's "variant", future provider-specific selects).
-// Renders the current option's label and opens a radio menu on click.
+// Renders the current option's label and opens a radio menu on hover or click.
 export const GenericSelectChip = memo(function GenericSelectChip(props: GenericSelectChipProps) {
   const value =
     typeof props.descriptor.currentValue === "string" ? props.descriptor.currentValue : "";
@@ -27,6 +27,9 @@ export const GenericSelectChip = memo(function GenericSelectChip(props: GenericS
   return (
     <Menu>
       <MenuTrigger
+        openOnHover
+        delay={150}
+        closeDelay={200}
         render={
           <Button
             size="xs"
