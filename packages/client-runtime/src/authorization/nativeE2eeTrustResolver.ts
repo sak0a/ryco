@@ -66,6 +66,7 @@ export type NativeE2eeTrustResolution =
   | {
       readonly kind: "recovery-required";
       readonly reason: "enrollment-unavailable" | "account-authorization-unavailable";
+      readonly retryAfterMs?: number;
     };
 
 export interface NativeE2eeTrustResolverInput {
@@ -239,7 +240,13 @@ export function createNativeE2eeTrustResolver(input: NativeE2eeTrustResolverInpu
       if (cause instanceof HostedHubApiError && cause.code === "unsupported_version") {
         return { kind: "blocked", reason: "node-update-required" };
       }
-      return { kind: "recovery-required", reason: "account-authorization-unavailable" };
+      return {
+        kind: "recovery-required",
+        reason: "account-authorization-unavailable",
+        ...(cause instanceof HostedHubApiError && cause.retryAfterMs !== undefined
+          ? { retryAfterMs: cause.retryAfterMs }
+          : {}),
+      };
     }
 
     let grantEnvelope: Uint8Array;

@@ -216,6 +216,25 @@ describe("mobile account E2EE relay attempt", () => {
     expect(hoisted.begin).not.toHaveBeenCalled();
   });
 
+  it("carries Hub retry guidance into the relay reconnect policy", async () => {
+    hoisted.resolveTrust.mockResolvedValueOnce({
+      kind: "recovery-required",
+      reason: "account-authorization-unavailable",
+      retryAfterMs: 42_000,
+    });
+    const prepared = await prepareMobileRelaySocketContext();
+
+    await expect(
+      issueMobileRelayAttempt({
+        nodeId: `node_${"n".repeat(22)}`,
+        preparedSocketContext: prepared,
+      }),
+    ).rejects.toMatchObject({
+      failure: { kind: "network", retryable: true, retryAfterMs: 42_000 },
+    });
+    expect(hoisted.issueRelayTicket).not.toHaveBeenCalled();
+  });
+
   it("erases and rejects an account grant that resolves after an account switch", async () => {
     let resolveGrant!: (value: ReturnType<typeof authorizedResolution>) => void;
     hoisted.resolveTrust.mockImplementationOnce(

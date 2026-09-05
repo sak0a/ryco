@@ -423,6 +423,19 @@ describe("native E2EE trust resolver", () => {
     });
   });
 
+  it("preserves bounded retry guidance for temporary account authorization loss", async () => {
+    const { api, resolve, request } = harness();
+    vi.mocked(api.issueAccountGrantRelayTicket).mockRejectedValue(
+      new HostedHubApiError("rate_limited", 429, 42_000),
+    );
+
+    await expect(resolve(request)).resolves.toEqual({
+      kind: "recovery-required",
+      reason: "account-authorization-unavailable",
+      retryAfterMs: 42_000,
+    });
+  });
+
   it("reports an old node as update-required instead of retrying or falling back", async () => {
     const { api, resolve, request } = harness();
     vi.mocked(api.issueAccountGrantRelayTicket).mockRejectedValue(
