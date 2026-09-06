@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   composerFileUploadEngine,
   deriveComposerFileUploadSendBlock,
+  releaseUnusedComposerFileUploads,
   seedComposerFileNeedsReattach,
   seedComposerFileUploadFromPersisted,
 } from "./composerFileUpload";
@@ -92,6 +93,24 @@ describe("deriveComposerFileUploadSendBlock", () => {
       ).toContain("Attach 'stale.bin' again");
     } finally {
       releaseSeeded(seeded);
+    }
+  });
+});
+
+describe("composer upload cleanup", () => {
+  it("releases removed rows while retaining hidden drafts and uploads owned by another composer", () => {
+    const ids = ["removed", "hidden-draft", "other-composer"];
+    try {
+      for (const id of ids) seedComposerFileNeedsReattach(id);
+      releaseUnusedComposerFileUploads(
+        new Set(["removed", "hidden-draft"]),
+        new Set(["hidden-draft"]),
+      );
+      expect(composerFileUploadEngine.get("removed")).toBeNull();
+      expect(composerFileUploadEngine.get("hidden-draft")).not.toBeNull();
+      expect(composerFileUploadEngine.get("other-composer")).not.toBeNull();
+    } finally {
+      releaseSeeded(ids);
     }
   });
 });

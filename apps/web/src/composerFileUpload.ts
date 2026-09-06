@@ -28,6 +28,16 @@ export {
  */
 export const composerFileUploadEngine = createChatFileUploadEngine(webChatFileUploadTransport);
 
+/** Release only uploads previously owned by this composer, preserving other drafts. */
+export function releaseUnusedComposerFileUploads(
+  candidateIds: ReadonlySet<string>,
+  retainedIds: ReadonlySet<string>,
+): void {
+  for (const id of candidateIds) {
+    if (!retainedIds.has(id)) composerFileUploadEngine.release(id);
+  }
+}
+
 /** Seeds an uploaded file restored from persisted draft/stash state. */
 export function seedComposerFileUploadFromPersisted(input: {
   attachmentId: string;

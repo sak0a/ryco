@@ -51,8 +51,8 @@ import {
 } from "@ryco/client-runtime/state/composer";
 import { webAttachmentCodec } from "../../platform/attachmentCodec";
 import {
-  composerFileUploadEngine,
   deriveComposerFileUploadSendBlock,
+  releaseUnusedComposerFileUploads,
   useComposerFileUploadRecords,
 } from "../../composerFileUpload";
 import {
@@ -900,6 +900,8 @@ export const ChatComposer = memo(
       }
     }, [composerDraftTarget, composerImages, fileUploadRecords, updateComposerDraftImage]);
 
+    const previousUploadIdsRef = useRef<ReadonlySet<string>>(new Set());
+
     // Engine records are process-transient: drop the ones whose attachment
     // left the composer (removal, send clear, discard), except those still
     // referenced by a stash snapshot that may be restored this session.
@@ -910,11 +912,14 @@ export const ChatComposer = memo(
           snapshot.images.map((image) => image.id),
         ),
       );
-      for (const attachmentId of composerFileUploadEngine.snapshot().keys()) {
-        if (!liveIds.has(attachmentId) && !stashedIds.has(attachmentId)) {
-          composerFileUploadEngine.release(attachmentId);
-        }
+      // A mounted composer may change threads while the previous draft keeps
+      // uploading. Its records still belong to that draft, even while hidden.
+      const retainedIds = new Set([...liveIds, ...stashedIds]);
+      for (const draft of Object.values(useComposerDraftStore.getState().draftsByThreadKey)) {
+        for (const image of draft.images) retainedIds.add(image.id);
       }
+      releaseUnusedComposerFileUploads(previousUploadIdsRef.current, retainedIds);
+      previousUploadIdsRef.current = liveIds;
     }, [composerImages]);
 
     // ------------------------------------------------------------------
