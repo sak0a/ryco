@@ -164,3 +164,25 @@ describe("renderContextHandoffInput", () => {
     }
   });
 });
+
+it("retains more history for a 1M destination than the default budget", () => {
+  const artifact = artifactWithLongHistory();
+  const document = {
+    ...artifact.document,
+    messages: artifact.document.messages.map((message) => ({
+      ...message,
+      text: message.text.repeat(5),
+    })),
+  };
+  const normal = renderContextHandoffInput({ document, currentMessage: "continue" });
+  const expanded = renderContextHandoffInput({
+    document,
+    currentMessage: "continue",
+    maxInputChars: 1_400_000,
+  });
+  expect(normal.truncated).toBe(true);
+  expect(expanded.includedEntryCount).toBeGreaterThan(normal.includedEntryCount);
+  expect(expanded.inputChars).toBeGreaterThan(120_000);
+  expect(expanded.truncated).toBe(false);
+  expect(expanded.renderedContext.messages?.[0]?.id).toBe(document.messages[0]?.id);
+});

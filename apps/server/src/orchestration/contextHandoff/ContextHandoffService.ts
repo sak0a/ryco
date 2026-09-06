@@ -1,5 +1,7 @@
 import {
   CONTEXT_HANDOFF_CONTEXT_VERSION,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  type ContextHandoffInputBudget,
   type ContextHandoffEndpointSnapshot,
   type ContextHandoffId,
   type MessageId,
@@ -70,6 +72,8 @@ export interface RenderStoredContextHandoffInput {
 }
 
 export interface PrepareContextHandoffDeliveryInput extends RenderStoredContextHandoffInput {
+  readonly budgetSource?: ContextHandoffInputBudget["budgetSource"];
+  readonly contextWindowTokens?: number | null;
   readonly triggeringMessageId: MessageId;
   readonly preparedAt: string;
 }
@@ -256,10 +260,28 @@ const makeContextHandoffService = Effect.gen(function* () {
 
   const prepareDeliveryArtifact: ContextHandoffServiceShape["prepareDeliveryArtifact"] = (input) =>
     Effect.gen(function* () {
+      const recordBeforeRender = yield* requireRecord(input.handoffId);
+      if (recordBeforeRender.deliveryArtifact !== null) {
+        const existing = yield* decodeDeliveryArtifact(recordBeforeRender);
+        if (
+          existing.triggeringMessage.messageId !== input.triggeringMessageId ||
+          existing.triggeringMessage.text !== input.currentMessage
+        ) {
+          return yield* artifactError(
+            input.handoffId,
+            "delivery-artifact-conflict",
+            "Stored context handoff delivery artifact conflicts with the triggering message",
+          );
+        }
+        return existing;
+      }
       const rendered = yield* renderStoredContext(input);
       const artifact = yield* Effect.try({
         try: () =>
           makeContextHandoffDeliveryArtifact({
+            maxInputChars: input.maxInputChars ?? PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+            budgetSource: input.budgetSource ?? null,
+            contextWindowTokens: input.contextWindowTokens ?? null,
             renderedContext: rendered.renderedContext,
             renderedContextJson: rendered.renderedContextJson,
             providerInput: rendered.providerInput,

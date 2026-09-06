@@ -56,6 +56,9 @@ const document: ContextHandoffDocument = {
 const canonicalJson = stableStringifyContextHandoff(document);
 const providerInput = `<context>${canonicalJson}</context>\n<current_user_message>exact 😀</current_user_message>`;
 const deliveryArtifact = makeContextHandoffDeliveryArtifact({
+  maxInputChars: 1_400_000,
+  budgetSource: "manifest",
+  contextWindowTokens: 1_000_000,
   renderedContext: document,
   renderedContextJson: canonicalJson,
   providerInput,
@@ -107,6 +110,9 @@ it.effect("ContextHandoffInspection serves bounded exact and complete artifacts"
   Effect.gen(function* () {
     const inspection = yield* ContextHandoffInspection;
     const summary = yield* inspection.getSummary({ threadId, handoffId });
+    assert.strictEqual(summary.maxInputChars, 1_400_000);
+    assert.strictEqual(summary.budgetSource, "manifest");
+    assert.strictEqual(summary.contextWindowTokens, 1_000_000);
     assert.strictEqual(summary.deliveryLabel, "sent");
     assert.strictEqual(summary.sent.available, true);
     assert.strictEqual(summary.sent.digest, deliveryArtifact.providerInputDigest);
@@ -156,4 +162,33 @@ it.effect("ContextHandoffInspection hides cross-thread handoff ids as not found"
       .pipe(Effect.flip);
     assert.strictEqual(error.reason, "not-found");
   }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "ContextHandoffInspection leaves legacy budgets unknown without changing stored digests",
+  () => {
+    const legacyArtifact = Object.fromEntries(
+      Object.entries(deliveryArtifact).filter(
+        ([key]) => !["maxInputChars", "budgetSource", "contextWindowTokens"].includes(key),
+      ),
+    );
+    const legacyRecord = { ...record, deliveryArtifact: legacyArtifact };
+    const storedJson = JSON.stringify(legacyRecord);
+    const legacyLayer = ContextHandoffInspectionLive.pipe(
+      Layer.provide(
+        Layer.mock(ContextHandoffRepository)({
+          getById: () => Effect.succeed(Option.some(legacyRecord)),
+        }),
+      ),
+    );
+    return Effect.gen(function* () {
+      const inspection = yield* ContextHandoffInspection;
+      const summary = yield* inspection.getSummary({ threadId, handoffId });
+      assert.isNull(summary.maxInputChars);
+      assert.isNull(summary.budgetSource);
+      assert.isNull(summary.contextWindowTokens);
+      assert.strictEqual(summary.sent.digest, deliveryArtifact.providerInputDigest);
+      assert.strictEqual(JSON.stringify(legacyRecord), storedJson);
+    }).pipe(Effect.provide(legacyLayer));
+  },
 );

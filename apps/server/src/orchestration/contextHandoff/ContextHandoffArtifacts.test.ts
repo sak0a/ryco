@@ -1,7 +1,9 @@
 import { MessageId, ProviderDriverKind, ProviderInstanceId } from "@ryco/contracts";
+import { Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  ContextHandoffDeliveryArtifact,
   ContextHandoffRenderedDocument,
   digestContextHandoffUtf8,
   makeContextHandoffDeliveryArtifact,
@@ -48,6 +50,17 @@ describe("ContextHandoffDeliveryArtifact", () => {
       preparedAt: "2026-08-05T10:00:00.000Z",
     });
 
+    const { maxInputChars, budgetSource, contextWindowTokens, ...legacy } = artifact;
+    expect(Schema.decodeUnknownSync(ContextHandoffDeliveryArtifact)(legacy)).toEqual(legacy);
+    const withBudget = Schema.decodeUnknownSync(ContextHandoffDeliveryArtifact)({
+      ...legacy,
+      maxInputChars: 1_400_000,
+      budgetSource: "manifest",
+      contextWindowTokens: 1_000_000,
+    });
+    expect(withBudget.providerInputDigest).toBe(legacy.providerInputDigest);
+    expect(withBudget.renderedContextDigest).toBe(legacy.renderedContextDigest);
+    expect([maxInputChars, budgetSource, contextWindowTokens]).toEqual([null, null, null]);
     expect(artifact.providerInput).toBe(providerInput);
     expect(artifact.triggeringMessage.text).toBe("  exact message  ");
     expect(artifact.renderedContextDigest).toBe(digestContextHandoffUtf8(renderedContextJson));

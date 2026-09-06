@@ -238,6 +238,9 @@ export const makeContextHandoffInspection = Effect.gen(function* () {
       target: loaded.target,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
+      maxInputChars: delivery?.maxInputChars ?? null,
+      budgetSource: delivery?.budgetSource ?? null,
+      contextWindowTokens: delivery?.contextWindowTokens ?? null,
       preparedAt: delivery?.preparedAt ?? null,
       acceptedAt: record.acceptedProviderTurnId !== null ? record.updatedAt : null,
       sent: delivery

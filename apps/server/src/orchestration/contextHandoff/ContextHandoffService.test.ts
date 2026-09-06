@@ -232,6 +232,9 @@ it.effect("ContextHandoffService persists and reuses the exact delivery artifact
       preparedAt: "2026-08-04T00:00:04.000Z",
     });
     const retry = yield* service.prepareDeliveryArtifact({
+      maxInputChars: 1_400_000,
+      budgetSource: "manifest",
+      contextWindowTokens: 1_000_000,
       handoffId,
       triggeringMessageId: targetMessageId,
       currentMessage,
