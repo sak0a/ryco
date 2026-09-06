@@ -102,7 +102,7 @@ import { SidebarProjectDialogProvider } from "./sidebar/SidebarProjectDialogOwne
 import { SidebarChromeHeader, SidebarChromeFooter } from "./sidebar/SidebarChrome";
 import { SidebarNewThreadButton } from "./sidebar/SidebarNewThreadButton";
 import { resolveNewThreadProjectKey } from "./sidebar/sidebarNewThreadTarget";
-import { InboxSidebar } from "./inboxSidebar/InboxSidebar";
+import { ConnectedInboxSidebar } from "./inboxSidebar/ConnectedInboxSidebar";
 import {
   buildPrimaryInboxSidebarEnvironment,
   type InboxSidebarEnvironment,
@@ -345,6 +345,12 @@ export default function Sidebar() {
           role: machine.effectiveRole,
           trust: machine.nativeTrust,
           deliveryUnknown: machine.deliveryUnknown,
+          threadSnoozeSupported:
+            (machine.environmentId === primaryEnvironmentId
+              ? primaryEnvironmentDescriptor?.capabilities.threadSnooze
+              : undefined) ??
+            machine.capabilities.threadSnooze ??
+            false,
           threadSettlementSupported:
             machine.environmentId === primaryEnvironmentId
               ? (primaryEnvironmentDescriptor?.capabilities.threadSettlement ??
@@ -395,6 +401,7 @@ export default function Sidebar() {
             connectionState: primaryConnectionState,
             hydratedFromCache:
               environmentStateById[environmentId]?.hydratedFromCacheAt !== undefined,
+            threadSnoozeSupported: primaryEnvironmentDescriptor?.capabilities.threadSnooze ?? false,
             threadSettlementSupported:
               primaryEnvironmentDescriptor?.capabilities.threadSettlement ?? false,
           }),
@@ -422,14 +429,25 @@ export default function Sidebar() {
         role: runtime?.role ?? null,
         trust: "unknown",
         deliveryUnknown: false,
+        threadSnoozeSupported: runtime?.descriptor?.capabilities.threadSnooze ?? false,
         threadSettlementSupported: runtime?.descriptor?.capabilities.threadSettlement ?? false,
-        mutationReady: connectionState === "connected" && runtime?.role !== null && !stale,
+        mutationReady:
+          connectionState === "connected" &&
+          (runtime?.role === "owner" || runtime?.role === "client") &&
+          !stale,
         shellCurrent: !stale,
       });
     }
     return [...byEnvironmentId.values()]
       .map((environment) =>
         Object.assign(environment, {
+          threadSnoozeSupported:
+            (environment.environmentId === primaryEnvironmentId
+              ? primaryEnvironmentDescriptor
+              : savedEnvironmentRuntimeById[environment.environmentId]?.descriptor
+            )?.capabilities.threadSnooze ??
+            environment.threadSnoozeSupported ??
+            false,
           providers:
             (environment.environmentId === primaryEnvironmentId
               ? inboxServerConfig
@@ -1373,7 +1391,9 @@ export default function Sidebar() {
         className={sidebarMode === "inbox" ? "contents" : "hidden"}
         inert={sidebarMode !== "inbox"}
       >
-        <InboxSidebar
+        <ConnectedInboxSidebar
+          archiveThread={archiveThread}
+          deleteThread={deleteThread}
           activeThreadKey={activeRouteThreadKey}
           aiFocusEnabled={aiFocusEnabled}
           autoSettleAfterDays={sidebarAutoSettleAfterDays}

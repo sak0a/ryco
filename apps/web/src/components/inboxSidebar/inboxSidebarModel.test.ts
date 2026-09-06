@@ -13,6 +13,7 @@ import {
   ProviderInstanceId,
   type SidebarAutoSettleAfterDays,
   ThreadId,
+  WorktreeId,
   TurnId,
 } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -502,5 +503,54 @@ describe("describeInboxFocus", () => {
       detail: "A review should happen next.",
       aiGenerated: true,
     });
+  });
+});
+
+describe("inbox PR badges", () => {
+  const worktree: SidebarWorktreeSummary = {
+    id: WorktreeId.make("pr-worktree"),
+    environmentId: ENV_A,
+    projectId: PROJECT_A,
+    title: "Feature",
+    branch: "feature/pr",
+    worktreePath: "/repo/pr",
+    origin: "pr",
+    prNumber: 42,
+    issueNumber: null,
+    prTitle: "Pull request",
+    issueTitle: null,
+    prState: "open",
+    prIsDraft: false,
+    issueState: null,
+    workItemProvider: null,
+    workItemKey: null,
+    workItemTitle: null,
+    workItemState: null,
+    workItemStateName: null,
+    workItemUrl: null,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    updatedAt: "2026-08-23T00:00:00.000Z",
+    archivedAt: null,
+    manualPosition: 0,
+  };
+  it.each(["open", "closed", "merged"] as const)(
+    "exposes %s PR metadata directly on the row",
+    (state) => {
+      const rows = build({
+        threads: [thread("pr", { worktreeId: worktree.id })],
+        worktrees: [{ ...worktree, prState: state, prIsDraft: state === "open" }],
+      }).flatMap((section) => section.rows);
+      expect(rows[0]?.pullRequest).toEqual({ number: 42, state, isDraft: state === "open" });
+    },
+  );
+  it("does not label an issue as a pull request or borrow another machine's PR", () => {
+    const rows = build({
+      threads: [
+        thread("issue", { worktreeId: worktree.id }),
+        thread("other", { environmentId: ENV_B, worktreeId: worktree.id }),
+      ],
+      worktrees: [{ ...worktree, prNumber: null, issueNumber: 12 }],
+    }).flatMap((section) => section.rows);
+    expect(rows.every((row) => row.pullRequest === null)).toBe(true);
   });
 });

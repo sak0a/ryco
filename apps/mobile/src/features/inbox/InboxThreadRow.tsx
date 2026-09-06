@@ -47,6 +47,7 @@ function statusTextClassName(state: InboxThreadState): string {
 export function InboxThreadRow(props: {
   readonly row: InboxThreadRowModel;
   readonly onPress: () => void;
+  readonly onLongPress?: (() => void) | undefined;
 }) {
   const settled = props.row.attentionState === "settled";
   // A badge that exists only in pixels is invisible to VoiceOver, so the two
@@ -67,6 +68,7 @@ export function InboxThreadRow(props: {
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       onPress={props.onPress}
+      onLongPress={props.onLongPress}
       className={`mx-4 mb-2.5 flex-row items-start gap-3 rounded-2xl px-4 active:bg-card-alt ${
         settled ? "bg-subtle py-2.5" : "bg-card py-3.5"
       }`}
@@ -81,7 +83,9 @@ export function InboxThreadRow(props: {
             {props.row.title}
           </Text>
           <Text className="font-mono text-2xs text-foreground-tertiary">
-            {relativeTime(props.row.updatedAt)}
+            {props.row.snoozedUntil
+              ? `Until ${new Date(props.row.snoozedUntil).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`
+              : relativeTime(props.row.updatedAt)}
           </Text>
         </View>
         <Text className="font-sans text-xs text-foreground-muted" numberOfLines={1}>

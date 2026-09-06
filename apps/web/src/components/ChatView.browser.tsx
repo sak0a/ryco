@@ -3419,6 +3419,49 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("pins and renames a thread from the Inbox action menu", async () => {
+    useUiStateStore.setState({ sidebarMode: "inbox" });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-inbox-actions" as MessageId,
+        targetText: "inbox actions",
+      }),
+    });
+    try {
+      const row = page.getByTestId("inbox-thread-row").first();
+      await row.click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Pin thread", exact: true }).click();
+      await vi.waitFor(() =>
+        expect(
+          useUiStateStore.getState().pinnedThreadKeys[
+            scopedThreadKey(scopeThreadRef(LOCAL_ENVIRONMENT_ID, THREAD_ID))
+          ],
+        ).toBe(true),
+      );
+      await vi.waitFor(() =>
+        expect(document.querySelector('[data-slot="context-menu-popup"]')).toBeNull(),
+      );
+      await row.click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Rename thread", exact: true }).click();
+      await page
+        .getByRole("textbox", { name: "Thread title", exact: true })
+        .fill("Renamed inbox thread");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await vi.waitFor(() =>
+        expect(
+          wsRequests.some(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              JSON.stringify(request).includes("Renamed inbox thread"),
+          ),
+        ).toBe(true),
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("opens an Inbox row through its exact scoped route", async () => {
     useUiStateStore.setState({ sidebarMode: "inbox" });
     const snapshot = createSnapshotForTargetUser({

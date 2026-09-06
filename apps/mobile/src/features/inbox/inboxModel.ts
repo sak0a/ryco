@@ -64,6 +64,7 @@ export interface InboxEnvironment {
   /** Wave 3b: this environment, not the whole app, has an unconfirmed send. */
   readonly deliveryUnknown?: boolean;
   readonly threadSettlementSupported?: boolean;
+  readonly threadSnoozeSupported?: boolean;
   readonly mutationReady?: boolean;
   readonly shellCurrent?: boolean;
 }
@@ -107,7 +108,10 @@ export interface InboxThreadRow {
   readonly focusTitle: string | null;
   readonly focusDetail: string | null;
   readonly focusAiGenerated: boolean;
-  readonly attentionState: "active" | "settled";
+  readonly attentionState: "active" | "settled" | "snoozed";
+  readonly snoozedUntil?: string | null;
+  readonly canSnooze?: boolean;
+  readonly canUnsnooze?: boolean;
   readonly canSettle: boolean;
   readonly settlementBlocker: ThreadSettlementBlocker | null;
   readonly mutationEnabled: boolean;
@@ -115,8 +119,8 @@ export interface InboxThreadRow {
 }
 
 export interface InboxSection {
-  readonly key: "focus" | "active" | "settled";
-  readonly title: "Focus" | "Active" | "Settled";
+  readonly key: "focus" | "active" | "settled" | "snoozed";
+  readonly title: "Focus" | "Active" | "Settled" | "Snoozed";
   readonly rows: ReadonlyArray<InboxThreadRow>;
 }
 
@@ -204,6 +208,7 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
       environmentId: environment.environmentId,
       label: environment.label,
       threadSettlementSupported: environment.threadSettlementSupported ?? false,
+      threadSnoozeSupported: environment.threadSnoozeSupported ?? false,
       connected: environment.connectionState === "connected",
       mutationReady: environment.mutationReady ?? false,
       shellCurrent: environment.shellCurrent ?? false,
@@ -265,6 +270,14 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
       focusDetail: focusExplanation?.detail ?? null,
       focusAiGenerated: focusExplanation?.aiGenerated ?? false,
       attentionState: entry.lifecycle.classification,
+      snoozedUntil:
+        entry.lifecycle.classification === "snoozed" ? (thread.snoozedUntil ?? null) : null,
+      canSnooze: entry.canSnooze,
+      canUnsnooze:
+        environment?.threadSnoozeSupported === true &&
+        environment.mutationReady === true &&
+        environment.shellCurrent === true &&
+        environment.connectionState === "connected",
       canSettle: entry.lifecycle.eligibility.canSettle,
       settlementBlocker: entry.lifecycle.settlementBlocker,
       mutationEnabled: entry.mutationEnabled,
@@ -275,10 +288,12 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
   const focus = inbox.focus.map(toRow);
   const active = inbox.active.map(toRow);
   const settled = inbox.settled.map(toRow);
+  const snoozed = inbox.snoozed.map(toRow);
 
   const sections: InboxSection[] = [];
   if (focus.length > 0) sections.push({ key: "focus", title: "Focus", rows: focus });
   if (active.length > 0) sections.push({ key: "active", title: "Active", rows: active });
+  if (snoozed.length > 0) sections.push({ key: "snoozed", title: "Snoozed", rows: snoozed });
   if (settled.length > 0) sections.push({ key: "settled", title: "Settled", rows: settled });
   return sections;
 }

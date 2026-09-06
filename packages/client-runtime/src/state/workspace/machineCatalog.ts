@@ -22,6 +22,7 @@ export interface WorkspaceMachineCatalogInput {
     readonly repositoryIdentity?: boolean;
     readonly nativeClientRequired?: boolean;
     readonly threadSettlement?: boolean;
+    readonly threadSnooze?: boolean;
   };
   readonly clientTier: WorkspaceClientTier;
   readonly nativeTrust: WorkspaceNativeTrustState;
@@ -92,6 +93,9 @@ export function reconcileWorkspaceMachine(
       repositoryIdentity: input.capabilities?.repositoryIdentity ?? false,
       nativeClientRequired: input.capabilities?.nativeClientRequired ?? false,
       threadSettlement: input.capabilities?.threadSettlement ?? false,
+      ...(input.capabilities?.threadSnooze !== undefined
+        ? { threadSnooze: input.capabilities.threadSnooze }
+        : {}),
     },
     clientTier: input.clientTier,
     nativeTrust: input.nativeTrust,

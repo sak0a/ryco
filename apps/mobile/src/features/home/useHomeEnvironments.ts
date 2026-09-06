@@ -67,6 +67,7 @@ export function useHomeEnvironments() {
           label: row.record.label,
           connectionState: row.runtime.connectionState,
           role: row.runtime.role,
+          threadSnoozeSupported: row.runtime.descriptor?.capabilities.threadSnooze ?? false,
           threadSettlementSupported: row.runtime.descriptor?.capabilities.threadSettlement ?? false,
           shellCurrent: environmentStateById[row.record.environmentId]?.bootstrapComplete === true,
           apiAvailable: readEnvironmentApi(row.record.environmentId) !== undefined,
@@ -79,6 +80,11 @@ export function useHomeEnvironments() {
             transportStatus: connection.transportStatus,
             sessionStatus: connection.sessionStatus,
             role: connection.effectiveRole,
+            threadSnoozeSupported:
+              (connection.environmentId === primaryDescriptor?.environmentId
+                ? primaryDescriptor
+                : readEnvironmentDescriptor(connection.environmentId)
+              )?.capabilities.threadSnooze ?? false,
             threadSettlementSupported:
               connection.environmentId === primaryDescriptor?.environmentId
                 ? primaryDescriptor.capabilities.threadSettlement

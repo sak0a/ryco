@@ -366,6 +366,7 @@ describe("Home environment provenance (wave 4)", () => {
           role: _role,
           trust: _trust,
           threadSettlementSupported: _threadSettlementSupported,
+          threadSnoozeSupported: _threadSnoozeSupported,
           mutationReady: _mutationReady,
           shellCurrent: _shellCurrent,
           ...rest

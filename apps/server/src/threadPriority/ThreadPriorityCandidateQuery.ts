@@ -75,6 +75,7 @@ const makeThreadPriorityCandidateQuery = Effect.gen(function* () {
       AND thread.archived_at IS NULL
       AND project.deleted_at IS NULL
       AND COALESCE(thread.settled_override, 'active') <> 'settled'
+      AND (thread.snoozed_until IS NULL OR julianday(thread.snoozed_until) <= julianday('now'))
     ORDER BY thread.updated_at DESC, thread.thread_id ASC
   `.pipe(
     Effect.map((rows) =>

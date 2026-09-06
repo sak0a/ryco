@@ -196,6 +196,10 @@
       "types": "./src/deviceHelperCache.ts",
       "import": "./src/deviceHelperCache.ts"
     },
+    "./threadSnooze": {
+      "types": "./src/threadSnooze.ts",
+      "import": "./src/threadSnooze.ts"
+    },
     "./threadSettlement": {
       "types": "./src/threadSettlement.ts",
       "import": "./src/threadSettlement.ts"

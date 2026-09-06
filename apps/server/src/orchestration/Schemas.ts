@@ -1,3 +1,4 @@
+export { ThreadSnoozedPayload, ThreadUnsnoozedPayload } from "@ryco/contracts";
 import {
   ProjectCreatedPayload as ContractsProjectCreatedPayloadSchema,
   ProjectMetaUpdatedPayload as ContractsProjectMetaUpdatedPayloadSchema,

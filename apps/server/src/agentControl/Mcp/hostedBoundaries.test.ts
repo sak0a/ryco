@@ -48,6 +48,7 @@ describe("pre-auth server environment descriptor", () => {
       "repositoryIdentity",
       "threadPriorityRanking",
       "threadSettlement",
+      "threadSnooze",
     ]);
   });
 });

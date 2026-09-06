@@ -342,6 +342,8 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     archivedAt: thread.archivedAt,
     settledOverride: thread.settledOverride,
     settledAt: thread.settledAt,
+    snoozedUntil: thread.snoozedUntil ?? null,
+    snoozedAt: thread.snoozedAt ?? null,
     updatedAt: thread.updatedAt,
     latestTurn: thread.latestTurn,
     pendingSourceProposedPlan: thread.latestTurn?.sourceProposedPlan,
@@ -380,6 +382,8 @@ function mapThreadShell(
     archivedAt: thread.archivedAt,
     settledOverride: thread.settledOverride,
     settledAt: thread.settledAt,
+    snoozedUntil: thread.snoozedUntil ?? null,
+    snoozedAt: thread.snoozedAt ?? null,
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
@@ -407,6 +411,8 @@ function mapThreadShell(
     archivedAt: thread.archivedAt,
     settledOverride: thread.settledOverride,
     settledAt: thread.settledAt,
+    snoozedUntil: thread.snoozedUntil ?? null,
+    snoozedAt: thread.snoozedAt ?? null,
     updatedAt: thread.updatedAt,
     latestTurn: thread.latestTurn,
     branch: thread.branch,
@@ -445,6 +451,8 @@ function toThreadShell(thread: Thread): ThreadShell {
     archivedAt: thread.archivedAt,
     settledOverride: thread.settledOverride,
     settledAt: thread.settledAt,
+    snoozedUntil: thread.snoozedUntil ?? null,
+    snoozedAt: thread.snoozedAt ?? null,
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
@@ -540,6 +548,8 @@ function sidebarThreadSummariesEqual(
     left.archivedAt === right.archivedAt &&
     left.settledOverride === right.settledOverride &&
     left.settledAt === right.settledAt &&
+    left.snoozedUntil === right.snoozedUntil &&
+    left.snoozedAt === right.snoozedAt &&
     left.updatedAt === right.updatedAt &&
     latestTurnsEqual(left.latestTurn, right.latestTurn) &&
     left.branch === right.branch &&
@@ -594,6 +604,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.archivedAt === right.archivedAt &&
     left.settledOverride === right.settledOverride &&
     left.settledAt === right.settledAt &&
+    left.snoozedUntil === right.snoozedUntil &&
+    left.snoozedAt === right.snoozedAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
@@ -1379,7 +1391,9 @@ function updateThreadShellTimestamp(
 function updateThreadSettlementState(
   state: EnvironmentState,
   threadId: ThreadId,
-  patch: Pick<ThreadShell, "settledOverride" | "settledAt"> & { readonly updatedAt: string },
+  patch: Pick<ThreadShell, "settledOverride" | "settledAt" | "snoozedUntil" | "snoozedAt"> & {
+    readonly updatedAt: string;
+  },
 ): EnvironmentState {
   const shell = state.threadShellById[threadId];
   const summary = state.sidebarThreadSummaryById[threadId];
@@ -1391,11 +1405,15 @@ function updateThreadSettlementState(
     !shell ||
     (shell.settledOverride === patch.settledOverride &&
       shell.settledAt === patch.settledAt &&
+      (patch.snoozedUntil === undefined || shell.snoozedUntil === patch.snoozedUntil) &&
+      (patch.snoozedAt === undefined || shell.snoozedAt === patch.snoozedAt) &&
       shell.updatedAt === patch.updatedAt);
   const summaryUnchanged =
     !summary ||
     (summary.settledOverride === patch.settledOverride &&
       summary.settledAt === patch.settledAt &&
+      (patch.snoozedUntil === undefined || summary.snoozedUntil === patch.snoozedUntil) &&
+      (patch.snoozedAt === undefined || summary.snoozedAt === patch.snoozedAt) &&
       summary.updatedAt === patch.updatedAt);
   if (shellUnchanged && summaryUnchanged) {
     return state;
@@ -2233,9 +2251,27 @@ function applyEnvironmentOrchestrationEvent(
         updatedAt: event.payload.updatedAt,
       }));
 
+    case "thread.snoozed":
+      return updateThreadSettlementState(state, event.payload.threadId, {
+        settledOverride: "active",
+        settledAt: null,
+        snoozedUntil: event.payload.snoozedUntil,
+        snoozedAt: event.payload.snoozedAt,
+        updatedAt: event.payload.updatedAt,
+      });
+    case "thread.unsnoozed":
+      return updateThreadSettlementState(state, event.payload.threadId, {
+        settledOverride: "active",
+        settledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        updatedAt: event.payload.updatedAt,
+      });
     case "thread.settled":
       return updateThreadSettlementState(state, event.payload.threadId, {
         settledOverride: "settled",
+        snoozedUntil: null,
+        snoozedAt: null,
         settledAt: event.payload.settledAt,
         updatedAt: event.payload.updatedAt,
       });
