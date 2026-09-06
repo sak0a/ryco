@@ -18,7 +18,11 @@ import {
   normalizeAttachmentRelativePath,
   resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
-import { resolveAttachmentPathById } from "./attachmentStore.ts";
+import {
+  probeAttachmentMediaDimensions,
+  probeAttachmentMediaForServing,
+} from "./attachmentMedia.ts";
+import { attachmentIdExtensionSegment, resolveAttachmentPathById } from "./attachmentStore.ts";
 import {
   ChatAttachmentUploadError,
   ChatAttachmentUploads,
@@ -299,9 +303,25 @@ export const attachmentsRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
 
+    const mediaDimensions = yield* probeAttachmentMediaForServing(
+      filePath,
+      path.extname(filePath) ||
+        (isIdLookup ? attachmentIdExtensionSegment(normalizedRelativePath) : null) ||
+        "",
+    );
+    const mediaHeaders = mediaDimensions
+      ? {
+          "X-Attachment-Width": String(mediaDimensions.width),
+          "X-Attachment-Height": String(mediaDimensions.height),
+        }
+      : {};
+
     return yield* HttpServerResponse.file(filePath, {
       status: 200,
-      headers: userAssetResponseHeaders(filePath, path),
+      headers: {
+        ...userAssetResponseHeaders(filePath, path),
+        ...mediaHeaders,
+      },
     }).pipe(
       Effect.catch(() =>
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
@@ -437,7 +457,13 @@ export const attachmentUploadRouteLayer = HttpRouter.add(
         });
       }
 
-      const completeResult = yield* Effect.result(uploads.completeUpload(uploadToken));
+      const mediaDimensions = yield* probeAttachmentMediaDimensions(
+        lease.finalPath,
+        lease.mimeType,
+      );
+      const completeResult = yield* Effect.result(
+        uploads.completeUpload(uploadToken, mediaDimensions),
+      );
       if (completeResult._tag === "Failure") {
         yield* Effect.tryPromise(() => unlink(lease.finalPath)).pipe(Effect.ignore);
         return HttpServerResponse.text(completeResult.failure.message, {
@@ -451,6 +477,9 @@ export const attachmentUploadRouteLayer = HttpRouter.add(
         name: lease.name,
         mimeType: lease.mimeType,
         sizeBytes: lease.sizeBytes,
+        ...(mediaDimensions
+          ? { width: mediaDimensions.width, height: mediaDimensions.height }
+          : {}),
       });
     }).pipe(
       Effect.onError(() =>

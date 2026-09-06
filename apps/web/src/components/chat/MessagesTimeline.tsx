@@ -28,7 +28,7 @@ import {
   type AgentPanelModel,
 } from "../../threadWorkspaceViewModel";
 import { glassSurfaceClassName } from "../mobile/GlassSurface";
-import { type TurnDiffSummary, isChatImageAttachment } from "../../types";
+import { type TurnDiffSummary, isChatFileAttachment, isChatImageAttachment } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
@@ -39,7 +39,6 @@ import {
   CircleAlertIcon,
   EyeIcon,
   FileDiffIcon,
-  FileIcon,
   GitBranchIcon,
   GlobeIcon,
   HammerIcon,
@@ -52,6 +51,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { AttachmentFileRow, AttachmentVideo, isVideoAttachmentMimeType } from "./AttachmentVideo";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
@@ -1150,45 +1150,18 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                                 <img
                                   src={image.previewUrl}
                                   alt={image.name}
+                                  {...(image.width !== undefined && image.height !== undefined
+                                    ? { width: image.width, height: image.height }
+                                    : {})}
                                   className="block h-auto max-h-[220px] w-full object-cover"
                                 />
                               </button>
-                            ) : image.type === "file" ? (
-                              (() => {
-                                const sizeLabel =
-                                  image.sizeBytes !== undefined
-                                    ? `${Math.ceil(image.sizeBytes / 1024)} KB`
-                                    : null;
-                                const body = (
-                                  <>
-                                    <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-                                    <span className="min-w-0">
-                                      <span className="block truncate font-medium">
-                                        {image.name}
-                                      </span>
-                                      <span className="block text-[10px] text-muted-foreground">
-                                        {[image.mimeType, sizeLabel]
-                                          .filter((part): part is string => part !== null)
-                                          .join(" · ")}
-                                      </span>
-                                    </span>
-                                  </>
-                                );
-                                const className =
-                                  "flex min-h-[72px] items-center gap-2 px-3 py-3 text-left text-xs text-foreground/80";
-                                return image.previewUrl ? (
-                                  <a
-                                    href={image.previewUrl}
-                                    download={image.name}
-                                    className={className}
-                                    aria-label={`Download ${image.name}`}
-                                  >
-                                    {body}
-                                  </a>
-                                ) : (
-                                  <div className={className}>{body}</div>
-                                );
-                              })()
+                            ) : isChatFileAttachment(image) ? (
+                              image.previewUrl && isVideoAttachmentMimeType(image.mimeType) ? (
+                                <AttachmentVideo attachment={image} />
+                              ) : (
+                                <AttachmentFileRow attachment={image} />
+                              )
                             ) : (
                               <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
                                 <span>{image.name ?? "Attachment"}</span>

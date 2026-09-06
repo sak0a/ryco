@@ -6,6 +6,7 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
+  type ChatImageAttachment,
   type ClientOrchestrationCommand,
 } from "@ryco/contracts";
 import { it } from "@effect/vitest";
@@ -209,6 +210,110 @@ it.effect("persists a validated general file under an opaque path", () =>
 
       expect(persistedNames).toContain(`${attachment.id}.bin`);
       expect(Buffer.from(persistedBytes).toString("utf8")).toBe("abc");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+const imageTurnCommand = (input: {
+  readonly dataUrl: string;
+  readonly sizeBytes: number;
+}): ClientOrchestrationCommand => ({
+  type: "thread.turn.start",
+  commandId: CommandId.make("image-attachment-command"),
+  threadId: ThreadId.make("image-attachment-thread"),
+  message: {
+    messageId: MessageId.make("image-attachment-message"),
+    role: "user",
+    text: "Review the image",
+    attachments: [
+      {
+        type: "image" as const,
+        name: "tiny.png",
+        mimeType: "image/png",
+        sizeBytes: input.sizeBytes,
+        dataUrl: input.dataUrl,
+      },
+    ],
+  },
+  runtimeMode: "full-access",
+  interactionMode: "default",
+  createdAt: "2026-01-01T00:00:00.000Z",
+});
+
+const TINY_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+it.effect("persists probed image dimensions with an inline dataUrl attachment", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const workspaceAccessRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "ryco-normalizer-image-",
+      });
+      const layer = makeNormalizerLayer(workspaceAccessRoot);
+
+      const { normalized, persistedNames } = yield* Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const config = yield* ServerConfig;
+        const normalized = yield* normalizeDispatchCommand(
+          imageTurnCommand({
+            dataUrl: `data:image/png;base64,${TINY_PNG_BASE64}`,
+            sizeBytes: Buffer.from(TINY_PNG_BASE64, "base64").byteLength,
+          }),
+        );
+        return {
+          normalized,
+          persistedNames: yield* fileSystem.readDirectory(config.attachmentsDir),
+        };
+      }).pipe(Effect.provide(layer));
+
+      if (normalized.type !== "thread.turn.start") {
+        throw new Error(`Unexpected normalized command: ${normalized.type}`);
+      }
+      const attachment = normalized.message.attachments[0] as ChatImageAttachment | undefined;
+      expect(attachment?.type).toBe("image");
+      if (!attachment || attachment.type !== "image") {
+        throw new Error("Expected a normalized image attachment");
+      }
+      expect(attachment.width).toBe(1);
+      expect(attachment.height).toBe(1);
+      expect(persistedNames).toContain(`${attachment.id}.png`);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.effect("persists an unparseable image without dimensions", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const workspaceAccessRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "ryco-normalizer-image-corrupt-",
+      });
+      const layer = makeNormalizerLayer(workspaceAccessRoot);
+
+      const { normalized, persistedNames } = yield* Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const config = yield* ServerConfig;
+        const normalized = yield* normalizeDispatchCommand(
+          imageTurnCommand({ dataUrl: "data:image/png;base64,YWJj", sizeBytes: 3 }),
+        );
+        return {
+          normalized,
+          persistedNames: yield* fileSystem.readDirectory(config.attachmentsDir),
+        };
+      }).pipe(Effect.provide(layer));
+
+      if (normalized.type !== "thread.turn.start") {
+        throw new Error(`Unexpected normalized command: ${normalized.type}`);
+      }
+      const attachment = normalized.message.attachments[0] as ChatImageAttachment | undefined;
+      expect(attachment?.type).toBe("image");
+      if (!attachment || attachment.type !== "image") {
+        throw new Error("Expected a normalized image attachment");
+      }
+      expect(attachment.width).toBeUndefined();
+      expect(attachment.height).toBeUndefined();
+      expect(persistedNames).toContain(`${attachment.id}.png`);
     }).pipe(Effect.provide(NodeServices.layer)),
   ),
 );

@@ -5,6 +5,7 @@ export {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
+  isChatFileAttachment,
   isChatImageAttachment,
 } from "@ryco/client-runtime/state/threads";
 export type {
@@ -12,6 +13,7 @@ export type {
   ChatFileAttachment,
   ChatImageAttachment,
   ChatMessage,
+  ChatUnknownAttachment,
   Project,
   ProjectScript,
   ProposedPlan,

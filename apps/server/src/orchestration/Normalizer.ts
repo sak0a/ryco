@@ -14,6 +14,7 @@ import {
 } from "@ryco/contracts";
 
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
+import { probeAttachmentMediaDimensions } from "../attachmentMedia.ts";
 import { ChatAttachmentUploads } from "../attachmentUpload.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
@@ -159,6 +160,8 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
               name: attachment.name,
               mimeType: attachment.mimeType.toLowerCase(),
               sizeBytes: attachment.sizeBytes,
+              ...(adopted.width !== undefined ? { width: adopted.width } : {}),
+              ...(adopted.height !== undefined ? { height: adopted.height } : {}),
             };
             const attachmentPath = resolveAttachmentPath({
               attachmentsDir: serverConfig.attachmentsDir,
@@ -324,7 +327,27 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       ),
     );
 
-    const normalizedAttachments = preparedAttachments.map((prepared) => prepared.attachment);
+    const normalizedAttachments = yield* Effect.forEach(
+      preparedAttachments,
+      (prepared) =>
+        prepared.kind === "prepared"
+          ? probeAttachmentMediaDimensions(
+              prepared.attachmentPath,
+              prepared.attachment.mimeType,
+            ).pipe(
+              Effect.map((dimensions) =>
+                dimensions
+                  ? {
+                      ...prepared.attachment,
+                      width: dimensions.width,
+                      height: dimensions.height,
+                    }
+                  : prepared.attachment,
+              ),
+            )
+          : Effect.succeed(prepared.attachment),
+      { concurrency: 1 },
+    );
 
     return {
       ...command,

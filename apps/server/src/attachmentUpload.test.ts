@@ -117,6 +117,44 @@ describe("chat attachment uploads", () => {
     }),
   );
 
+  it.effect("carries probed media dimensions into adoption", () =>
+    Effect.gen(function* () {
+      const uploads = yield* makeRegistry();
+      const created = yield* createUpload(uploads);
+      const withoutDimensions = yield* uploads.beginUpload(created.uploadToken);
+      expect(withoutDimensions.attachmentId).toBeTruthy();
+      yield* uploads.completeUpload(created.uploadToken);
+
+      const adoptedWithoutDimensions = yield* uploads.claimForAdoption({
+        uploadToken: created.uploadToken,
+        threadId: ThreadId.make("upload-thread"),
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      });
+      expect(adoptedWithoutDimensions.width).toBeUndefined();
+      expect(adoptedWithoutDimensions.height).toBeUndefined();
+
+      const imageUpload = yield* createUpload(uploads, {
+        name: "pic.png",
+        mimeType: "image/png",
+      });
+      const imageLease = yield* uploads.beginUpload(imageUpload.uploadToken);
+      expect(imageLease.attachmentId).toBeTruthy();
+      yield* uploads.completeUpload(imageUpload.uploadToken, { width: 640, height: 360 });
+
+      const adoptedImage = yield* uploads.claimForAdoption({
+        uploadToken: imageUpload.uploadToken,
+        threadId: ThreadId.make("upload-thread"),
+        name: "pic.png",
+        mimeType: "image/png",
+        sizeBytes: 3,
+      });
+      expect(adoptedImage.width).toBe(640);
+      expect(adoptedImage.height).toBe(360);
+    }),
+  );
+
   it.effect("rejects adoption mismatches", () =>
     Effect.gen(function* () {
       const uploads = yield* makeRegistry();

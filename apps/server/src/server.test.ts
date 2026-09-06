@@ -2218,6 +2218,73 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("reports probed media dimensions on upload and attachment GET", () =>
+    Effect.gen(function* () {
+      const { uploads } = yield* makeUploadTestContext;
+      const pngBytes = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      const created = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "tiny.png",
+        mimeType: "image/png",
+        sizeBytes: pngBytes.byteLength,
+      });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+
+      const response = yield* postAttachmentUpload({
+        uploadToken: created.uploadToken,
+        cookie,
+        body: HttpBody.uint8Array(new Uint8Array(pngBytes)),
+      });
+      assert.equal(response.status, 200);
+      const payload = (yield* response.json) as {
+        readonly id: string;
+        readonly width?: number;
+        readonly height?: number;
+      };
+      assert.equal(payload.width, 1);
+      assert.equal(payload.height, 1);
+
+      const getResponse = yield* HttpClient.get(`/attachments/${payload.id}`, {
+        headers: { cookie },
+      });
+      assert.equal(getResponse.status, 200);
+      assert.equal(getResponse.headers["x-attachment-width"], "1");
+      assert.equal(getResponse.headers["x-attachment-height"], "1");
+      assert.equal(getResponse.headers["x-attachment-width"], String(payload.width));
+      assert.equal(getResponse.headers["x-attachment-height"], String(payload.height));
+
+      const textUpload = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      });
+      const textResponse = yield* postAttachmentUpload({
+        uploadToken: textUpload.uploadToken,
+        cookie,
+        body: HttpBody.uint8Array(new TextEncoder().encode("abc")),
+      });
+      assert.equal(textResponse.status, 200);
+      const textPayload = (yield* textResponse.json) as {
+        readonly id: string;
+        readonly width?: number;
+        readonly height?: number;
+      };
+      assert.isUndefined(textPayload.width);
+      assert.isUndefined(textPayload.height);
+
+      const textGetResponse = yield* HttpClient.get(`/attachments/${textPayload.id}`, {
+        headers: { cookie },
+      });
+      assert.equal(textGetResponse.status, 200);
+      assert.isUndefined(textGetResponse.headers["x-attachment-width"]);
+      assert.isUndefined(textGetResponse.headers["x-attachment-height"]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("rejects oversized uploads and removes the staging file", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

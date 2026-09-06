@@ -440,4 +440,128 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("opaque-blob");
     expect(markup).not.toContain("Preview unavailable");
   });
+
+  it("pre-sizes image slots for attachments with dimensions and leaves unknown-size images unchanged", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "message",
+            createdAt: "2026-07-24T12:00:00.000Z",
+            message: {
+              id: MessageId.make("user-1"),
+              role: "user",
+              text: "See images",
+              createdAt: "2026-07-24T12:00:00.000Z",
+              streaming: false,
+              attachments: [
+                {
+                  type: "image",
+                  id: "image-1",
+                  name: "chart.png",
+                  mimeType: "image/png",
+                  sizeBytes: 1024,
+                  previewUrl: "http://localhost:0/attachments/image-1",
+                  width: 640,
+                  height: 480,
+                },
+                {
+                  type: "image",
+                  id: "image-2",
+                  name: "unknown-size.png",
+                  mimeType: "image/png",
+                  sizeBytes: 512,
+                  previewUrl: "http://localhost:0/attachments/image-2",
+                },
+              ],
+            },
+          },
+        ]}
+      />,
+    );
+
+    const imageTags = markup.match(/<img\b[^>]*>/g) ?? [];
+    expect(imageTags).toHaveLength(2);
+    expect(imageTags[0]).toContain('src="http://localhost:0/attachments/image-1"');
+    expect(imageTags[0]).toContain('width="640"');
+    expect(imageTags[0]).toContain('height="480"');
+    expect(imageTags[1]).toContain('src="http://localhost:0/attachments/image-2"');
+    expect(imageTags[1]).not.toContain("width=");
+    expect(markup).toContain('aria-label="Preview chart.png"');
+    expect(markup).toContain('aria-label="Preview unknown-size.png"');
+  });
+
+  it("renders received video file attachments inline with a download affordance and keeps other files as rows", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "message",
+            createdAt: "2026-07-24T12:00:00.000Z",
+            message: {
+              id: MessageId.make("user-1"),
+              role: "user",
+              text: "See media",
+              createdAt: "2026-07-24T12:00:00.000Z",
+              streaming: false,
+              attachments: [
+                {
+                  type: "file",
+                  id: "video-1",
+                  name: "clip.mp4",
+                  mimeType: "video/mp4",
+                  sizeBytes: 8192,
+                  previewUrl: "http://localhost:0/attachments/video-1",
+                  width: 1920,
+                  height: 1080,
+                },
+                {
+                  type: "file",
+                  id: "video-2",
+                  name: "stream.mov",
+                  mimeType: "video/quicktime",
+                  sizeBytes: 4096,
+                  previewUrl: "http://localhost:0/attachments/video-2",
+                },
+                {
+                  type: "file",
+                  id: "doc-1",
+                  name: "notes.pdf",
+                  mimeType: "application/pdf",
+                  sizeBytes: 2048,
+                  previewUrl: "http://localhost:0/attachments/doc-1",
+                },
+                {
+                  type: "vendorX/telemetry",
+                  name: "opaque-blob",
+                  sizeBytes: 16,
+                },
+              ],
+            },
+          },
+        ]}
+      />,
+    );
+
+    const videoTags = markup.match(/<video\b[^>]*>/g) ?? [];
+    expect(videoTags).toHaveLength(2);
+    expect(videoTags[0]).toContain('src="http://localhost:0/attachments/video-1"');
+    expect(videoTags[0]).toContain('width="1920"');
+    expect(videoTags[0]).toContain('height="1080"');
+    expect(videoTags[1]).toContain('src="http://localhost:0/attachments/video-2"');
+    expect(videoTags[1]).not.toContain("width=");
+    expect(markup).toContain('preload="metadata"');
+    expect(markup).toContain('download="clip.mp4"');
+    expect(markup).toContain('download="stream.mov"');
+    expect(markup).toContain('href="http://localhost:0/attachments/doc-1"');
+    expect(markup).toContain('download="notes.pdf"');
+    expect(markup).toContain("opaque-blob");
+    expect(markup).not.toContain('download="opaque-blob"');
+  });
 });

@@ -523,6 +523,8 @@ export const ChatImageAttachment = Schema.Struct({
   name: ChatAttachmentName,
   mimeType: ChatAttachmentMimeType.check(Schema.isPattern(/^image\//i)),
   sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)),
+  width: Schema.optional(NonNegativeInt),
+  height: Schema.optional(NonNegativeInt),
 });
 export type ChatImageAttachment = typeof ChatImageAttachment.Type;
 
@@ -543,6 +545,8 @@ export const ChatFileAttachment = Schema.Struct({
   name: ChatAttachmentName,
   mimeType: ChatAttachmentMimeType,
   sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_FILE_BYTES)),
+  width: Schema.optional(NonNegativeInt),
+  height: Schema.optional(NonNegativeInt),
 });
 export type ChatFileAttachment = typeof ChatFileAttachment.Type;
 

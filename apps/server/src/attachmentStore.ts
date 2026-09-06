@@ -282,3 +282,13 @@ export function parseAttachmentIdFromRelativePath(relativePath: string): string 
   }
   return ATTACHMENT_ID_WITH_EXTENSION_PATTERN.test(normalized) ? normalized : null;
 }
+
+/**
+ * Streamed-upload ids end with a sanitized extension segment instead of a
+ * dotted extension, so the on-disk file has no `path.extname`. This recovers
+ * the equivalent dotted extension for content-type sniffing on serve.
+ */
+export function attachmentIdExtensionSegment(attachmentId: string): string | null {
+  const match = attachmentId.toLowerCase().match(ATTACHMENT_ID_WITH_EXTENSION_PATTERN);
+  return match?.[3] ? `.${match[3]}` : null;
+}

@@ -3,6 +3,8 @@ import { Effect, Schema } from "effect";
 
 import {
   ChatAttachment,
+  ChatFileAttachment,
+  ChatImageAttachment,
   ChatUnknownAttachment,
   ClientOrchestrationCommand,
   ContextHandoffActivityPayload,
@@ -61,6 +63,8 @@ const decodeOrchestrationThreadShell = Schema.decodeUnknownEffect(OrchestrationT
 const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 const decodeChatAttachment = Schema.decodeUnknownEffect(ChatAttachment);
 const decodeChatUnknownAttachment = Schema.decodeUnknownEffect(ChatUnknownAttachment);
+const decodeChatImageAttachment = Schema.decodeUnknownEffect(ChatImageAttachment);
+const decodeChatFileAttachment = Schema.decodeUnknownEffect(ChatFileAttachment);
 const decodeFileAttachmentCreateUploadUrlInput = Schema.decodeUnknownEffect(
   FileAttachmentCreateUploadUrlInput,
 );
@@ -196,6 +200,70 @@ it.effect("decodes future attachment kinds and rejects malformed known kinds", (
       }),
     );
     assert.strictEqual(malformedFile._tag, "Failure");
+  }),
+);
+
+it.effect("decodes optional attachment media dimensions and rejects negative ones", () =>
+  Effect.gen(function* () {
+    const image = yield* decodeChatImageAttachment({
+      type: "image",
+      id: "img-1",
+      name: "pic.png",
+      mimeType: "image/png",
+      sizeBytes: 3,
+      width: 1920,
+      height: 1080,
+    });
+    assert.strictEqual(image.width, 1920);
+    assert.strictEqual(image.height, 1080);
+
+    const file = yield* decodeChatFileAttachment({
+      type: "file",
+      id: "clip-1",
+      name: "clip.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 3,
+      width: 640,
+      height: 360,
+    });
+    assert.strictEqual(file.width, 640);
+    assert.strictEqual(file.height, 360);
+
+    const absent = yield* decodeChatImageAttachment({
+      type: "image",
+      id: "img-2",
+      name: "old.png",
+      mimeType: "image/png",
+      sizeBytes: 3,
+    });
+    assert.strictEqual(absent.width, undefined);
+    assert.strictEqual(absent.height, undefined);
+
+    const negativeWidth = yield* Effect.exit(
+      decodeChatAttachment({
+        type: "image",
+        id: "img-3",
+        name: "pic.png",
+        mimeType: "image/png",
+        sizeBytes: 3,
+        width: -1,
+        height: 2,
+      }),
+    );
+    assert.strictEqual(negativeWidth._tag, "Failure");
+
+    const negativeHeight = yield* Effect.exit(
+      decodeChatAttachment({
+        type: "file",
+        id: "clip-2",
+        name: "clip.mp4",
+        mimeType: "video/mp4",
+        sizeBytes: 3,
+        width: 2,
+        height: -1,
+      }),
+    );
+    assert.strictEqual(negativeHeight._tag, "Failure");
   }),
 );
 

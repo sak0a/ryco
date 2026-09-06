@@ -264,6 +264,7 @@ const config: ExpoConfig = {
       },
     ],
     "expo-web-browser",
+    "expo-video",
     [
       "expo-camera",
       {

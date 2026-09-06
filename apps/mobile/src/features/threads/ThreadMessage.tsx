@@ -5,6 +5,7 @@ import {
   type ChatMessage,
   type ChatUnknownAttachment,
 } from "@ryco/client-runtime/state/threads";
+import { useVideoPlayer, VideoView } from "expo-video";
 import * as Linking from "expo-linking";
 import { Image, Pressable, ScrollView, Share, View } from "react-native";
 
@@ -18,6 +19,12 @@ import {
   type NativeMarkdownTextStyle,
 } from "../../native/SelectableMarkdownText";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
+import {
+  DEFAULT_MEDIA_ASPECT_RATIO,
+  IMAGE_ATTACHMENT_SLOT_WIDTH,
+  isVideoFileAttachment,
+  readAttachmentDimensions,
+} from "./threadAttachmentModel";
 import { threadMessagePresentation } from "./threadPresentation";
 
 function isChatFileAttachment(
@@ -32,6 +39,61 @@ async function shareAttachmentFile(previewUrl: string): Promise<void> {
   } catch {
     // The user dismissed the share sheet; nothing to report.
   }
+}
+
+function ImageAttachment(props: {
+  readonly attachment: ChatImageAttachment;
+  readonly previewUrl: string;
+}) {
+  const dimensions = readAttachmentDimensions(props.attachment);
+  return (
+    <Image
+      source={{ uri: props.previewUrl }}
+      style={
+        dimensions
+          ? {
+              width: IMAGE_ATTACHMENT_SLOT_WIDTH,
+              aspectRatio: dimensions.width / dimensions.height,
+            }
+          : undefined
+      }
+      className={dimensions ? "rounded-2xl bg-subtle" : "h-36 w-36 rounded-2xl bg-subtle"}
+      resizeMode="cover"
+      accessibilityLabel={props.attachment.name}
+    />
+  );
+}
+
+function VideoAttachmentRow(props: { readonly attachment: ChatFileAttachment }) {
+  const dimensions = readAttachmentDimensions(props.attachment);
+  const aspectRatio = dimensions
+    ? dimensions.width / dimensions.height
+    : DEFAULT_MEDIA_ASPECT_RATIO;
+  const player = useVideoPlayer({ uri: props.attachment.previewUrl });
+  return (
+    <View className="w-full rounded-2xl bg-subtle">
+      <View style={{ aspectRatio }} className="overflow-hidden rounded-2xl">
+        <VideoView
+          player={player}
+          style={{ width: "100%", height: "100%" }}
+          contentFit="contain"
+          nativeControls
+          accessibilityLabel={props.attachment.name}
+        />
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${props.attachment.name}`}
+        onPress={() => void shareAttachmentFile(props.attachment.previewUrl!)}
+        className="flex-row items-center justify-between px-3 py-2"
+      >
+        <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+          {props.attachment.mimeType} · {Math.ceil(props.attachment.sizeBytes / 1024)} KB
+        </Text>
+        <Text className="font-ryco-bold text-xs text-foreground">Share</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 export function ThreadMessage(props: { readonly message: ChatMessage }) {
@@ -74,6 +136,12 @@ export function ThreadMessage(props: { readonly message: ChatMessage }) {
   };
   const text = props.message.text || (props.message.streaming ? "…" : "");
   const attachments = props.message.attachments ?? [];
+  const hasVideoPlaybackSource = (
+    attachment: ChatFileAttachment | ChatImageAttachment | ChatUnknownAttachment,
+  ): attachment is ChatFileAttachment =>
+    isVideoFileAttachment(attachment) && attachment.previewUrl !== undefined;
+  const videoAttachments = attachments.filter(hasVideoPlaybackSource);
+  const stripAttachments = attachments.filter((attachment) => !hasVideoPlaybackSource(attachment));
 
   return (
     <View className={`px-4 py-2 ${isUser ? "items-end" : "items-start"}`}>
@@ -108,17 +176,22 @@ export function ThreadMessage(props: { readonly message: ChatMessage }) {
             }}
           />
         )}
-        {attachments.length > 0 ? (
+        {videoAttachments.length > 0 ? (
+          <View className="mt-2 w-full gap-2">
+            {videoAttachments.map((attachment) => (
+              <VideoAttachmentRow key={attachment.id} attachment={attachment} />
+            ))}
+          </View>
+        ) : null}
+        {stripAttachments.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-2 grow-0">
             <View className="flex-row gap-2">
-              {attachments.map((attachment) =>
+              {stripAttachments.map((attachment) =>
                 isChatImageAttachment(attachment) && attachment.previewUrl ? (
-                  <Image
+                  <ImageAttachment
                     key={attachment.id}
-                    source={{ uri: attachment.previewUrl }}
-                    className="h-36 w-36 rounded-2xl bg-subtle"
-                    resizeMode="cover"
-                    accessibilityLabel={attachment.name}
+                    attachment={attachment}
+                    previewUrl={attachment.previewUrl}
                   />
                 ) : isChatFileAttachment(attachment) && attachment.previewUrl ? (
                   <Pressable

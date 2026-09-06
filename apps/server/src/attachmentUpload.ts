@@ -8,6 +8,7 @@ import {
 } from "@ryco/contracts";
 import { Context, Data, Effect, Layer } from "effect";
 
+import type { AttachmentMediaDimensions } from "./attachmentMedia.ts";
 import { createFileAttachmentId } from "./attachmentStore.ts";
 import { ServerConfig } from "./config.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
@@ -26,6 +27,7 @@ interface UploadEntry {
   expiresAtMs: number;
   state: UploadState;
   attachmentId: string | null;
+  mediaDimensions: AttachmentMediaDimensions | null;
 }
 
 export interface ChatAttachmentUploadLease {
@@ -45,6 +47,8 @@ export interface AdoptedChatAttachmentUpload {
   readonly name: string;
   readonly mimeType: string;
   readonly sizeBytes: number;
+  readonly width?: number;
+  readonly height?: number;
 }
 
 export class ChatAttachmentUploadError extends Data.TaggedError("ChatAttachmentUploadError")<{
@@ -65,7 +69,10 @@ export interface ChatAttachmentUploadsShape {
   readonly beginUpload: (
     uploadToken: string,
   ) => Effect.Effect<ChatAttachmentUploadLease, ChatAttachmentUploadError>;
-  readonly completeUpload: (uploadToken: string) => Effect.Effect<void, ChatAttachmentUploadError>;
+  readonly completeUpload: (
+    uploadToken: string,
+    mediaDimensions?: AttachmentMediaDimensions | null,
+  ) => Effect.Effect<void, ChatAttachmentUploadError>;
   readonly abortUpload: (uploadToken: string) => Effect.Effect<void>;
   readonly claimForAdoption: (input: {
     readonly uploadToken: string;
@@ -172,7 +179,10 @@ export const makeChatAttachmentUploads = (options: {
         } satisfies ChatAttachmentUploadLease;
       });
 
-    const completeUpload: ChatAttachmentUploadsShape["completeUpload"] = (uploadToken) =>
+    const completeUpload: ChatAttachmentUploadsShape["completeUpload"] = (
+      uploadToken,
+      mediaDimensions,
+    ) =>
       Effect.gen(function* () {
         const entry = entries.get(uploadToken);
         if (!entry || entry.state !== "uploading" || entry.attachmentId === null) {
@@ -185,6 +195,7 @@ export const makeChatAttachmentUploads = (options: {
           );
         }
         entry.state = "uploaded";
+        entry.mediaDimensions = mediaDimensions ?? null;
       });
 
     const abortUpload: ChatAttachmentUploadsShape["abortUpload"] = (uploadToken) =>
@@ -257,6 +268,12 @@ export const makeChatAttachmentUploads = (options: {
           name: entry.name,
           mimeType: entry.mimeType,
           sizeBytes: entry.sizeBytes,
+          ...(entry.mediaDimensions
+            ? {
+                width: entry.mediaDimensions.width,
+                height: entry.mediaDimensions.height,
+              }
+            : {}),
         } satisfies AdoptedChatAttachmentUpload;
       });
 
@@ -287,6 +304,7 @@ export const makeChatAttachmentUploads = (options: {
           expiresAtMs: nowMs + ttlMs,
           state: "pending",
           attachmentId: null,
+          mediaDimensions: null,
         });
         return {
           uploadToken,
