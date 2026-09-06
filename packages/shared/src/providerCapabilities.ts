@@ -1,6 +1,12 @@
 import type { ProviderDriverKind } from "@ryco/contracts";
 
-/** Drivers whose native turn API accepts arbitrary file bytes, not only images. */
-export function providerSupportsGeneralFileAttachments(provider: ProviderDriverKind): boolean {
-  return provider === "copilot" || provider === "opencode";
+/**
+ * Every driver now accepts general file attachments. Providers without a
+ * native arbitrary-file channel (Codex, Claude, Cursor, Grok) degrade them
+ * into on-disk path lines appended to the turn prompt, while Copilot and
+ * OpenCode ingest the bytes natively. Per-adapter native gating lives in
+ * each adapter.
+ */
+export function providerSupportsGeneralFileAttachments(_provider: ProviderDriverKind): boolean {
+  return true;
 }

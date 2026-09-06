@@ -13,6 +13,8 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ChatAttachment,
+  type ChatFileAttachment,
+  type ChatImageAttachment,
 } from "@ryco/contracts";
 
 import {
@@ -25,10 +27,18 @@ const ATTACHMENT_FILENAME_EXTENSIONS = [...SAFE_IMAGE_FILE_EXTENSIONS, ".bin"];
 const ATTACHMENT_ID_THREAD_SEGMENT_MAX_CHARS = 80;
 const ATTACHMENT_ID_THREAD_SEGMENT_PATTERN = "[a-z0-9_]+(?:-[a-z0-9_]+)*";
 const ATTACHMENT_ID_UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const ATTACHMENT_ID_EXTENSION_SEGMENT_MAX_CHARS = 12;
 const ATTACHMENT_ID_PATTERN = new RegExp(
   `^(${ATTACHMENT_ID_THREAD_SEGMENT_PATTERN})-(${ATTACHMENT_ID_UUID_PATTERN})$`,
   "i",
 );
+const ATTACHMENT_ID_WITH_EXTENSION_PATTERN = new RegExp(
+  `^(${ATTACHMENT_ID_THREAD_SEGMENT_PATTERN})-(${ATTACHMENT_ID_UUID_PATTERN})-([a-z0-9]{1,${ATTACHMENT_ID_EXTENSION_SEGMENT_MAX_CHARS}})$`,
+  "i",
+);
+
+const PART_EXTENSION_SEGMENT = "part";
+const FALLBACK_EXTENSION_SEGMENT = "bin";
 
 export function toSafeThreadAttachmentSegment(threadId: string): string | null {
   const segment = threadId
@@ -53,19 +63,63 @@ export function createAttachmentId(threadId: string): string | null {
   return `${threadSegment}-${randomUUID()}`;
 }
 
+/**
+ * Derives the safe extension segment baked into streamed-upload attachment
+ * ids so the persisted path resolves directly from the id without probing a
+ * list of extensions. A `part` segment is remapped to `bin` so a final file
+ * can never collide with the `<name>.part` staging namespace used while an
+ * upload is still streaming.
+ */
+export function toSafeFileAttachmentExtensionSegment(name: string): string {
+  const dotIndex = name.lastIndexOf(".");
+  const rawExtension = dotIndex >= 0 && dotIndex < name.length - 1 ? name.slice(dotIndex + 1) : "";
+  const segment = rawExtension
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, ATTACHMENT_ID_EXTENSION_SEGMENT_MAX_CHARS);
+  if (segment.length === 0 || segment === PART_EXTENSION_SEGMENT) {
+    return FALLBACK_EXTENSION_SEGMENT;
+  }
+  return segment;
+}
+
+/**
+ * Attachment ids for streamed general-file uploads carry a sanitized
+ * extension segment (`<thread>-<uuid>-<ext>`) so the on-disk file name is
+ * exactly the id. `*.part` staging files live outside this namespace.
+ */
+export function createFileAttachmentId(threadId: string, name: string): string | null {
+  const threadSegment = toSafeThreadAttachmentSegment(threadId);
+  if (!threadSegment) {
+    return null;
+  }
+  return `${threadSegment}-${randomUUID()}-${toSafeFileAttachmentExtensionSegment(name)}`;
+}
+
 export function parseThreadSegmentFromAttachmentId(attachmentId: string): string | null {
   const normalizedId = normalizeAttachmentRelativePath(attachmentId);
   if (!normalizedId || normalizedId.includes("/") || normalizedId.includes(".")) {
     return null;
   }
-  const match = normalizedId.match(ATTACHMENT_ID_PATTERN);
+  const match =
+    normalizedId.match(ATTACHMENT_ID_PATTERN) ??
+    normalizedId.match(ATTACHMENT_ID_WITH_EXTENSION_PATTERN);
   if (!match) {
     return null;
   }
   return match[1]?.toLowerCase() ?? null;
 }
 
-export function attachmentRelativePath(attachment: ChatAttachment): string {
+export function isPersistableChatAttachment(
+  attachment: ChatAttachment,
+): attachment is ChatImageAttachment | ChatFileAttachment {
+  return attachment.type === "image" || attachment.type === "file";
+}
+
+export function attachmentRelativePath(attachment: ChatAttachment): string | null {
+  if (!isPersistableChatAttachment(attachment)) {
+    return null;
+  }
   switch (attachment.type) {
     case "image": {
       const extension = inferImageExtension({
@@ -75,9 +129,13 @@ export function attachmentRelativePath(attachment: ChatAttachment): string {
       return `${attachment.id}${extension}`;
     }
     case "file":
-      // General files are deliberately stored under an opaque extension. The
-      // display name and MIME type remain metadata and never influence a path.
-      return `${attachment.id}.bin`;
+      // Streamed uploads bake a sanitized extension segment into the id and
+      // the on-disk file name is exactly the id. Legacy general files keep
+      // the opaque `.bin` extension; display names and MIME types never
+      // influence a path.
+      return ATTACHMENT_ID_WITH_EXTENSION_PATTERN.test(attachment.id)
+        ? attachment.id
+        : `${attachment.id}.bin`;
   }
 }
 
@@ -85,9 +143,13 @@ export function resolveAttachmentPath(input: {
   readonly attachmentsDir: string;
   readonly attachment: ChatAttachment;
 }): string | null {
+  const relativePath = attachmentRelativePath(input.attachment);
+  if (relativePath === null) {
+    return null;
+  }
   return resolveAttachmentRelativePath({
     attachmentsDir: input.attachmentsDir,
-    relativePath: attachmentRelativePath(input.attachment),
+    relativePath,
   });
 }
 
@@ -187,6 +249,15 @@ export function resolveAttachmentPathById(input: {
   if (!normalizedId || normalizedId.includes("/") || normalizedId.includes(".")) {
     return null;
   }
+  // Streamed-upload ids carry their extension segment, so the file name is
+  // exactly the id; legacy ids probe the known extension set.
+  const directPath = resolveAttachmentRelativePath({
+    attachmentsDir: input.attachmentsDir,
+    relativePath: normalizedId,
+  });
+  if (directPath && existsSync(directPath)) {
+    return directPath;
+  }
   for (const extension of ATTACHMENT_FILENAME_EXTENSIONS) {
     const maybePath = resolveAttachmentRelativePath({
       attachmentsDir: input.attachmentsDir,
@@ -201,13 +272,23 @@ export function resolveAttachmentPathById(input: {
 
 export function parseAttachmentIdFromRelativePath(relativePath: string): string | null {
   const normalized = normalizeAttachmentRelativePath(relativePath);
-  if (!normalized || normalized.includes("/")) {
+  if (!normalized || normalized.includes("/") || normalized.toLowerCase().endsWith(".part")) {
     return null;
   }
   const extensionIndex = normalized.lastIndexOf(".");
-  if (extensionIndex <= 0) {
-    return null;
+  if (extensionIndex > 0) {
+    const id = normalized.slice(0, extensionIndex);
+    return id.length > 0 && !id.includes(".") ? id : null;
   }
-  const id = normalized.slice(0, extensionIndex);
-  return id.length > 0 && !id.includes(".") ? id : null;
+  return ATTACHMENT_ID_WITH_EXTENSION_PATTERN.test(normalized) ? normalized : null;
+}
+
+/**
+ * Streamed-upload ids end with a sanitized extension segment instead of a
+ * dotted extension, so the on-disk file has no `path.extname`. This recovers
+ * the equivalent dotted extension for content-type sniffing on serve.
+ */
+export function attachmentIdExtensionSegment(attachmentId: string): string | null {
+  const match = attachmentId.toLowerCase().match(ATTACHMENT_ID_WITH_EXTENSION_PATTERN);
+  return match?.[3] ? `.${match[3]}` : null;
 }

@@ -26,7 +26,7 @@ export function toUploadChatImageAttachments(
 
 const OWNED_PASTED_IMAGE_DIRECTORY = "t3-composer-paste";
 
-async function loadImagePicker() {
+export async function loadImagePicker() {
   try {
     return await import("expo-image-picker");
   } catch (error) {
@@ -40,6 +40,59 @@ async function loadClipboard() {
   } catch (error) {
     throw new Error("Clipboard paste is unavailable right now.", { cause: error });
   }
+}
+
+/**
+ * Converts one picked library asset into a draft image attachment (inline
+ * base64 dataUrl + local preview uri). Shared by the images-only picker and
+ * the mixed image/file picker.
+ */
+export function draftImageAttachmentFromPickerAsset(asset: {
+  readonly mimeType?: string | undefined;
+  readonly fileName?: string | null | undefined;
+  readonly base64?: string | null | undefined;
+  readonly fileSize?: number | null | undefined;
+  readonly uri: string;
+}): {
+  readonly attachment: DraftComposerImageAttachment | null;
+  readonly error: string | null;
+} {
+  const mimeType = asset.mimeType?.toLowerCase();
+  if (!mimeType?.startsWith("image/")) {
+    return {
+      attachment: null,
+      error: `Unsupported file type for '${asset.fileName ?? "image"}'.`,
+    };
+  }
+
+  const base64 = asset.base64;
+  if (!base64) {
+    return {
+      attachment: null,
+      error: `Failed to read '${asset.fileName ?? "image"}'.`,
+    };
+  }
+
+  const sizeBytes = asset.fileSize ?? estimateBase64ByteSize(base64);
+  if (sizeBytes <= 0 || sizeBytes > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+    return {
+      attachment: null,
+      error: `'${asset.fileName ?? "image"}' exceeds the 10 MB attachment limit.`,
+    };
+  }
+
+  return {
+    attachment: {
+      id: uuidv4(),
+      type: "image",
+      name: asset.fileName ?? "image",
+      mimeType,
+      sizeBytes,
+      dataUrl: `data:${mimeType};base64,${base64}`,
+      previewUri: asset.uri,
+    },
+    error: null,
+  };
 }
 
 export async function pickComposerImages(input: { readonly existingCount: number }): Promise<{
@@ -92,33 +145,13 @@ export async function pickComposerImages(input: { readonly existingCount: number
   let error: string | null = null;
 
   for (const asset of result.assets) {
-    const mimeType = asset.mimeType?.toLowerCase();
-    if (!mimeType?.startsWith("image/")) {
-      error = `Unsupported file type for '${asset.fileName ?? "image"}'.`;
-      continue;
+    const result = draftImageAttachmentFromPickerAsset(asset);
+    if (result.error) {
+      error = result.error;
     }
-
-    const base64 = asset.base64;
-    if (!base64) {
-      error = `Failed to read '${asset.fileName ?? "image"}'.`;
-      continue;
+    if (result.attachment) {
+      nextImages.push(result.attachment);
     }
-
-    const sizeBytes = asset.fileSize ?? estimateBase64ByteSize(base64);
-    if (sizeBytes <= 0 || sizeBytes > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
-      error = `'${asset.fileName ?? "image"}' exceeds the 10 MB attachment limit.`;
-      continue;
-    }
-
-    nextImages.push({
-      id: uuidv4(),
-      type: "image",
-      name: asset.fileName ?? "image",
-      mimeType,
-      sizeBytes,
-      dataUrl: `data:${mimeType};base64,${base64}`,
-      previewUri: asset.uri,
-    });
   }
 
   return {

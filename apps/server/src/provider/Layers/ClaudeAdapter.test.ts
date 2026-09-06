@@ -947,7 +947,7 @@ describe("ClaudeAdapterLive", () => {
         mimeType: "image/png",
         sizeBytes: 4,
       };
-      const attachmentPath = path.join(attachmentsDir, attachmentRelativePath(attachment));
+      const attachmentPath = path.join(attachmentsDir, attachmentRelativePath(attachment)!);
       mkdirSync(path.dirname(attachmentPath), { recursive: true });
       writeFileSync(attachmentPath, Uint8Array.from([1, 2, 3, 4]));
 
@@ -981,6 +981,142 @@ describe("ClaudeAdapterLive", () => {
           },
         },
       ]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("sends PDF file attachments as Anthropic document blocks", () => {
+    const baseDir = mkdtempSync(path.join(os.tmpdir(), "claude-attachments-pdf-"));
+    const harness = makeHarness({
+      cwd: "/tmp/project-claude-attachments-pdf",
+      baseDir,
+    });
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() =>
+          rmSync(baseDir, {
+            recursive: true,
+            force: true,
+          }),
+        ),
+      );
+
+      const adapter = yield* ClaudeAdapter;
+      const { attachmentsDir } = yield* ServerConfig;
+
+      const attachment = {
+        type: "file" as const,
+        id: "thread-claude-pdf-12345678-1234-1234-1234-123456789abc",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 4,
+      };
+      const attachmentPath = path.join(attachmentsDir, attachmentRelativePath(attachment)!);
+      mkdirSync(path.dirname(attachmentPath), { recursive: true });
+      writeFileSync(attachmentPath, Uint8Array.from([1, 2, 3, 4]));
+
+      const session = yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-claudeadapter-pdf"),
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "Summarize the report",
+        attachments: [attachment],
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      const promptMessage = yield* Effect.promise(() => readFirstPromptMessage(createInput));
+      assert.isDefined(promptMessage);
+      assert.deepEqual(promptMessage?.message.content, [
+        {
+          type: "text",
+          text: "Summarize the report",
+        },
+        {
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: "application/pdf",
+            data: "AQIDBA==",
+          },
+          title: "report.pdf",
+        },
+      ]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("degrades non-native file attachments to on-disk path lines", () => {
+    const baseDir = mkdtempSync(path.join(os.tmpdir(), "claude-attachments-pathline-"));
+    const harness = makeHarness({
+      cwd: "/tmp/project-claude-attachments-pathline",
+      baseDir,
+    });
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() =>
+          rmSync(baseDir, {
+            recursive: true,
+            force: true,
+          }),
+        ),
+      );
+
+      const adapter = yield* ClaudeAdapter;
+      const { attachmentsDir } = yield* ServerConfig;
+
+      const textFile = {
+        type: "file" as const,
+        id: "thread-claude-notes-12345678-1234-1234-1234-123456789abc",
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      };
+      const bitmap = {
+        type: "image" as const,
+        id: "thread-claude-bmp-12345678-1234-1234-1234-123456789abc",
+        name: "diagram.bmp",
+        mimeType: "image/bmp",
+        sizeBytes: 2,
+      };
+      const textPath = path.join(attachmentsDir, attachmentRelativePath(textFile)!);
+      mkdirSync(path.dirname(textPath), { recursive: true });
+      writeFileSync(textPath, Uint8Array.from([1, 2, 3]));
+
+      const session = yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-claudeadapter-pathline"),
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "Use these",
+        attachments: [textFile, bitmap],
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      const promptMessage = yield* Effect.promise(() => readFirstPromptMessage(createInput));
+      assert.isDefined(promptMessage);
+      const content = promptMessage?.message.content;
+      assert.isArray(content);
+      assert.lengthOf(content ?? [], 1);
+      const textBlock = content?.[0] as { type: string; text: string };
+      assert.equal(textBlock.type, "text");
+      assert.include(
+        textBlock.text,
+        `[Attached file] notes.txt (text/plain, 3 bytes) saved at: ${textPath}`,
+      );
+      assert.include(textBlock.text, "[Attached file] diagram.bmp (image/bmp, 2 bytes) saved at:");
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

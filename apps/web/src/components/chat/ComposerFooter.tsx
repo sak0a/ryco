@@ -413,6 +413,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   isConnecting: boolean;
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
+  sendDisabledReason?: string | null | undefined;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
@@ -438,6 +439,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        sendDisabledReason={props.sendDisabledReason}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
@@ -517,6 +519,7 @@ export interface ComposerFooterProps {
   isEnvironmentUnavailable: boolean;
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
+  sendDisabledReason?: string | null | undefined;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -727,6 +730,7 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
           isEnvironmentUnavailable={props.isEnvironmentUnavailable}
           isPreparingWorktree={props.isPreparingWorktree}
           hasSendableContent={props.hasSendableContent}
+          sendDisabledReason={props.sendDisabledReason}
           preserveComposerFocusOnPointerDown={props.isMobileViewport}
           onPreviousPendingQuestion={props.onPreviousPendingQuestion}
           onInterrupt={props.onInterrupt}

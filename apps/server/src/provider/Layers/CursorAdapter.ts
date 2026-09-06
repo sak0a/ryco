@@ -41,7 +41,13 @@ import {
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import {
+  appendAttachmentPathLines,
+  formatAttachmentPathLines,
+  type AttachmentPathLineEntry,
+} from "@ryco/shared/attachmentPrompt";
+
+import { isPersistableChatAttachment, resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import {
@@ -1132,42 +1138,65 @@ export function makeCursorAdapter(
           });
           ctx.agentControlHostContextDelivered = true;
         }
-        if (input.input?.trim()) {
-          promptParts.push({ type: "text", text: input.input.trim() });
-        }
-        if (input.attachments && input.attachments.length > 0) {
-          for (const attachment of input.attachments) {
-            const attachmentPath = resolveAttachmentPath({
-              attachmentsDir: serverConfig.attachmentsDir,
+        const pathLineEntries: AttachmentPathLineEntry[] = [];
+        const imageParts: Array<EffectAcpSchema.ContentBlock> = [];
+        for (const attachment of input.attachments ?? []) {
+          if (!isPersistableChatAttachment(attachment) || attachment.type !== "image") {
+            pathLineEntries.push({
               attachment,
-            });
-            if (!attachmentPath) {
-              return yield* new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "session/prompt",
-                detail: `Invalid attachment id '${attachment.id}'.`,
-              });
-            }
-            const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProviderAdapterRequestError({
-                    provider: PROVIDER,
-                    method: "session/prompt",
-                    detail: cause.message,
-                    cause,
+              ...(attachment.id === undefined
+                ? {}
+                : {
+                    resolvedPath:
+                      resolveAttachmentPath({
+                        attachmentsDir: serverConfig.attachmentsDir,
+                        attachment,
+                      }) ?? undefined,
                   }),
-              ),
-            );
-            promptParts.push({
-              type: "image",
-              data: Buffer.from(bytes).toString("base64"),
-              mimeType: attachment.mimeType,
+            });
+            continue;
+          }
+          const attachmentPath = resolveAttachmentPath({
+            attachmentsDir: serverConfig.attachmentsDir,
+            attachment,
+          });
+          if (!attachmentPath) {
+            return yield* new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "session/prompt",
+              detail: `Invalid attachment id '${attachment.id}'.`,
             });
           }
+          const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "session/prompt",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          );
+          imageParts.push({
+            type: "image",
+            data: Buffer.from(bytes).toString("base64"),
+            mimeType: attachment.mimeType,
+          });
         }
+        const promptText = appendAttachmentPathLines(
+          input.input?.trim(),
+          formatAttachmentPathLines(pathLineEntries),
+        );
+        if (promptText?.trim()) {
+          promptParts.push({ type: "text", text: promptText });
+        }
+        promptParts.push(...imageParts);
 
-        if (!input.input?.trim() && (!input.attachments || input.attachments.length === 0)) {
+        if (
+          (!promptText || promptText.trim().length === 0) &&
+          (!input.attachments || input.attachments.length === 0)
+        ) {
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "sendTurn",

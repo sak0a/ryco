@@ -55,6 +55,8 @@ describe("WS_METHODS Atlassian and work item names", () => {
     expect(WS_METHODS.workItemsUpdate).toBe("workItems.update");
     expect(WS_METHODS.workItemsEditComment).toBe("workItems.editComment");
     expect(WS_METHODS.workItemsTransition).toBe("workItems.transition");
+    expect(WS_METHODS.chatAttachmentsCreateFileUpload).toBe("chatAttachments.createFileUpload");
+    expect(WsRpcGroup.requests.has(WS_METHODS.chatAttachmentsCreateFileUpload)).toBe(true);
   });
 
   it("rejects payloads missing required fields", () => {

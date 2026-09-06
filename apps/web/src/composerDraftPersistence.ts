@@ -8,6 +8,10 @@ import {
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
 import { isHostedHubMode } from "./env";
 import { createDebouncedStorage, createMemoryStorage } from "./lib/storage";
+import {
+  seedComposerFileNeedsReattach,
+  seedComposerFileUploadFromPersisted,
+} from "./composerFileUpload";
 import type { ComposerImageAttachment } from "./composerDraftStore";
 
 // ---------------------------------------------------------------------------
@@ -56,10 +60,11 @@ export function readPersistedAttachmentIdsFromStorage(threadKey: string): string
 
 function hydratePersistedComposerImageAttachment(
   attachment: PersistedComposerImageAttachment,
+  dataUrl: string,
 ): File | null {
-  const commaIndex = attachment.dataUrl.indexOf(",");
-  const header = commaIndex === -1 ? attachment.dataUrl : attachment.dataUrl.slice(0, commaIndex);
-  const payload = commaIndex === -1 ? "" : attachment.dataUrl.slice(commaIndex + 1);
+  const commaIndex = dataUrl.indexOf(",");
+  const header = commaIndex === -1 ? dataUrl : dataUrl.slice(0, commaIndex);
+  const payload = commaIndex === -1 ? "" : dataUrl.slice(commaIndex + 1);
   if (payload.length === 0) {
     return null;
   }
@@ -106,7 +111,33 @@ export function hydrateImagesFromPersistedWithFailures(
   const images: ComposerImageAttachment[] = [];
   const unreadableImageNames: string[] = [];
   for (const attachment of attachments) {
-    const file = hydratePersistedComposerImageAttachment(attachment);
+    if (!attachment.dataUrl) {
+      // Streamed file attachment: bytes were never client-persisted, so the
+      // row restores from token metadata (or as an "attach again" stub).
+      if (attachment.uploadToken && attachment.expiresAt) {
+        seedComposerFileUploadFromPersisted({
+          attachmentId: attachment.id,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          uploadToken: attachment.uploadToken,
+          expiresAt: attachment.expiresAt,
+        });
+      } else {
+        seedComposerFileNeedsReattach(attachment.id);
+      }
+      images.push({
+        type: "file",
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        previewUrl: "",
+        file: null,
+      });
+      continue;
+    }
+    const file = hydratePersistedComposerImageAttachment(attachment, attachment.dataUrl);
     if (!file) {
       unreadableImageNames.push(attachment.name);
       continue;

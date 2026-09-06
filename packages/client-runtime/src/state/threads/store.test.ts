@@ -1918,3 +1918,92 @@ describe("shell push coalescing", () => {
     expect(committed).toEqual(reference);
   });
 });
+
+describe("message attachment mapping", () => {
+  it("carries advisory attachment dimensions through message mapping", () => {
+    const thread = makeThread();
+    const state = makeState(thread);
+
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.message-sent", {
+        threadId: thread.id,
+        messageId: MessageId.make("message-1"),
+        role: "user",
+        text: "with attachments",
+        attachments: [
+          {
+            type: "image",
+            id: "attachment-image-1",
+            name: "chart.png",
+            mimeType: "image/png",
+            sizeBytes: 1024,
+            width: 640,
+            height: 480,
+          },
+          {
+            type: "image",
+            id: "attachment-image-2",
+            name: "unknown-size.png",
+            mimeType: "image/png",
+            sizeBytes: 512,
+          },
+          {
+            type: "file",
+            id: "attachment-file-1",
+            name: "clip.mp4",
+            mimeType: "video/mp4",
+            sizeBytes: 2048,
+            width: 1920,
+            height: 1080,
+          },
+          {
+            type: "vendorX/telemetry",
+            name: "opaque-blob",
+            sizeBytes: 16,
+          },
+        ],
+        turnId: TurnId.make("turn-1"),
+        streaming: false,
+        createdAt: "2026-02-27T00:00:01.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    const attachments = threadsOf(next)[0]?.messages[0]?.attachments;
+    expect(attachments?.[0]).toEqual({
+      type: "image",
+      id: "attachment-image-1",
+      name: "chart.png",
+      mimeType: "image/png",
+      sizeBytes: 1024,
+      width: 640,
+      height: 480,
+      previewUrl: "attachment-image-1",
+    });
+    expect(attachments?.[1]).toEqual({
+      type: "image",
+      id: "attachment-image-2",
+      name: "unknown-size.png",
+      mimeType: "image/png",
+      sizeBytes: 512,
+      previewUrl: "attachment-image-2",
+    });
+    expect(attachments?.[2]).toEqual({
+      type: "file",
+      id: "attachment-file-1",
+      name: "clip.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 2048,
+      width: 1920,
+      height: 1080,
+      previewUrl: "attachment-file-1",
+    });
+    expect(attachments?.[3]).toEqual({
+      type: "vendorX/telemetry",
+      name: "opaque-blob",
+      sizeBytes: 16,
+    });
+  });
+});

@@ -2,6 +2,7 @@ import { Effect, Option, Schema, Stream } from "effect";
 import { clamp } from "effect/Number";
 import {
   AuthRpcError,
+  FileAttachmentCreateUploadUrlError,
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
@@ -691,6 +692,30 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
           }),
         ),
         { "rpc.aggregate": "threadPriority" },
+      ),
+    [WS_METHODS.chatAttachmentsCreateFileUpload]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.chatAttachmentsCreateFileUpload,
+        ownerEffect(
+          WS_METHODS.chatAttachmentsCreateFileUpload,
+          Option.match(ctx.chatAttachmentUploads, {
+            onNone: () =>
+              Effect.fail(
+                new FileAttachmentCreateUploadUrlError({
+                  message: "File attachment uploads are not available on this server.",
+                }),
+              ),
+            onSome: (uploads) =>
+              uploads
+                .create(input)
+                .pipe(
+                  Effect.mapError(
+                    (error) => new FileAttachmentCreateUploadUrlError({ message: error.message }),
+                  ),
+                ),
+          }),
+        ),
+        { "rpc.aggregate": "orchestration" },
       ),
   });
 };

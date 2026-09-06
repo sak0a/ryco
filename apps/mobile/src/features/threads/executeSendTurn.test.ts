@@ -98,7 +98,8 @@ describe("executeSendTurn", () => {
       name: "screen.png",
       mimeType: "image/png",
       sizeBytes: 3,
-      previewUrl: "data:image/png;base64,AQID",
+      dataUrl: "data:image/png;base64,AQID",
+      previewUri: "file:///tmp/screen.png",
     };
     const { input, dispatchCommand } = baseInput({
       composer: {

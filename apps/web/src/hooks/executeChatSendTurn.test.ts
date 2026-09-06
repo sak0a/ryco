@@ -12,10 +12,90 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { DraftId } from "../composerDraftStore";
 import type { ChatMessage } from "../types";
 import {
+  buildOutgoingTurnAttachments,
   buildSendTurnBootstrap,
   executeChatSendTurn,
   rollbackSendTurn,
 } from "./executeChatSendTurn";
+
+// ---------------------------------------------------------------------------
+// buildOutgoingTurnAttachments
+// ---------------------------------------------------------------------------
+
+describe("buildOutgoingTurnAttachments", () => {
+  const NOW = Date.parse("2026-09-01T00:00:00.000Z");
+
+  function makeFileAttachment(overrides: Record<string, unknown> = {}) {
+    return {
+      type: "file" as const,
+      id: "att-file-1",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 12,
+      previewUrl: "",
+      file: null,
+      ...overrides,
+    };
+  }
+
+  it("dispatches uploaded file attachments by token without inline bytes", async () => {
+    const attachments = await buildOutgoingTurnAttachments(
+      [
+        makeFileAttachment({
+          uploadToken: "upload-token-1",
+          expiresAt: "2026-09-01T00:05:00.000Z",
+        }),
+      ],
+      { nowMs: NOW },
+    );
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toEqual({
+      type: "file",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 12,
+      uploadToken: "upload-token-1",
+    });
+    expect(attachments[0]).not.toHaveProperty("dataUrl");
+  });
+
+  it("falls back to inline dataUrl for legacy files and always for images", async () => {
+    const attachments = await buildOutgoingTurnAttachments(
+      [
+        makeFileAttachment({ file: new File(["hello world"], "notes.txt") }),
+        {
+          type: "image" as const,
+          id: "att-image-1",
+          name: "shot.png",
+          mimeType: "image/png",
+          sizeBytes: 4,
+          previewUrl: "blob:preview",
+          file: new File(["abcd"], "shot.png", { type: "image/png" }),
+        },
+      ],
+      { nowMs: NOW },
+    );
+    expect(attachments[0]).toMatchObject({ type: "file", name: "notes.txt" });
+    expect(attachments[0]?.dataUrl).toContain("data:application/octet-stream;base64,");
+    expect(attachments[0]).not.toHaveProperty("uploadToken");
+    expect(attachments[1]).toMatchObject({ type: "image", name: "shot.png" });
+    expect(attachments[1]?.dataUrl).toContain("data:image/png;base64,");
+  });
+
+  it("does not dispatch an expired upload token", async () => {
+    await expect(
+      buildOutgoingTurnAttachments(
+        [
+          makeFileAttachment({
+            uploadToken: "stale-token",
+            expiresAt: "2026-08-31T23:00:00.000Z",
+          }),
+        ],
+        { nowMs: NOW },
+      ),
+    ).rejects.toThrow();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // rollbackSendTurn

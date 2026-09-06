@@ -91,6 +91,7 @@ import {
   DEFAULT_AGENT_TOKEN_MODE,
   DEFAULT_RUNTIME_MODE,
   MAX_TERMINALS_PER_GROUP,
+  isChatImageAttachment,
   type ChatMessage,
   type TurnDiffSummary,
 } from "../types";
@@ -216,6 +217,7 @@ import {
 } from "../hooks/executeChatSendTurn";
 import { useMessageQueueStore } from "../messageQueueStore";
 import type { QueuedMessage } from "../messageQueue.logic";
+import { deriveComposerFileUploadSendBlock } from "~/composerFileUpload";
 import { ComposerQueuedMessages } from "./chat/ComposerQueuedMessages";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -1714,7 +1716,7 @@ export default function ChatView(props: ChatViewProps) {
             let changed = false;
             let imageIndex = 0;
             const attachments = message.attachments.map((attachment) => {
-              if (attachment.type !== "image") {
+              if (!isChatImageAttachment(attachment)) {
                 return attachment;
               }
               const handoffPreviewUrl = handoffPreviewUrls[imageIndex];
@@ -3434,6 +3436,20 @@ export default function ChatView(props: ChatViewProps) {
           }),
         );
       }
+      return;
+    }
+    const fileUploadSendBlock = deriveComposerFileUploadSendBlock({
+      attachments: composerImages,
+      nowMs: Date.now(),
+    });
+    if (fileUploadSendBlock) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Attachments aren't ready",
+          description: fileUploadSendBlock,
+        }),
+      );
       return;
     }
     const composerSnapshot: SendTurnComposerSnapshot = {

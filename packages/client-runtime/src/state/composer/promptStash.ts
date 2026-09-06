@@ -60,7 +60,7 @@ export function partitionPromptStashEntries(
 export function promptStashAttachmentCharacters(
   attachments: ReadonlyArray<PersistedComposerImageAttachmentType>,
 ): number {
-  return attachments.reduce((total, attachment) => total + attachment.dataUrl.length, 0);
+  return attachments.reduce((total, attachment) => total + (attachment.dataUrl?.length ?? 0), 0);
 }
 
 /**
@@ -77,7 +77,7 @@ export function partitionPromptStashAttachments(
   let aggregateChars = Math.max(0, aggregateCharsAlreadyUsed);
 
   for (const attachment of attachments) {
-    const attachmentChars = attachment.dataUrl.length;
+    const attachmentChars = attachment.dataUrl?.length ?? 0;
     const exceedsEntryBudget =
       entryChars + attachmentChars > PROMPT_STASH_MAX_ENTRY_ATTACHMENT_CHARS;
     const exceedsAggregateBudget =

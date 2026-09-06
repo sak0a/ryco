@@ -1,6 +1,12 @@
 import { Effect, Schema } from "effect";
 
-import { EnvironmentId, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  EnvironmentId,
+  NonNegativeInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 
 export const ExecutionEnvironmentPlatformOs = Schema.Literals([
   "darwin",
@@ -24,6 +30,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   threadSnooze: Schema.optional(Schema.Boolean),
   threadSettlement: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   threadPriorityRanking: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  fileAttachments: Schema.optional(Schema.Struct({ maxUploadBytes: NonNegativeInt })),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

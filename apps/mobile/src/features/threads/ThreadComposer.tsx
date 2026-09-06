@@ -9,11 +9,8 @@ import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStri
 import { ComposerToolbarButton, ComposerToolbarRow } from "../../components/ComposerToolbarTrigger";
 import { GlassSurface } from "../../components/GlassSurface";
 import { ProviderIcon } from "../../components/ProviderIcon";
-import {
-  convertPastedImagesToAttachments,
-  pickComposerImages,
-  type DraftComposerImageAttachment,
-} from "../../lib/composerImages";
+import type { DraftComposerAttachment } from "../../lib/composerFiles";
+import type { ChatFileUploadRecord } from "../../state/composerFileUpload";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { ComposerEditor } from "../../native/ComposerEditor";
 import type { PendingContextHandoffPresentation } from "./contextHandoffModel";
@@ -22,13 +19,24 @@ import { PendingContextHandoffChip } from "./PendingContextHandoffChip";
 // Floating glass composer capsule (§3.5.2, §5). It uses the shared native
 // ComposerEditor so mentions/skills, hardware-keyboard submit, and pasted images
 // behave like the desktop composer while preserving a compact phone footprint.
+// Attachment state (images + streamed files) lives in the owning screen, which
+// knows the environment/thread context the upload engine needs.
 export function ThreadComposer(props: {
   // Returns false when the send failed (offline/error) so the composer keeps the
   // user's text; enqueue/dispatch success returns true (or void) and clears it.
   readonly onSend: (
     text: string,
-    attachments: ReadonlyArray<DraftComposerImageAttachment>,
+    attachments: ReadonlyArray<DraftComposerAttachment>,
   ) => boolean | void | Promise<boolean | void>;
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
+  readonly onRemoveAttachment: (attachmentId: string) => void;
+  readonly onPickAttachments: () => void | Promise<void>;
+  readonly onPasteImages: (uris: ReadonlyArray<string>) => void | Promise<void>;
+  readonly onRetryFileUpload?: (attachmentId: string) => void;
+  readonly onReattachFile?: (attachmentId: string) => void;
+  readonly attachmentError?: string | null;
+  readonly sendBlock?: string | null;
+  readonly fileUploadRecords?: ReadonlyMap<string, ChatFileUploadRecord>;
   readonly disabled?: boolean;
   /**
    * Session-policy rail. Omitted on surfaces that have no thread to configure,
@@ -56,62 +64,43 @@ export function ThreadComposer(props: {
 }) {
   const safeAreaInsets = useSafeAreaInsets();
   const [text, setText] = useState("");
-  const [attachments, setAttachments] = useState<ReadonlyArray<DraftComposerImageAttachment>>([]);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const primaryFg = useThemeColor("--color-primary-foreground");
   const iconSubtle = useThemeColor("--color-icon-subtle");
   const iconColor = useThemeColor("--color-icon");
   const warningColor = useThemeColor("--color-warning");
 
-  const canSend = (text.trim().length > 0 || attachments.length > 0) && !sending && !props.disabled;
+  const visibleAttachmentError = props.attachmentError ?? props.sendBlock;
+  const canSend =
+    (text.trim().length > 0 || props.attachments.length > 0) &&
+    !sending &&
+    !props.disabled &&
+    !props.sendBlock;
 
   const send = async () => {
     if (!canSend) return;
     const value = text;
-    const imageSnapshot = attachments;
     setSending(true);
     try {
-      const result = await props.onSend(value, imageSnapshot);
+      const result = await props.onSend(value, props.attachments);
       // Keep the complete draft on an explicit failure; clear on success/enqueue.
       if (result !== false) {
         setText("");
-        setAttachments([]);
-        setAttachmentError(null);
       }
     } finally {
       setSending(false);
     }
   };
 
-  const pickImages = async () => {
-    const result = await pickComposerImages({
-      existingCount: attachments.length,
-    });
-    setAttachmentError(result.error);
-    if (result.images.length > 0) {
-      setAttachments((current) => [...current, ...result.images]);
-    }
-  };
-
   const pasteImages = async (uris: ReadonlyArray<string>) => {
-    const images = await convertPastedImagesToAttachments({
-      uris,
-      existingCount: attachments.length,
-    });
-    if (images.length === 0 && uris.length > 0) {
-      setAttachmentError("The pasted image could not be attached.");
-      return;
-    }
-    setAttachmentError(null);
-    setAttachments((current) => [...current, ...images]);
+    await props.onPasteImages(uris);
   };
 
   return (
     <View className="px-4 pt-1" style={{ paddingBottom: Math.max(8, safeAreaInsets.bottom) }}>
-      {attachmentError ? (
+      {visibleAttachmentError ? (
         <Text className="px-3 pb-1.5 text-xs font-ryco-medium text-danger-foreground">
-          {attachmentError}
+          {visibleAttachmentError}
         </Text>
       ) : null}
       {props.pendingContextHandoff ? (
@@ -163,20 +152,21 @@ export function ThreadComposer(props: {
           ) : null}
           <View className="px-2">
             <ComposerAttachmentStrip
-              attachments={attachments}
+              attachments={props.attachments}
+              fileUploadRecords={props.fileUploadRecords}
               imageSize={58}
               imageBorderRadius={13}
-              onRemove={(id) =>
-                setAttachments((current) => current.filter((attachment) => attachment.id !== id))
-              }
+              onRemove={props.onRemoveAttachment}
+              onRetryFileUpload={props.onRetryFileUpload}
+              onReattachFile={props.onReattachFile}
             />
           </View>
           <View className="flex-row items-end gap-1">
             <Pressable
               disabled={sending || props.disabled}
-              onPress={() => void pickImages()}
+              onPress={() => void props.onPickAttachments()}
               accessibilityRole="button"
-              accessibilityLabel="Attach images"
+              accessibilityLabel="Attach files"
               className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong disabled:opacity-40"
             >
               <SymbolView

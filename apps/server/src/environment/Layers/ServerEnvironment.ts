@@ -1,4 +1,8 @@
-import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@ryco/contracts";
+import {
+  EnvironmentId,
+  type ExecutionEnvironmentDescriptor,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+} from "@ryco/contracts";
 import { Effect, FileSystem, Layer, Path } from "effect";
 
 import { ServerConfig } from "../../config.ts";
@@ -83,6 +87,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       threadSettlement: true,
       threadSnooze: true,
       threadPriorityRanking: true,
+      fileAttachments: { maxUploadBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES },
     },
   };
 

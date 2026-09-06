@@ -25,7 +25,7 @@ function attachmentSummary(message: ChatMessage): string | null {
     return null;
   }
 
-  const names = attachments.slice(0, 3).map((attachment) => attachment.name);
+  const names = attachments.slice(0, 3).map((attachment) => attachment.name ?? "attachment");
   const namesSummary = names.join(", ");
   const extraCount = count - names.length;
   const extraSummary = extraCount > 0 ? ` (+${extraCount} more)` : "";

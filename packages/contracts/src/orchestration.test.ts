@@ -2,12 +2,18 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
 import {
+  ChatAttachment,
+  ChatFileAttachment,
+  ChatImageAttachment,
+  ChatUnknownAttachment,
+  ClientOrchestrationCommand,
   ContextHandoffActivityPayload,
   ContextHandoffExportChunk,
   ContextHandoffInspectionEntriesInput,
-  ClientOrchestrationCommand,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  FileAttachmentCreateUploadUrlInput,
+  FileAttachmentCreateUploadUrlResult,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
@@ -20,6 +26,7 @@ import {
   OrchestrationThreadShell,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
@@ -54,6 +61,16 @@ const decodeContextHandoffEntriesInput = Schema.decodeUnknownEffect(
 const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
 const decodeOrchestrationThreadShell = Schema.decodeUnknownEffect(OrchestrationThreadShell);
 const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
+const decodeChatAttachment = Schema.decodeUnknownEffect(ChatAttachment);
+const decodeChatUnknownAttachment = Schema.decodeUnknownEffect(ChatUnknownAttachment);
+const decodeChatImageAttachment = Schema.decodeUnknownEffect(ChatImageAttachment);
+const decodeChatFileAttachment = Schema.decodeUnknownEffect(ChatFileAttachment);
+const decodeFileAttachmentCreateUploadUrlInput = Schema.decodeUnknownEffect(
+  FileAttachmentCreateUploadUrlInput,
+);
+const decodeFileAttachmentCreateUploadUrlResult = Schema.decodeUnknownEffect(
+  FileAttachmentCreateUploadUrlResult,
+);
 
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
@@ -146,6 +163,171 @@ it.effect("rejects oversized, unsafe, and excessive general file uploads", () =>
     for (const result of exits) {
       assert.strictEqual(result._tag, "Failure");
     }
+  }),
+);
+
+it.effect("decodes future attachment kinds and rejects malformed known kinds", () =>
+  Effect.gen(function* () {
+    const unknown = yield* decodeChatAttachment({
+      type: "future-kind",
+      name: "archive.zip",
+      mimeType: "application/zip",
+      sizeBytes: 12,
+      extraField: "tolerated",
+    });
+    assert.strictEqual(unknown.type, "future-kind");
+
+    const directUnknown = yield* decodeChatUnknownAttachment({ type: "future-kind" });
+    assert.strictEqual(directUnknown.type, "future-kind");
+
+    const malformedImage = yield* Effect.exit(
+      decodeChatAttachment({
+        type: "image",
+        id: "img-1",
+        name: "pic.png",
+        mimeType: "image/png",
+        sizeBytes: PROVIDER_SEND_TURN_MAX_IMAGE_BYTES + 1,
+      }),
+    );
+    assert.strictEqual(malformedImage._tag, "Failure");
+
+    const malformedFile = yield* Effect.exit(
+      decodeChatAttachment({
+        type: "file",
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      }),
+    );
+    assert.strictEqual(malformedFile._tag, "Failure");
+  }),
+);
+
+it.effect("decodes optional attachment media dimensions and rejects negative ones", () =>
+  Effect.gen(function* () {
+    const image = yield* decodeChatImageAttachment({
+      type: "image",
+      id: "img-1",
+      name: "pic.png",
+      mimeType: "image/png",
+      sizeBytes: 3,
+      width: 1920,
+      height: 1080,
+    });
+    assert.strictEqual(image.width, 1920);
+    assert.strictEqual(image.height, 1080);
+
+    const file = yield* decodeChatFileAttachment({
+      type: "file",
+      id: "clip-1",
+      name: "clip.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 3,
+      width: 640,
+      height: 360,
+    });
+    assert.strictEqual(file.width, 640);
+    assert.strictEqual(file.height, 360);
+
+    const absent = yield* decodeChatImageAttachment({
+      type: "image",
+      id: "img-2",
+      name: "old.png",
+      mimeType: "image/png",
+      sizeBytes: 3,
+    });
+    assert.strictEqual(absent.width, undefined);
+    assert.strictEqual(absent.height, undefined);
+
+    const negativeWidth = yield* Effect.exit(
+      decodeChatAttachment({
+        type: "image",
+        id: "img-3",
+        name: "pic.png",
+        mimeType: "image/png",
+        sizeBytes: 3,
+        width: -1,
+        height: 2,
+      }),
+    );
+    assert.strictEqual(negativeWidth._tag, "Failure");
+
+    const negativeHeight = yield* Effect.exit(
+      decodeChatAttachment({
+        type: "file",
+        id: "clip-2",
+        name: "clip.mp4",
+        mimeType: "video/mp4",
+        sizeBytes: 3,
+        width: 2,
+        height: -1,
+      }),
+    );
+    assert.strictEqual(negativeHeight._tag, "Failure");
+  }),
+);
+
+it.effect("accepts file uploads by dataUrl or uploadToken but not both or neither", () =>
+  Effect.gen(function* () {
+    const baseFile = {
+      type: "file",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 3,
+    };
+    const byDataUrl = yield* decodeClientOrchestrationCommand(
+      clientTurnWithAttachments([{ ...baseFile, dataUrl: "data:text/plain;base64,YWJj" }]),
+    );
+    assert.strictEqual(byDataUrl.type, "thread.turn.start");
+
+    const byUploadToken = yield* decodeClientOrchestrationCommand(
+      clientTurnWithAttachments([{ ...baseFile, uploadToken: "upload-token-1" }]),
+    );
+    assert.strictEqual(byUploadToken.type, "thread.turn.start");
+
+    const neither = yield* Effect.exit(
+      decodeClientOrchestrationCommand(clientTurnWithAttachments([baseFile])),
+    );
+    assert.strictEqual(neither._tag, "Failure");
+
+    const both = yield* Effect.exit(
+      decodeClientOrchestrationCommand(
+        clientTurnWithAttachments([
+          { ...baseFile, dataUrl: "data:text/plain;base64,YWJj", uploadToken: "upload-token-1" },
+        ]),
+      ),
+    );
+    assert.strictEqual(both._tag, "Failure");
+  }),
+);
+
+it.effect("validates file attachment upload-url contracts", () =>
+  Effect.gen(function* () {
+    const input = yield* decodeFileAttachmentCreateUploadUrlInput({
+      threadId: "thread-1",
+      name: "notes.txt",
+      mimeType: "text/plain",
+      sizeBytes: 3,
+    });
+    assert.strictEqual(input.sizeBytes, 3);
+
+    const oversized = yield* Effect.exit(
+      decodeFileAttachmentCreateUploadUrlInput({
+        threadId: "thread-1",
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES + 1,
+      }),
+    );
+    assert.strictEqual(oversized._tag, "Failure");
+
+    const result = yield* decodeFileAttachmentCreateUploadUrlResult({
+      uploadToken: "upload-token-1",
+      expiresAt: "2026-09-06T00:00:00.000Z",
+      maxUploadBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+    });
+    assert.strictEqual(result.uploadToken, "upload-token-1");
+    assert.strictEqual(result.maxUploadBytes, PROVIDER_SEND_TURN_MAX_FILE_BYTES);
   }),
 );
 

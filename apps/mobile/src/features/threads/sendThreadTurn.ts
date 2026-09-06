@@ -7,7 +7,7 @@ import type {
   ThreadId,
 } from "@ryco/contracts";
 
-import type { DraftComposerImageAttachment } from "../../lib/composerImages";
+import type { DraftComposerAttachment } from "../../lib/composerFiles";
 import type { QueuedThreadMessage } from "../../state/threadOutboxModel";
 
 // §3-14: a send issued while the thread's turn is RUNNING, or while the
@@ -28,7 +28,7 @@ export interface SendThreadTurnContext {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly text: string;
-  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;

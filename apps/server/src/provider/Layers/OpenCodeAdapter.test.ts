@@ -33,9 +33,11 @@ import { agentControlHostContext } from "../../agentControl/ProviderInjection.ts
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
+  isOpenCodeNativeAttachment,
   OpenCodeRuntime,
   OpenCodeRuntimeError,
   type OpenCodeRuntimeShape,
+  OPENCODE_NATIVE_ATTACHMENT_MAX_BYTES,
 } from "../opencodeRuntime.ts";
 import {
   appendOpenCodeAssistantTextDelta,
@@ -879,6 +881,114 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           },
         ],
       });
+    }),
+  );
+
+  it.effect("gates native file parts and degrades the rest to path lines", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const config = yield* ServerConfig;
+      const threadId = asThreadId("thread-gated-attachments");
+      yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true });
+
+      const smallPdf = {
+        type: "file" as const,
+        id: "thread-gated-small-pdf-attachment",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 4,
+      };
+      const oversizedPdf = {
+        type: "file" as const,
+        id: "thread-gated-big-pdf-attachment",
+        name: "huge.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: OPENCODE_NATIVE_ATTACHMENT_MAX_BYTES + 1,
+      };
+      const zip = {
+        type: "file" as const,
+        id: "thread-gated-zip-attachment",
+        name: "bundle.zip",
+        mimeType: "application/zip",
+        sizeBytes: 10,
+      };
+      const bitmap = {
+        type: "image" as const,
+        id: "thread-gated-bmp-attachment",
+        name: "diagram.bmp",
+        mimeType: "image/bmp",
+        sizeBytes: 2,
+      };
+      for (const [attachment, bytes] of [
+        [smallPdf, Uint8Array.from([1, 2, 3, 4])],
+        [zip, Uint8Array.from(Array.from({ length: 10 }, (_, index) => index))],
+      ] as const) {
+        const attachmentPath = `${config.attachmentsDir}/${attachmentRelativePath(attachment)}`;
+        yield* fileSystem.writeFile(attachmentPath, bytes);
+      }
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-gated-attachments"),
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter
+        .sendTurn({
+          threadId,
+          input: "Review everything",
+          attachments: [smallPdf, oversizedPdf, zip, bitmap],
+          modelSelection: createModelSelection(ProviderInstanceId.make("opencode"), "openai/gpt-5"),
+        })
+        .pipe(
+          Effect.ensuring(
+            Effect.forEach(
+              [smallPdf, zip],
+              (attachment) =>
+                fileSystem
+                  .remove(`${config.attachmentsDir}/${attachmentRelativePath(attachment)}`)
+                  .pipe(Effect.ignore),
+              { discard: true },
+            ),
+          ),
+        );
+
+      assert.equal(isOpenCodeNativeAttachment(smallPdf), true);
+      assert.equal(isOpenCodeNativeAttachment(oversizedPdf), false);
+      assert.equal(isOpenCodeNativeAttachment(zip), false);
+      assert.equal(isOpenCodeNativeAttachment(bitmap), false);
+      const lastPrompt = runtimeMock.state.promptCalls.at(-1) as {
+        parts: Array<Record<string, unknown>>;
+      };
+      const fileParts = lastPrompt.parts.filter((part) => part.type === "file");
+      assert.deepEqual(fileParts, [
+        {
+          type: "file",
+          mime: "application/pdf",
+          filename: "report.pdf",
+          url: "data:application/pdf;base64,AQIDBA==",
+        },
+      ]);
+      const textPart = lastPrompt.parts.find((part) => part.type === "text");
+      const text = textPart?.text as string;
+      assert.equal(typeof text, "string");
+      assert.ok(text.includes("Review everything"));
+      assert.ok(
+        text.includes(
+          `[Attached file] huge.pdf (application/pdf, ${OPENCODE_NATIVE_ATTACHMENT_MAX_BYTES + 1} bytes) saved at: ${config.attachmentsDir}/${attachmentRelativePath(oversizedPdf)}`,
+        ),
+      );
+      assert.ok(
+        text.includes(
+          `[Attached file] bundle.zip (application/zip, 10 bytes) saved at: ${config.attachmentsDir}/${attachmentRelativePath(zip)}`,
+        ),
+      );
+      assert.ok(
+        text.includes(
+          `[Attached file] diagram.bmp (image/bmp, 2 bytes) saved at: ${config.attachmentsDir}/${attachmentRelativePath(bitmap)}`,
+        ),
+      );
     }),
   );
 

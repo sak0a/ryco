@@ -1,4 +1,4 @@
-import { Data, Effect, FileSystem, Option, Path } from "effect";
+import { Data, Effect, FileSystem, Option, Path, Stream } from "effect";
 import { cast } from "effect/Function";
 import {
   HttpBody,
@@ -9,6 +9,7 @@ import {
   HttpServerRequest,
   Multipart,
 } from "effect/unstable/http";
+import { open, rename, unlink } from "node:fs/promises";
 import * as Schema from "effect/Schema";
 import { OtlpTracer } from "effect/unstable/observability";
 
@@ -17,7 +18,16 @@ import {
   normalizeAttachmentRelativePath,
   resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
-import { resolveAttachmentPathById } from "./attachmentStore.ts";
+import {
+  probeAttachmentMediaDimensions,
+  probeAttachmentMediaForServing,
+} from "./attachmentMedia.ts";
+import { attachmentIdExtensionSegment, resolveAttachmentPathById } from "./attachmentStore.ts";
+import {
+  ChatAttachmentUploadError,
+  ChatAttachmentUploads,
+  type ChatAttachmentUploadLease,
+} from "./attachmentUpload.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
@@ -249,6 +259,34 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+const INLINE_VIDEO_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".ogv": "video/ogg",
+};
+
+/** A single byte range; malformed or multipart ranges are served in full. */
+export function parseAttachmentByteRange(
+  range: string | undefined,
+  size: number,
+): { start: number; end: number } | "unsatisfiable" | null {
+  const match = range?.match(/^bytes=(\d*)-(\d*)$/i);
+  if (!match || (!match[1] && !match[2])) return null;
+  const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+  const end = match[1] && match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    start > end ||
+    start >= size
+  ) {
+    return "unsatisfiable";
+  }
+  return { start, end };
+}
+
 export const attachmentsRouteLayer = HttpRouter.add(
   "GET",
   `${ATTACHMENTS_ROUTE_PREFIX}/*`,
@@ -293,12 +331,216 @@ export const attachmentsRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
 
+    const extension =
+      path.extname(filePath) ||
+      (isIdLookup ? attachmentIdExtensionSegment(normalizedRelativePath) : null) ||
+      "";
+    const videoContentType = INLINE_VIDEO_CONTENT_TYPES[extension.toLowerCase()];
+    const size = Number(fileInfo.size);
+    // If-Range validators are not compared here: sending the complete response
+    // is the safe fallback instead of returning a potentially mismatched slice.
+    const range =
+      videoContentType && !request.headers["if-range"]
+        ? parseAttachmentByteRange(request.headers.range, size)
+        : null;
+    if (range === "unsatisfiable") {
+      return HttpServerResponse.empty({
+        status: 416,
+        headers: {
+          "Content-Range": `bytes */${size}`,
+          "Cache-Control": "private, max-age=3600",
+        },
+      });
+    }
+    const mediaDimensions = yield* probeAttachmentMediaForServing(filePath, extension);
+    const mediaHeaders = mediaDimensions
+      ? {
+          "X-Attachment-Width": String(mediaDimensions.width),
+          "X-Attachment-Height": String(mediaDimensions.height),
+        }
+      : {};
+
     return yield* HttpServerResponse.file(filePath, {
-      status: 200,
-      headers: userAssetResponseHeaders(filePath, path),
+      status: range ? 206 : 200,
+      ...(range ? { offset: range.start, bytesToRead: range.end - range.start + 1 } : {}),
+      headers: {
+        ...(videoContentType
+          ? {
+              "Content-Type": videoContentType,
+              "Cache-Control": "private, max-age=3600",
+              "X-Content-Type-Options": "nosniff",
+              "Accept-Ranges": "bytes",
+            }
+          : userAssetResponseHeaders(filePath, path)),
+        ...(range ? { "Content-Range": `bytes ${range.start}-${range.end}/${size}` } : {}),
+        ...mediaHeaders,
+      },
     }).pipe(
       Effect.catch(() =>
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
+      ),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const UPLOAD_BODY_TOO_LARGE_STATUS = 413;
+
+class UploadBodyTooLargeError extends Data.TaggedError("UploadBodyTooLargeError")<{}> {}
+
+/**
+ * Streams the upload request body to the `<final>.part` staging file without
+ * buffering it in memory. The staging file lives outside the attachment id
+ * namespace so orphan sweeps can never touch a mid-upload file, and it is
+ * removed on every failure path.
+ */
+const streamUploadBodyToPartFile = <E>(input: {
+  readonly stream: Stream.Stream<Uint8Array, E>;
+  readonly lease: ChatAttachmentUploadLease;
+}) =>
+  Effect.acquireUseRelease(
+    Effect.tryPromise(() => open(input.lease.partPath, "w")),
+    (handle) =>
+      Effect.gen(function* () {
+        let written = 0;
+        yield* Stream.runForEach(input.stream, (chunk) =>
+          Effect.gen(function* () {
+            written += chunk.byteLength;
+            if (written > input.lease.maxBytes) {
+              return yield* Effect.fail(new UploadBodyTooLargeError());
+            }
+            yield* Effect.tryPromise(() => handle.writeFile(chunk));
+          }),
+        );
+        if (written !== input.lease.sizeBytes) {
+          return yield* Effect.fail(
+            new ChatAttachmentUploadError({
+              reason: "invalid-request",
+              status: 400,
+              message: "File upload ended before the declared size was received.",
+            }),
+          );
+        }
+        yield* Effect.tryPromise(() => handle.sync());
+      }),
+    (handle, exit) =>
+      Effect.tryPromise(() => handle.close()).pipe(
+        Effect.ignore,
+        Effect.andThen(
+          exit._tag === "Failure"
+            ? Effect.tryPromise(() => unlink(input.lease.partPath)).pipe(Effect.ignore)
+            : Effect.void,
+        ),
+      ),
+  );
+
+const removePartFile = (partPath: string) =>
+  Effect.tryPromise(() => unlink(partPath)).pipe(Effect.ignore);
+
+export const attachmentUploadRouteLayer = HttpRouter.add(
+  "POST",
+  `${ATTACHMENTS_ROUTE_PREFIX}/upload`,
+  Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+    const uploadToken = url.value.searchParams.get("token");
+    if (!uploadToken) {
+      return HttpServerResponse.text("Missing upload token", { status: 400 });
+    }
+
+    const uploads = yield* ChatAttachmentUploads;
+    const beginResult = yield* Effect.result(uploads.beginUpload(uploadToken));
+    if (beginResult._tag === "Failure") {
+      return HttpServerResponse.text(beginResult.failure.message, {
+        status: beginResult.failure.status,
+      });
+    }
+    const lease = beginResult.success;
+
+    return yield* Effect.gen(function* () {
+      const contentLength = Number(request.headers["content-length"] ?? "0");
+      if (Number.isFinite(contentLength) && contentLength > lease.maxBytes) {
+        yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
+        return HttpServerResponse.text("Upload exceeds the declared attachment size.", {
+          status: UPLOAD_BODY_TOO_LARGE_STATUS,
+        });
+      }
+
+      const streamResult = yield* Effect.result(
+        streamUploadBodyToPartFile({ stream: request.stream, lease }).pipe(
+          Effect.catchTag("UploadBodyTooLargeError", () =>
+            Effect.fail(
+              new ChatAttachmentUploadError({
+                reason: "invalid-request",
+                status: UPLOAD_BODY_TOO_LARGE_STATUS,
+                message: "Upload exceeds the declared attachment size.",
+              }),
+            ),
+          ),
+          Effect.mapError((cause) =>
+            cause instanceof ChatAttachmentUploadError
+              ? cause
+              : new ChatAttachmentUploadError({
+                  reason: "invalid-request",
+                  status: 400,
+                  message: "File upload stream failed before completion.",
+                }),
+          ),
+        ),
+      );
+      if (streamResult._tag === "Failure") {
+        yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
+        yield* removePartFile(lease.partPath);
+        return HttpServerResponse.text(streamResult.failure.message, {
+          status: streamResult.failure.status,
+        });
+      }
+
+      const renameResult = yield* Effect.result(
+        Effect.tryPromise(() => rename(lease.partPath, lease.finalPath)),
+      );
+      if (renameResult._tag === "Failure") {
+        yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
+        yield* removePartFile(lease.partPath);
+        return HttpServerResponse.text("Failed to persist the uploaded attachment.", {
+          status: 500,
+        });
+      }
+
+      const mediaDimensions = yield* probeAttachmentMediaDimensions(
+        lease.finalPath,
+        lease.mimeType,
+      );
+      const completeResult = yield* Effect.result(
+        uploads.completeUpload(uploadToken, mediaDimensions),
+      );
+      if (completeResult._tag === "Failure") {
+        yield* Effect.tryPromise(() => unlink(lease.finalPath)).pipe(Effect.ignore);
+        return HttpServerResponse.text(completeResult.failure.message, {
+          status: completeResult.failure.status,
+        });
+      }
+
+      return HttpServerResponse.jsonUnsafe({
+        attachmentTokenRef: uploadToken,
+        id: lease.attachmentId,
+        name: lease.name,
+        mimeType: lease.mimeType,
+        sizeBytes: lease.sizeBytes,
+        ...(mediaDimensions
+          ? { width: mediaDimensions.width, height: mediaDimensions.height }
+          : {}),
+      });
+    }).pipe(
+      Effect.onError(() =>
+        Effect.gen(function* () {
+          yield* uploads.abortUpload(uploadToken);
+          yield* removePartFile(lease.partPath);
+          yield* removePartFile(lease.finalPath);
+        }),
       ),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),

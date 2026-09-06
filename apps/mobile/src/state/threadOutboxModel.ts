@@ -11,7 +11,7 @@ import type {
   ThreadId,
 } from "@ryco/contracts";
 
-import type { DraftComposerImageAttachment } from "../lib/composerImages";
+import type { DraftComposerAttachment } from "../lib/composerFiles";
 
 // §3-14 (ratified option 2): the pure delivery/retry state machine for the
 // persistent offline outbox, ported verbatim from the upstream thread-outbox
@@ -31,7 +31,7 @@ export interface QueuedThreadMessage {
   readonly messageId: MessageId;
   readonly commandId: CommandId;
   readonly text: string;
-  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
+  readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly modelSelection?: ModelSelection;
   readonly runtimeMode?: RuntimeMode;
   readonly interactionMode?: ProviderInteractionMode;
@@ -62,6 +62,87 @@ export function modelSelectionsEqual(left: ModelSelection, right: ModelSelection
     left.model === right.model &&
     JSON.stringify(left.options ?? null) === JSON.stringify(right.options ?? null)
   );
+}
+
+/**
+ * Sanitizes a persisted outbox attachment list. Images keep their inline
+ * dataUrl; streamed files persist token metadata only (no bytes on reload)
+ * and restore as "attach again" rows when the upload never finished. Local
+ * read uris are transient and are always dropped here.
+ */
+export function normalizePersistedQueuedThreadMessageAttachments(
+  value: unknown,
+): DraftComposerAttachment[] {
+  if (!Array.isArray(value)) return [];
+  const out: DraftComposerAttachment[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as Record<string, unknown>;
+    const id = candidate.id;
+    const name = candidate.name;
+    const mimeType = candidate.mimeType;
+    const sizeBytes = candidate.sizeBytes;
+    if (
+      typeof id !== "string" ||
+      id.length === 0 ||
+      typeof name !== "string" ||
+      name.length === 0 ||
+      typeof mimeType !== "string" ||
+      typeof sizeBytes !== "number" ||
+      !Number.isFinite(sizeBytes) ||
+      sizeBytes < 0
+    ) {
+      continue;
+    }
+    const dataUrl =
+      typeof candidate.dataUrl === "string" && candidate.dataUrl.length > 0
+        ? candidate.dataUrl
+        : undefined;
+    const uploadToken =
+      typeof candidate.uploadToken === "string" && candidate.uploadToken.length > 0
+        ? candidate.uploadToken
+        : undefined;
+    const expiresAt =
+      typeof candidate.expiresAt === "string" && candidate.expiresAt.length > 0
+        ? candidate.expiresAt
+        : undefined;
+    if (candidate.type === "file") {
+      if (uploadToken !== undefined) {
+        out.push({
+          type: "file",
+          id,
+          name,
+          mimeType,
+          sizeBytes,
+          readUri: "",
+          ...(expiresAt !== undefined ? { expiresAt } : {}),
+          uploadToken,
+        });
+      } else {
+        out.push({
+          type: "file",
+          id,
+          name,
+          mimeType,
+          sizeBytes,
+          readUri: "",
+          uploadState: "needsReattach",
+        });
+      }
+      continue;
+    }
+    if (dataUrl === undefined) continue;
+    out.push({
+      type: "image",
+      id,
+      name,
+      mimeType,
+      sizeBytes,
+      dataUrl,
+      previewUri: dataUrl,
+    });
+  }
+  return out;
 }
 
 export function groupQueuedThreadMessages(

@@ -23,8 +23,13 @@ import {
   type DraftId,
   useComposerDraftStore,
 } from "../../composerDraftStore";
+import {
+  composerFileUploadEngine,
+  useEnvironmentFileUploadCapability,
+} from "../../composerFileUpload";
 import { readEnvironmentApi } from "~/environmentApi";
 import { getPrimaryKnownEnvironment } from "~/environments/primary";
+import { getEnvironmentHttpBaseUrl } from "~/environments/runtime/catalog";
 import { readLocalApi } from "~/localApi";
 import { randomUUID } from "~/lib/utils";
 import { toastManager } from "../ui/toast";
@@ -35,6 +40,13 @@ const FILE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_FILE_BYTES / 
 const STAGED_FILE_SIZE_LIMIT_LABEL = `${Math.round(PROJECT_STAGE_FILE_MAX_BYTES / (1024 * 1024))}MB`;
 const COMPOSER_FILE_REFERENCE_SEPARATOR = " ";
 
+function formatUploadSizeLimitLabel(maxBytes: number): string {
+  const streamingLimit = Math.min(maxBytes, PROVIDER_SEND_TURN_MAX_FILE_BYTES);
+  return streamingLimit % (1024 * 1024) === 0
+    ? `${Math.round(streamingLimit / (1024 * 1024))}MB`
+    : `${Math.round(streamingLimit / 1024)}KB`;
+}
+
 async function readFileAsBase64(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
@@ -43,6 +55,43 @@ async function readFileAsBase64(file: File): Promise<string> {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
   }
   return btoa(binary);
+}
+
+export interface ComposerAttachmentRouting {
+  /** Files attached directly to the composer (images, or files when supported). */
+  readonly direct: File[];
+  /** Files degraded into workspace file references in the prompt. */
+  readonly references: File[];
+}
+
+/**
+ * Capability-based routing: the environment's `fileAttachments` capability
+ * sends every file straight to the composer (non-images stream through the
+ * upload queue). Without it, the legacy provider gate keeps the old split —
+ * inline dataUrl files where the provider ingests bytes, file references
+ * everywhere else.
+ */
+export function resolveComposerAttachmentRouting(input: {
+  fileUploadMaxBytes: number | null;
+  selectedProvider: ProviderDriverKind;
+  files: readonly File[];
+}): ComposerAttachmentRouting {
+  const supportsDirectFiles =
+    input.fileUploadMaxBytes !== null ||
+    providerSupportsGeneralFileAttachments(input.selectedProvider);
+  if (supportsDirectFiles) {
+    return { direct: [...input.files], references: [] };
+  }
+  const direct: File[] = [];
+  const references: File[] = [];
+  for (const file of input.files) {
+    if (file.type.startsWith("image/")) {
+      direct.push(file);
+    } else {
+      references.push(file);
+    }
+  }
+  return { direct, references };
 }
 
 export interface UseComposerImageAttachmentsParams {
@@ -65,6 +114,7 @@ export interface UseComposerImageAttachmentsResult {
   isDragOverComposer: boolean;
   addComposerAttachments: (files: File[]) => Promise<void>;
   removeComposerImage: (imageId: string) => void;
+  retryComposerFileUpload: (imageId: string) => void;
   onComposerPaste: (event: React.ClipboardEvent<HTMLElement>) => void;
   onComposerDragEnter: (event: React.DragEvent<HTMLDivElement>) => void;
   onComposerDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -76,6 +126,11 @@ export interface UseComposerImageAttachmentsResult {
  * Owns composer image/file attachment handling: staging, drag-and-drop, paste,
  * and the drag-over visual state. Extracted from ChatComposer so the editor
  * shell and footer can share the same attachment pipeline.
+ *
+ * Routing is capability-based: when the environment advertises
+ * `fileAttachments`, non-image files attach directly and stream through the
+ * upload queue; otherwise the legacy provider gate decides between inline
+ * dataUrl attach and workspace file-reference staging.
  */
 export function useComposerImageAttachments(
   params: UseComposerImageAttachmentsParams,
@@ -96,9 +151,18 @@ export function useComposerImageAttachments(
     focusComposer,
   } = params;
 
+  const advertisedFileUploadMaxBytes = useEnvironmentFileUploadCapability(environmentId);
+  // Streaming also needs an environment HTTP base URL to transfer bytes
+  // against; hosted-relay environments keep the legacy attach paths.
+  const fileUploadMaxBytes =
+    advertisedFileUploadMaxBytes !== null && getEnvironmentHttpBaseUrl(environmentId) !== null
+      ? advertisedFileUploadMaxBytes
+      : null;
+
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
+  const getComposerDraftSession = useComposerDraftStore((store) => store.getDraftSession);
 
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const dragDepthRef = useRef(0);
@@ -129,6 +193,35 @@ export function useComposerImageAttachments(
     [composerDraftTarget, removeComposerDraftImage],
   );
 
+  const resolveUploadThreadId = useCallback((): ThreadId | null => {
+    if (typeof composerDraftTarget !== "string") {
+      return composerDraftTarget.threadId;
+    }
+    return (draftId ? getComposerDraftSession(draftId)?.threadId : null) ?? routeThreadRef.threadId;
+  }, [composerDraftTarget, draftId, getComposerDraftSession, routeThreadRef]);
+
+  const enqueueFileUpload = useCallback(
+    (file: File, attachmentId: string) => {
+      if (fileUploadMaxBytes === null) {
+        return;
+      }
+      const threadId = resolveUploadThreadId();
+      if (!threadId) {
+        return;
+      }
+      composerFileUploadEngine.enqueue({
+        attachmentId,
+        threadId,
+        environmentId,
+        name: file.name || "file",
+        mimeType: file.type || "application/octet-stream",
+        sizeBytes: file.size,
+        readBytes: async () => new Uint8Array(await file.arrayBuffer()),
+      });
+    },
+    [environmentId, fileUploadMaxBytes, resolveUploadThreadId],
+  );
+
   const addDirectComposerAttachments = useCallback(
     (files: File[]) => {
       if (!activeThreadId || files.length === 0) return;
@@ -153,10 +246,17 @@ export function useComposerImageAttachments(
           error = `'${attachmentName}' has an unsafe filename. Rename it without path separators or control characters.`;
           continue;
         }
+        const streamsUpload = !isImage && fileUploadMaxBytes !== null;
         const fileLimit = isImage
           ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
-          : PROVIDER_SEND_TURN_MAX_FILE_BYTES;
-        const limitLabel = isImage ? IMAGE_SIZE_LIMIT_LABEL : FILE_SIZE_LIMIT_LABEL;
+          : streamsUpload
+            ? Math.min(fileUploadMaxBytes, PROVIDER_SEND_TURN_MAX_FILE_BYTES)
+            : PROVIDER_SEND_TURN_MAX_FILE_BYTES;
+        const limitLabel = isImage
+          ? IMAGE_SIZE_LIMIT_LABEL
+          : streamsUpload
+            ? formatUploadSizeLimitLabel(fileUploadMaxBytes)
+            : `${Math.round(PROVIDER_SEND_TURN_MAX_FILE_BYTES / (1024 * 1024))}MB`;
         if (file.size <= 0 || file.size > fileLimit) {
           error = `'${attachmentName}' must be non-empty and no larger than the ${limitLabel} attachment limit.`;
           continue;
@@ -169,16 +269,20 @@ export function useComposerImageAttachments(
           error = `Attachments can total at most ${FILE_SIZE_LIMIT_LABEL} per message.`;
           continue;
         }
+        const attachmentId = randomUUID();
         const previewUrl = isImage ? URL.createObjectURL(file) : "";
         nextImages.push({
           type: isImage ? "image" : "file",
-          id: randomUUID(),
+          id: attachmentId,
           name: attachmentName,
           mimeType: file.type || "application/octet-stream",
           sizeBytes: file.size,
           previewUrl,
           file,
         });
+        if (streamsUpload) {
+          enqueueFileUpload(file, attachmentId);
+        }
         nextAttachmentCount += 1;
         nextTotalBytes += file.size;
       }
@@ -194,6 +298,8 @@ export function useComposerImageAttachments(
       addComposerImage,
       addComposerImagesToDraft,
       composerImagesRef,
+      enqueueFileUpload,
+      fileUploadMaxBytes,
       pendingUserInputCount,
       setThreadError,
     ],
@@ -305,34 +411,33 @@ export function useComposerImageAttachments(
     async (files: File[]) => {
       if (files.length === 0) return;
 
-      const supportsGeneralFiles = providerSupportsGeneralFileAttachments(selectedProvider);
-      const directAttachments = supportsGeneralFiles
-        ? files
-        : files.filter((file) => file.type.startsWith("image/"));
-      const nonImageFiles = supportsGeneralFiles
-        ? []
-        : files.filter((file) => !file.type.startsWith("image/"));
+      const { direct, references } = resolveComposerAttachmentRouting({
+        fileUploadMaxBytes,
+        selectedProvider,
+        files,
+      });
 
-      if (directAttachments.length > 0) {
-        addDirectComposerAttachments(directAttachments);
+      if (direct.length > 0) {
+        addDirectComposerAttachments(direct);
       }
 
-      if (nonImageFiles.length === 0) {
+      if (references.length === 0) {
         return;
       }
 
-      const references = (
+      const fileReferences = (
         await Promise.all(
-          nonImageFiles.map(async (file) => {
+          references.map(async (file) => {
             const reference = await resolveComposerFileReference(file);
             return reference ? formatComposerFileReference(reference) : null;
           }),
         )
       ).filter((reference): reference is string => reference !== null);
-      insertComposerFileReferences(references);
+      insertComposerFileReferences(fileReferences);
     },
     [
       addDirectComposerAttachments,
+      fileUploadMaxBytes,
       insertComposerFileReferences,
       resolveComposerFileReference,
       selectedProvider,
@@ -341,10 +446,15 @@ export function useComposerImageAttachments(
 
   const removeComposerImage = useCallback(
     (imageId: string) => {
+      composerFileUploadEngine.release(imageId);
       removeComposerImageFromDraft(imageId);
     },
     [removeComposerImageFromDraft],
   );
+
+  const retryComposerFileUpload = useCallback((imageId: string) => {
+    composerFileUploadEngine.retry(imageId);
+  }, []);
 
   const onComposerPaste = useCallback(
     (event: React.ClipboardEvent<HTMLElement>) => {
@@ -389,20 +499,21 @@ export function useComposerImageAttachments(
       setIsDragOverComposer(false);
       const files = Array.from(event.dataTransfer.files);
       const requiresFileReferences =
-        !providerSupportsGeneralFileAttachments(selectedProvider) &&
-        files.some((file) => !file.type.startsWith("image/"));
+        resolveComposerAttachmentRouting({ fileUploadMaxBytes, selectedProvider, files }).references
+          .length > 0;
       void addComposerAttachments(files);
       if (!requiresFileReferences) {
         focusComposer();
       }
     },
-    [addComposerAttachments, focusComposer, selectedProvider],
+    [addComposerAttachments, fileUploadMaxBytes, focusComposer, selectedProvider],
   );
 
   return {
     isDragOverComposer,
     addComposerAttachments,
     removeComposerImage,
+    retryComposerFileUpload,
     onComposerPaste,
     onComposerDragEnter,
     onComposerDragOver,

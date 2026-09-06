@@ -2,7 +2,9 @@ import { Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
 import { ServerConfig } from "./config.ts";
+import { ChatAttachmentUploadsLive } from "./attachmentUpload.ts";
 import {
+  attachmentUploadRouteLayer,
   attachmentsRouteLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
@@ -439,6 +441,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(AnalyticsServiceLayerLive),
   Layer.provideMerge(OpenLive),
   Layer.provideMerge(ServerLifecycleEventsLive),
+  Layer.provideMerge(ChatAttachmentUploadsLive),
   Layer.provide(NetService.layer),
 );
 
@@ -499,6 +502,7 @@ const projectAssetRoutesLayer = Layer.mergeAll(
 export const makeRoutesLayer = Layer.mergeAll(
   authRoutesLayer,
   attachmentsRouteLayer,
+  attachmentUploadRouteLayer,
   orchestrationDispatchRouteLayer,
   orchestrationSnapshotRouteLayer,
   otlpTracesProxyRouteLayer,

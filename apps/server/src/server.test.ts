@@ -61,12 +61,19 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, resolveManagedWorktreesRoot, ServerConfig } from "./config.ts";
+import {
+  ChatAttachmentUploads,
+  type ChatAttachmentUploadsShape,
+  ChatAttachmentUploadsLive,
+  makeChatAttachmentUploads,
+} from "./attachmentUpload.ts";
 import { Diagnostics, type DiagnosticsShape } from "./diagnostics/Services/Diagnostics.ts";
 import { makeRoutesLayer } from "./server.ts";
 import * as WsTestClient from "./test/WsTestClient.ts";
 import { ORCHESTRATION_LEGACY_REPLAY_MAX_EVENTS } from "./ws/context/constants.ts";
 import { resolveStaticCacheControl } from "./http.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
+import { attachmentRelativePath } from "./attachmentStore.ts";
 import {
   CheckpointDiffQuery,
   type CheckpointDiffQueryShape,
@@ -490,6 +497,7 @@ const buildAppUnderTest = (options?: {
     textGeneration?: Partial<TextGenerationShape>;
     diagnostics?: Partial<DiagnosticsShape>;
     hubConnector?: Partial<HubConnectorServiceShape>;
+    chatAttachmentUploads?: ChatAttachmentUploadsShape;
   };
 }) =>
   Effect.gen(function* () {
@@ -967,6 +975,9 @@ const buildAppUnderTest = (options?: {
           remove: () => Effect.void,
         }),
       ),
+      options?.layers?.chatAttachmentUploads
+        ? Layer.provide(Layer.succeed(ChatAttachmentUploads, options.layers.chatAttachmentUploads))
+        : Layer.provideMerge(ChatAttachmentUploadsLive),
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provideMerge(LocalDiagnosticsMetricsLive),
       Layer.provideMerge(AdvertisedEndpointRegistryLive),
@@ -2112,6 +2123,322 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.headers["cache-control"], "private, max-age=3600");
       assert.equal(response.headers["x-content-type-options"], "nosniff");
       assert.equal(yield* response.text, "attachment-encoded-ok");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  const makeUploadTestContext = Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "ryco-upload-test-" });
+    const derivedPaths = yield* deriveServerPaths(baseDir, undefined).pipe(
+      Effect.provide(NodeServices.layer),
+    );
+    yield* fileSystem.makeDirectory(derivedPaths.attachmentsDir, { recursive: true });
+    const uploads = yield* makeChatAttachmentUploads({
+      attachmentsDir: derivedPaths.attachmentsDir,
+    }).pipe(Effect.provide(NodeServices.layer));
+    const config = yield* buildAppUnderTest({
+      config: { baseDir },
+      layers: { chatAttachmentUploads: uploads },
+    });
+    return { config, uploads };
+  });
+
+  const postAttachmentUpload = (input: {
+    readonly uploadToken: string;
+    readonly cookie: string;
+    readonly body?: HttpBody.HttpBody;
+  }) =>
+    HttpClient.post(`/attachments/upload?token=${encodeURIComponent(input.uploadToken)}`, {
+      headers: {
+        cookie: input.cookie,
+        "content-type": "application/octet-stream",
+      },
+      ...(input.body ? { body: input.body } : {}),
+    });
+
+  it.effect("streams a chat file upload to disk and serves it back", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const { config, uploads } = yield* makeUploadTestContext;
+      const created = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+
+      const response = yield* postAttachmentUpload({
+        uploadToken: created.uploadToken,
+        cookie,
+        body: HttpBody.uint8Array(new TextEncoder().encode("abc")),
+      });
+      assert.equal(response.status, 200);
+      const payload = (yield* response.json) as {
+        readonly attachmentTokenRef: string;
+        readonly id: string;
+        readonly name: string;
+        readonly mimeType: string;
+        readonly sizeBytes: number;
+      };
+      assert.equal(payload.attachmentTokenRef, created.uploadToken);
+      assert.equal(payload.name, "notes.txt");
+      assert.equal(payload.mimeType, "text/plain");
+      assert.equal(payload.sizeBytes, 3);
+      assert.isTrue(payload.id.endsWith("-txt"));
+
+      const finalPath = `${config.attachmentsDir}/${payload.id}`;
+      assert.equal(yield* fileSystem.readFileString(finalPath), "abc");
+      assert.deepEqual(yield* fileSystem.readDirectory(config.attachmentsDir), [payload.id]);
+      assert.equal(
+        attachmentRelativePath({
+          type: "file",
+          id: payload.id,
+          name: "notes.txt",
+          mimeType: "text/plain",
+          sizeBytes: 3,
+        }),
+        payload.id,
+      );
+
+      const getResponse = yield* HttpClient.get(`/attachments/${payload.id}`, {
+        headers: { cookie },
+      });
+      assert.equal(getResponse.status, 200);
+      assert.equal(getResponse.headers["content-type"], "application/octet-stream");
+      assert.include(getResponse.headers["content-disposition"] ?? "", "attachment");
+      assert.equal(yield* getResponse.text, "abc");
+
+      const reuseResponse = yield* postAttachmentUpload({
+        uploadToken: created.uploadToken,
+        cookie,
+        body: HttpBody.uint8Array(new TextEncoder().encode("abc")),
+      });
+      assert.equal(reuseResponse.status, 409);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves streamed videos with their media type and seekable byte ranges", () =>
+    Effect.gen(function* () {
+      const { uploads } = yield* makeUploadTestContext;
+      const created = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "clip.mp4",
+        mimeType: "video/mp4",
+        sizeBytes: 10,
+      });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const response = yield* postAttachmentUpload({
+        uploadToken: created.uploadToken,
+        cookie,
+        body: HttpBody.uint8Array(new TextEncoder().encode("0123456789")),
+      });
+      assert.equal(response.status, 200);
+      const payload = (yield* response.json) as { id: string };
+      const url = `/attachments/${payload.id}`;
+      const full = yield* HttpClient.get(url, { headers: { cookie } });
+      assert.equal(full.status, 200);
+      assert.equal(full.headers["content-type"], "video/mp4");
+      assert.equal(full.headers["content-disposition"], undefined);
+      assert.equal(full.headers["accept-ranges"], "bytes");
+      assert.equal(yield* full.text, "0123456789");
+      for (const [range, contentRange, body] of [
+        ["bytes=0-1", "bytes 0-1/10", "01"],
+        ["bytes=7-", "bytes 7-9/10", "789"],
+        ["bytes=-3", "bytes 7-9/10", "789"],
+        ["bytes=8-100", "bytes 8-9/10", "89"],
+      ]) {
+        const partial = yield* HttpClient.get(url, { headers: { cookie, range: range! } });
+        assert.equal(partial.status, 206);
+        assert.equal(partial.headers["content-range"], contentRange);
+        assert.equal(partial.headers["content-type"], "video/mp4");
+        assert.equal(yield* partial.text, body);
+      }
+      for (const range of ["bytes=10-", "bytes=-0", "bytes=5-3"]) {
+        const invalid = yield* HttpClient.get(url, { headers: { cookie, range } });
+        assert.equal(invalid.status, 416);
+        assert.equal(invalid.headers["content-range"], "bytes */10");
+      }
+      const conditional = yield* HttpClient.get(url, {
+        headers: { cookie, range: "bytes=0-1", "if-range": '"old-version"' },
+      });
+      assert.equal(conditional.status, 200);
+      assert.equal(yield* conditional.text, "0123456789");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("reports probed media dimensions on upload and attachment GET", () =>
+    Effect.gen(function* () {
+      const { uploads } = yield* makeUploadTestContext;
+      const pngBytes = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      const created = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "tiny.png",
+        mimeType: "image/png",
+        sizeBytes: pngBytes.byteLength,
+      });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+
+      const response = yield* postAttachmentUpload({
+        uploadToken: created.uploadToken,
+        cookie,
+        body: HttpBody.uint8Array(new Uint8Array(pngBytes)),
+      });
+      assert.equal(response.status, 200);
+      const payload = (yield* response.json) as {
+        readonly id: string;
+        readonly width?: number;
+        readonly height?: number;
+      };
+      assert.equal(payload.width, 1);
+      assert.equal(payload.height, 1);
+
+      const getResponse = yield* HttpClient.get(`/attachments/${payload.id}`, {
+        headers: { cookie },
+      });
+      assert.equal(getResponse.status, 200);
+      assert.equal(getResponse.headers["x-attachment-width"], "1");
+      assert.equal(getResponse.headers["x-attachment-height"], "1");
+      assert.equal(getResponse.headers["x-attachment-width"], String(payload.width));
+      assert.equal(getResponse.headers["x-attachment-height"], String(payload.height));
+
+      const textUpload = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      });
+      const textResponse = yield* postAttachmentUpload({
+        uploadToken: textUpload.uploadToken,
+        cookie,
+        body: HttpBody.uint8Array(new TextEncoder().encode("abc")),
+      });
+      assert.equal(textResponse.status, 200);
+      const textPayload = (yield* textResponse.json) as {
+        readonly id: string;
+        readonly width?: number;
+        readonly height?: number;
+      };
+      assert.isUndefined(textPayload.width);
+      assert.isUndefined(textPayload.height);
+
+      const textGetResponse = yield* HttpClient.get(`/attachments/${textPayload.id}`, {
+        headers: { cookie },
+      });
+      assert.equal(textGetResponse.status, 200);
+      assert.isUndefined(textGetResponse.headers["x-attachment-width"]);
+      assert.isUndefined(textGetResponse.headers["x-attachment-height"]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects oversized uploads and removes the staging file", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const { config, uploads } = yield* makeUploadTestContext;
+      const created = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "big.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 3,
+      });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+
+      const response = yield* postAttachmentUpload({
+        uploadToken: created.uploadToken,
+        cookie,
+        body: HttpBody.uint8Array(new TextEncoder().encode("0123456789")),
+      });
+      assert.equal(response.status, 413);
+      assert.deepEqual(yield* fileSystem.readDirectory(config.attachmentsDir), []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects unknown upload tokens without staging a file", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const { config, uploads } = yield* makeUploadTestContext;
+      yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+
+      const response = yield* postAttachmentUpload({
+        uploadToken: "definitely-not-a-real-token",
+        cookie,
+        body: HttpBody.uint8Array(new TextEncoder().encode("abc")),
+      });
+      assert.equal(response.status, 400);
+      assert.deepEqual(yield* fileSystem.readDirectory(config.attachmentsDir), []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("requires authentication for attachment uploads", () =>
+    Effect.gen(function* () {
+      const { uploads } = yield* makeUploadTestContext;
+      const created = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      });
+      const response = yield* postAttachmentUpload({
+        uploadToken: created.uploadToken,
+        cookie: "session=invalid",
+        body: HttpBody.uint8Array(new TextEncoder().encode("abc")),
+      });
+      assert.equal(response.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("cleans up staging files when the upload stream is interrupted", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const { config, uploads } = yield* makeUploadTestContext;
+      const created = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 30,
+      });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+
+      const interrupted = yield* Effect.result(
+        postAttachmentUpload({
+          uploadToken: created.uploadToken,
+          cookie,
+          body: HttpBody.stream(
+            Stream.concat(
+              Stream.make(new TextEncoder().encode("partial-bytes")),
+              Stream.fail(new Error("client aborted")),
+            ),
+          ),
+        }),
+      );
+      assert.isTrue(interrupted._tag === "Failure" || interrupted._tag === "Success");
+
+      const cleanupComplete = () =>
+        fileSystem
+          .readDirectory(config.attachmentsDir)
+          .pipe(
+            Effect.map(
+              (entries) => entries.filter((entry) => entry.endsWith(".part")).length === 0,
+            ),
+          );
+      const waitMillis = (millis: number) =>
+        Effect.promise(() => new Promise((resolve) => setTimeout(resolve, millis)));
+      let clean = yield* cleanupComplete();
+      for (let attempt = 0; attempt < 20 && !clean; attempt += 1) {
+        yield* waitMillis(50);
+        clean = yield* cleanupComplete();
+      }
+      assert.isTrue(clean);
+      assert.deepEqual(yield* fileSystem.readDirectory(config.attachmentsDir), []);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -4,6 +4,7 @@ import { HttpRouter, HttpServerRequest } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
+import { ChatAttachmentUploadsLive } from "./attachmentUpload.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { AtlassianConnectionRepositoryLive } from "./persistence/Layers/AtlassianConnections.ts";
@@ -34,6 +35,7 @@ export const makeServerWsRpcLayer = (principal: RpcPrincipal) =>
         Layer.provide(SqlitePersistenceLayerLive),
       ),
     ),
+    Layer.provideMerge(ChatAttachmentUploadsLive),
     Layer.provideMerge(RpcSerialization.layerJson),
     Layer.provide(ProviderMaintenanceRunner.layer),
     Layer.provide(

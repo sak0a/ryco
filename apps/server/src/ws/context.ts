@@ -17,6 +17,7 @@ import {
 import { RpcGroup } from "effect/unstable/rpc";
 
 import { AgentControlProposalService } from "../agentControl/Services/AgentControlProposalService.ts";
+import { ChatAttachmentUploads } from "../attachmentUpload.ts";
 import { AgentControlExternalIntegrationService } from "../agentControl/Services/AgentControlExternalIntegration.ts";
 import { AgentControlExternalInstallationService } from "../agentControl/Services/AgentControlExternalInstallation.ts";
 import { CheckpointDiffQuery } from "../checkpointing/Services/CheckpointDiffQuery.ts";
@@ -124,6 +125,9 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     // construction; production provides it in `makeServerWsRpcLayer`.
     const contextHandoffInspection = yield* Effect.serviceOption(ContextHandoffInspection);
     const threadPriorityCoordinator = yield* Effect.serviceOption(ThreadPriorityCoordinator);
+    // Optional for the same route-test reason; production provides it in the
+    // runtime layer and `makeServerWsRpcLayer`.
+    const chatAttachmentUploads = yield* Effect.serviceOption(ChatAttachmentUploads);
     // Optional for the same route-test reason; production always provides it
     // through the runtime's Agent Control layer.
     const agentControlProposals = yield* Effect.serviceOption(AgentControlProposalService);
@@ -739,6 +743,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       orchestrationEngine,
       contextHandoffInspection,
       threadPriorityCoordinator,
+      chatAttachmentUploads,
       agentControlProposals,
       agentControlExternalIntegrations,
       agentControlExternalInstallations,

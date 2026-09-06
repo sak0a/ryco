@@ -1,7 +1,9 @@
 import { mobileKV } from "../platform/kv";
+import type { DraftComposerFileAttachment } from "../lib/composerFiles";
 import { useMessageQueueStore } from "./messageQueueStore";
 import {
   groupQueuedThreadMessages,
+  normalizePersistedQueuedThreadMessageAttachments,
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxFailureAction,
   type EnvironmentShellStatus,
@@ -56,9 +58,28 @@ function mirrorToQueueStore(): void {
 }
 
 function persist(): void {
-  void mobileKV.setItem(OUTBOX_STORAGE_KEY, JSON.stringify(messages)).catch(() => {
-    // Fire-and-forget: the in-memory queue stays authoritative until the next write.
-  });
+  // The local read uri is transient: restored files carry token metadata or a
+  // needsReattach marker only, never a byte source.
+  void mobileKV
+    .setItem(
+      OUTBOX_STORAGE_KEY,
+      JSON.stringify(
+        messages.map((message) => ({
+          ...message,
+          attachments: message.attachments.map((attachment) =>
+            attachment.type === "file" ? stripFileReadUri(attachment) : attachment,
+          ),
+        })),
+      ),
+    )
+    .catch(() => {
+      // Fire-and-forget: the in-memory queue stays authoritative until the next write.
+    });
+}
+
+function stripFileReadUri(attachment: DraftComposerFileAttachment) {
+  const { readUri: _readUri, ...persisted } = attachment;
+  return persisted;
 }
 
 /** Idempotently load the persisted queue once. */
@@ -68,7 +89,26 @@ export async function hydrateThreadOutbox(): Promise<void> {
   try {
     const raw = await mobileKV.getItem(OUTBOX_STORAGE_KEY);
     const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-    messages = Array.isArray(parsed) ? (parsed as QueuedThreadMessage[]) : [];
+    messages = Array.isArray(parsed)
+      ? parsed.flatMap((message) => {
+          if (!message || typeof message !== "object") return [];
+          const candidate = message as Record<string, unknown>;
+          if (
+            typeof candidate.messageId !== "string" ||
+            typeof candidate.commandId !== "string" ||
+            typeof candidate.text !== "string"
+          ) {
+            return [];
+          }
+          const queued = message as QueuedThreadMessage;
+          return [
+            {
+              ...queued,
+              attachments: normalizePersistedQueuedThreadMessageAttachments(candidate.attachments),
+            },
+          ];
+        })
+      : [];
   } catch {
     messages = [];
   }

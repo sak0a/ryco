@@ -543,7 +543,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         mimeType: "image/png",
         sizeBytes: 4,
       };
-      const attachmentPath = path.join(attachmentsDir, attachmentRelativePath(attachment));
+      const attachmentPath = path.join(attachmentsDir, attachmentRelativePath(attachment)!);
       fs.mkdirSync(path.dirname(attachmentPath), { recursive: true });
       fs.writeFileSync(attachmentPath, Uint8Array.from([1, 2, 3, 4]));
 
@@ -571,6 +571,84 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
             url: "data:image/png;base64,AQIDBA==",
           },
         ],
+      });
+    }).pipe(Effect.provide(attachmentLayer));
+  });
+
+  it.effect("appends on-disk path lines for file attachments instead of native ingestion", () => {
+    const attachmentRuntimeFactory = makeRuntimeFactory();
+    const attachmentLayer = makeCodexAdapterTestLayer({
+      runtimeFactory: attachmentRuntimeFactory,
+      prefix: "ryco-codex-attachment-file-",
+    });
+
+    return Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const { attachmentsDir } = yield* ServerConfig;
+      const fileAttachment = {
+        type: "file" as const,
+        id: "thread-codex-file-12345678-1234-1234-1234-123456789abc",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 123456,
+      };
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-file"),
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-attachment-file"),
+        runtimeMode: "full-access",
+      });
+      const runtime = attachmentRuntimeFactory.lastRuntime;
+      assert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+
+      yield* adapter.sendTurn({
+        threadId: asThreadId("sess-attachment-file"),
+        input: "Review the report",
+        attachments: [fileAttachment],
+      });
+
+      assert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+        input: `Review the report\n\n[Attached file] report.pdf (application/pdf, 123456 bytes) saved at: ${path.join(
+          attachmentsDir,
+          attachmentRelativePath(fileAttachment)!,
+        )}`,
+      });
+    }).pipe(Effect.provide(attachmentLayer));
+  });
+
+  it.effect("appends path-less lines for unknown attachments", () => {
+    const attachmentRuntimeFactory = makeRuntimeFactory();
+    const attachmentLayer = makeCodexAdapterTestLayer({
+      runtimeFactory: attachmentRuntimeFactory,
+      prefix: "ryco-codex-attachment-unknown-",
+    });
+
+    return Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const unknownAttachment = {
+        type: "vendor-secret",
+        name: "mystery.bin",
+        mimeType: "application/octet-stream",
+      };
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-unknown"),
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-attachment-unknown"),
+        runtimeMode: "full-access",
+      });
+      const runtime = attachmentRuntimeFactory.lastRuntime;
+      assert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+
+      yield* adapter.sendTurn({
+        threadId: asThreadId("sess-attachment-unknown"),
+        input: "What is this?",
+        attachments: [unknownAttachment],
+      });
+
+      assert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+        input: `What is this?\n\n[Attached file] mystery.bin (application/octet-stream, size unknown bytes)`,
       });
     }).pipe(Effect.provide(attachmentLayer));
   });
@@ -638,7 +716,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
           mimeType: "image/png",
           sizeBytes: 1,
         };
-        const attachmentPath = path.join(attachmentsDir, attachmentRelativePath(attachment));
+        const attachmentPath = path.join(attachmentsDir, attachmentRelativePath(attachment)!);
         fs.mkdirSync(path.dirname(attachmentPath), { recursive: true });
         fs.writeFileSync(attachmentPath, Buffer.alloc(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES + 1));
 

@@ -48,6 +48,9 @@ export interface ChatImageAttachment {
   mimeType: string;
   sizeBytes: number;
   previewUrl?: string;
+  /** Advisory intrinsic dimensions probed server-side; absent = unknown. */
+  width?: number;
+  height?: number;
 }
 
 export interface ChatFileAttachment {
@@ -56,9 +59,34 @@ export interface ChatFileAttachment {
   name: string;
   mimeType: string;
   sizeBytes: number;
+  /** Download URL resolved from the environment attachment endpoint. */
+  previewUrl?: string;
+  /** Advisory media dimensions probed server-side (video/AV media); absent = unknown. */
+  width?: number;
+  height?: number;
 }
 
-export type ChatAttachment = ChatImageAttachment | ChatFileAttachment;
+export interface ChatUnknownAttachment {
+  type: string;
+  id?: string | undefined;
+  name?: string | undefined;
+  mimeType?: string | undefined;
+  sizeBytes?: number | undefined;
+  /** Never resolved for unknown attachments; optional keeps mapping tolerant. */
+  previewUrl?: string;
+}
+
+export type ChatAttachment = ChatImageAttachment | ChatFileAttachment | ChatUnknownAttachment;
+
+export function isChatImageAttachment(
+  attachment: ChatAttachment,
+): attachment is ChatImageAttachment {
+  return attachment.type === "image";
+}
+
+export function isChatFileAttachment(attachment: ChatAttachment): attachment is ChatFileAttachment {
+  return attachment.type === "file";
+}
 
 export interface ChatMessage {
   id: MessageId;

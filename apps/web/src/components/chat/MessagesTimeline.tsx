@@ -28,7 +28,7 @@ import {
   type AgentPanelModel,
 } from "../../threadWorkspaceViewModel";
 import { glassSurfaceClassName } from "../mobile/GlassSurface";
-import { type TurnDiffSummary } from "../../types";
+import { type TurnDiffSummary, isChatFileAttachment, isChatImageAttachment } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
@@ -39,7 +39,6 @@ import {
   CircleAlertIcon,
   EyeIcon,
   FileDiffIcon,
-  FileIcon,
   GitBranchIcon,
   GlobeIcon,
   HammerIcon,
@@ -52,6 +51,7 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
+import { AttachmentFileRow, AttachmentVideo, isVideoAttachmentMimeType } from "./AttachmentVideo";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
@@ -1133,13 +1133,16 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                             key={image.id}
                             className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
                           >
-                            {image.type === "image" && image.previewUrl ? (
+                            {isChatImageAttachment(image) && image.previewUrl ? (
                               <button
                                 type="button"
                                 className="h-full w-full cursor-zoom-in"
                                 aria-label={`Preview ${image.name}`}
                                 onClick={() => {
-                                  const preview = buildExpandedImagePreview(userImages, image.id);
+                                  const preview = buildExpandedImagePreview(
+                                    userImages.filter(isChatImageAttachment),
+                                    image.id,
+                                  );
                                   if (!preview) return;
                                   ctx.onImageExpand(preview);
                                 }}
@@ -1147,27 +1150,21 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                                 <img
                                   src={image.previewUrl}
                                   alt={image.name}
+                                  {...(image.width !== undefined && image.height !== undefined
+                                    ? { width: image.width, height: image.height }
+                                    : {})}
                                   className="block h-auto max-h-[220px] w-full object-cover"
                                 />
                               </button>
-                            ) : image.type === "file" ? (
-                              <div className="flex min-h-[72px] items-center gap-2 px-3 py-3 text-left text-xs text-foreground/80">
-                                <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-                                <span className="min-w-0">
-                                  <span className="block truncate font-medium">{image.name}</span>
-                                  <span className="block text-[10px] text-muted-foreground">
-                                    {image.mimeType} · {Math.ceil(image.sizeBytes / 1024)} KB
-                                  </span>
-                                </span>
-                              </div>
+                            ) : isChatFileAttachment(image) ? (
+                              image.previewUrl && isVideoAttachmentMimeType(image.mimeType) ? (
+                                <AttachmentVideo attachment={image} />
+                              ) : (
+                                <AttachmentFileRow attachment={image} />
+                              )
                             ) : (
                               <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                                <span>
-                                  {image.name}
-                                  <span className="mt-1 block">
-                                    Preview unavailable on this connection.
-                                  </span>
-                                </span>
+                                <span>{image.name ?? "Attachment"}</span>
                               </div>
                             )}
                           </div>

@@ -7,6 +7,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -30,7 +31,10 @@ import {
 } from "@ryco/client-runtime/state/message-queue";
 import { buildThreadInbox } from "@ryco/client-runtime/state/threads";
 import { EnvironmentId, MessageId, ThreadId, type ModelSelection } from "@ryco/contracts";
-import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@ryco/client-runtime/state/composer";
+import {
+  ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+  deriveChatFileUploadSendBlock,
+} from "@ryco/client-runtime/state/composer";
 
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
@@ -42,7 +46,13 @@ import {
   retainThreadDetailSubscription,
 } from "../../connection/threadDetail";
 import { useThreadConnectionRetarget } from "../../connection/useThreadConnectionRetarget";
-import type { DraftComposerImageAttachment } from "../../lib/composerImages";
+import type { DraftComposerAttachment, DraftComposerFileAttachment } from "../../lib/composerFiles";
+import {
+  isDraftComposerFileAttachment,
+  pickComposerAttachments,
+  readComposerFileBytes,
+} from "../../lib/composerFiles";
+import { convertPastedImagesToAttachments } from "../../lib/composerImages";
 import { newCommandId, newMessageId } from "../../lib/ids";
 import { useThemeColor } from "../../lib/useThemeColor";
 import {
@@ -91,6 +101,11 @@ import {
 import { useThreadChecks } from "./useThreadChecks";
 import { buildThreadTimelineRows, toggleFold, type ThreadTimelineRow } from "./threadActivityFold";
 import { ThreadActivityFoldRow } from "./ThreadActivityFoldRow";
+import {
+  composerFileUploadEngine,
+  useComposerFileUploadMaxBytes,
+  useComposerFileUploadRecords,
+} from "../../state/composerFileUpload";
 import {
   applyModelOption,
   buildModelPickerModel,
@@ -238,6 +253,9 @@ export function ThreadDetailScreen(props: {
   const [modelQuery, setModelQuery] = useState("");
   const [stagedModelSelection, setStagedModelSelection] = useState<ModelSelection | null>(null);
   const [sendBusy, setSendBusy] = useState(false);
+  const [attachments, setAttachments] = useState<ReadonlyArray<DraftComposerAttachment>>([]);
+  const ownedUploadIds = useRef(new Set<string>());
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [steeringMessageIds, setSteeringMessageIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -270,6 +288,21 @@ export function ThreadDetailScreen(props: {
   );
 
   const built = useThreadTimeline(environmentId, threadId);
+  // Capability-routed file attachments: capability + direct HTTP base enable the
+  // streaming upload path; without either, only the legacy image dataUrl flow.
+  const fileUploadMaxBytes = useComposerFileUploadMaxBytes(environmentId);
+  const fileUploadRecords = useComposerFileUploadRecords();
+  const sendBlock = useMemo(
+    () =>
+      deriveChatFileUploadSendBlock({
+        attachmentIds: attachments.map((attachment) => attachment.id),
+        getRecord: (attachmentId) => fileUploadRecords.get(attachmentId) ?? null,
+        nowMs: Date.now(),
+      }).blockReason,
+    // Records drive the re-render while uploads progress; attachments drive it
+    // when rows appear or leave.
+    [attachments, fileUploadRecords],
+  );
   const thread = useStore((state) =>
     selectThreadByRef(state, scopeThreadRef(environmentId, threadId)),
   );
@@ -742,9 +775,121 @@ export function ThreadDetailScreen(props: {
     });
   }, [headerModel, iconColor, navigation, openFiles, openReview]);
 
+  const enqueueFileUpload = useCallback(
+    (attachment: DraftComposerFileAttachment) => {
+      ownedUploadIds.current.add(attachment.id);
+      composerFileUploadEngine.enqueue({
+        attachmentId: attachment.id,
+        threadId,
+        environmentId,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        readBytes: () => readComposerFileBytes(attachment.readUri),
+      });
+    },
+    [environmentId, threadId],
+  );
+
+  const pickAttachments = useCallback(async () => {
+    setAttachmentError(null);
+    const existingTotalBytes = attachments.reduce((total, attachment) => {
+      if (attachment.type === "file" && attachment.uploadState === "needsReattach") return total;
+      return total + attachment.sizeBytes;
+    }, 0);
+    const result = await pickComposerAttachments({
+      existingCount: attachments.length,
+      existingTotalBytes,
+      fileUploadMaxBytes,
+    });
+    setAttachmentError(result.error);
+    if (result.images.length > 0 || result.files.length > 0) {
+      setAttachments((current) => [...current, ...result.images, ...result.files]);
+    }
+    for (const file of result.files) {
+      enqueueFileUpload(file);
+    }
+  }, [attachments, enqueueFileUpload, fileUploadMaxBytes]);
+
+  const pasteImages = useCallback(
+    async (uris: ReadonlyArray<string>) => {
+      const images = await convertPastedImagesToAttachments({
+        uris,
+        existingCount: attachments.length,
+      });
+      if (images.length === 0 && uris.length > 0) {
+        setAttachmentError("The pasted image could not be attached.");
+        return;
+      }
+      setAttachmentError(null);
+      setAttachments((current) => [...current, ...images]);
+    },
+    [attachments.length],
+  );
+
+  const removeAttachment = useCallback((attachmentId: string) => {
+    composerFileUploadEngine.release(attachmentId);
+    setAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
+  }, []);
+
+  const retryFileUpload = useCallback((attachmentId: string) => {
+    composerFileUploadEngine.retry(attachmentId);
+  }, []);
+
+  const reattachFile = useCallback(
+    (attachmentId: string) => {
+      composerFileUploadEngine.release(attachmentId);
+      setAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
+      void pickAttachments();
+    },
+    [pickAttachments],
+  );
+
+  // Sync uploaded tokens onto the rows so an enqueued outbox message persists
+  // token metadata (never bytes) and the immediate dispatch path can read it.
+  useEffect(() => {
+    setAttachments((current) => {
+      let changed = false;
+      const next = current.map((attachment) => {
+        if (!isDraftComposerFileAttachment(attachment)) return attachment;
+        const status = fileUploadRecords.get(attachment.id)?.status;
+        if (status?.kind !== "uploaded") return attachment;
+        if (
+          attachment.uploadToken === status.uploadToken &&
+          attachment.expiresAt === status.expiresAt
+        ) {
+          return attachment;
+        }
+        changed = true;
+        return { ...attachment, uploadToken: status.uploadToken, expiresAt: status.expiresAt };
+      });
+      return changed ? next : current;
+    });
+  }, [fileUploadRecords]);
+
+  // Engine records are process-transient: drop the ones whose attachment left
+  // the composer (removal, send clear, discard).
+  useEffect(() => {
+    const liveIds = new Set(attachments.map((attachment) => attachment.id));
+    for (const attachmentId of ownedUploadIds.current) {
+      if (!liveIds.has(attachmentId)) {
+        composerFileUploadEngine.release(attachmentId);
+        ownedUploadIds.current.delete(attachmentId);
+      }
+    }
+  }, [attachments]);
+
+  useEffect(() => {
+    const ownedIds = ownedUploadIds.current;
+    return () => {
+      for (const attachmentId of ownedIds) composerFileUploadEngine.release(attachmentId);
+      ownedIds.clear();
+    };
+  }, []);
+
   const onSend = async (
     text: string,
-    attachments: ReadonlyArray<DraftComposerImageAttachment>,
+    attachments: ReadonlyArray<DraftComposerAttachment>,
   ): Promise<boolean> => {
     setSendError(null);
     const state = useStore.getState();
@@ -795,7 +940,7 @@ export function ThreadDetailScreen(props: {
 
     setSendBusy(true);
     try {
-      return await sendThreadTurn(
+      const sent = await sendThreadTurn(
         {
           environmentId,
           threadId,
@@ -827,16 +972,7 @@ export function ThreadDetailScreen(props: {
               },
               composer: {
                 prompt: text,
-                // The runtime attachment pipeline expects the outgoing data URL,
-                // not the image-picker preview file URI.
-                images: attachments.map((attachment) => ({
-                  type: "image",
-                  id: attachment.id,
-                  name: attachment.name,
-                  mimeType: attachment.mimeType,
-                  sizeBytes: attachment.sizeBytes,
-                  previewUrl: attachment.dataUrl,
-                })),
+                images: attachments,
                 selectedModelSelection: modelSelection,
                 selectedModel: modelSelection.model,
                 hasSelectedModel: true,
@@ -858,6 +994,13 @@ export function ThreadDetailScreen(props: {
             }),
         },
       );
+      // The composer clears its own text on success; the attachment rows live
+      // here, so a delivered turn (dispatch or safe enqueue) clears them too.
+      if (sent !== false) {
+        setAttachments([]);
+        setAttachmentError(null);
+      }
+      return sent;
     } finally {
       setSendBusy(false);
     }
@@ -1038,6 +1181,15 @@ export function ThreadDetailScreen(props: {
 
       <ThreadComposer
         onSend={onSend}
+        attachments={attachments}
+        onRemoveAttachment={removeAttachment}
+        onPickAttachments={() => void pickAttachments()}
+        onPasteImages={(uris) => void pasteImages(uris)}
+        onRetryFileUpload={retryFileUpload}
+        onReattachFile={reattachFile}
+        attachmentError={attachmentError}
+        sendBlock={sendBlock}
+        fileUploadRecords={fileUploadRecords}
         disabled={cachedView.composerDisabled}
         policyLabel={policyModel?.pillLabel}
         policyIcon={policyModel?.pillIcon}
