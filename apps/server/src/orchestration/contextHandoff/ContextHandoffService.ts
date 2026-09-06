@@ -26,6 +26,7 @@ import {
   type ContextHandoffDeliveryArtifact,
   ContextHandoffDeliveryArtifact as ContextHandoffDeliveryArtifactSchema,
   makeContextHandoffDeliveryArtifact,
+  hasValidContextHandoffDeliveryDigests,
 } from "./ContextHandoffArtifacts.ts";
 import {
   ContextHandoffRenderError,
@@ -244,7 +245,7 @@ const makeContextHandoffService = Effect.gen(function* () {
           "Context handoff delivery artifact has not been stored",
         );
       }
-      return yield* Schema.decodeUnknownEffect(ContextHandoffDeliveryArtifactSchema)(
+      const artifact = yield* Schema.decodeUnknownEffect(ContextHandoffDeliveryArtifactSchema)(
         record.deliveryArtifact,
       ).pipe(
         Effect.mapError(() =>
@@ -255,6 +256,17 @@ const makeContextHandoffService = Effect.gen(function* () {
           ),
         ),
       );
+      if (
+        artifact.triggeringMessage.messageId !== record.firstMessageId ||
+        !hasValidContextHandoffDeliveryDigests(artifact)
+      ) {
+        return yield* artifactError(
+          record.handoffId,
+          "invalid-delivery-artifact",
+          "Stored context handoff delivery artifact failed integrity validation",
+        );
+      }
+      return artifact;
     },
   );
 

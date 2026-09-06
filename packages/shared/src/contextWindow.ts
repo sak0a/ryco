@@ -38,7 +38,7 @@ export function resolveModelContextWindow(
   } else {
     source = "slug";
     const matches = [
-      ...modelSlug.matchAll(/(?:^|[-_\[(])([1-9]\d*(?:k|m)|[1-9]\d{4,6})(?=$|[-_\])])/gi),
+      ...modelSlug.matchAll(/(?:^|[-_[(])([1-9]\d*(?:k|m)|[1-9]\d{4,6})(?=$|[-_\])])/gi),
     ];
     if (matches.length !== 1) return null;
     const value = matches[0]![1]!.toLowerCase();
@@ -62,10 +62,7 @@ export function resolveContextHandoffInputBudget(
     ? {
         maxInputChars: Math.min(
           CONTEXT_HANDOFF_MAX_INPUT_CHARS,
-          Math.max(
-            PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
-            Math.floor(window.contextWindowTokens * 0.35 * 4),
-          ),
+          Math.floor(window.contextWindowTokens * 0.35 * 4),
         ),
         budgetSource: window.source,
         contextWindowTokens: window.contextWindowTokens,

@@ -66,6 +66,16 @@ export function digestContextHandoffUtf8(value: string): ContextHandoffDigest {
   return ContextHandoffDigest.make(createHash("sha256").update(value, "utf8").digest("hex"));
 }
 
+export function hasValidContextHandoffDeliveryDigests(
+  artifact: ContextHandoffDeliveryArtifact,
+): boolean {
+  return (
+    artifact.providerInputDigest === digestContextHandoffUtf8(artifact.providerInput) &&
+    artifact.renderedContextDigest ===
+      digestContextHandoffUtf8(stableStringifyContextHandoff(artifact.renderedContext))
+  );
+}
+
 export function makeContextHandoffDeliveryArtifact(
   input: typeof ContextHandoffAppliedBudget.Type & {
     readonly renderedContext: ContextHandoffRenderedDocument;

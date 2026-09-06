@@ -169,10 +169,9 @@ it("retains more history for a 1M destination than the default budget", () => {
   const artifact = artifactWithLongHistory();
   const document = {
     ...artifact.document,
-    messages: artifact.document.messages.map((message) => ({
-      ...message,
-      text: message.text.repeat(5),
-    })),
+    messages: artifact.document.messages.map((message) =>
+      Object.assign({}, message, { text: message.text.repeat(5) }),
+    ),
   };
   const normal = renderContextHandoffInput({ document, currentMessage: "continue" });
   const expanded = renderContextHandoffInput({

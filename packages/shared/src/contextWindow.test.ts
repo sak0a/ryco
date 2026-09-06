@@ -76,8 +76,13 @@ describe("context window handoff budget", () => {
       ).budgetSource,
     ).toBe("default");
   });
-  it("clamps known windows to the supported input range", () => {
-    expect(budget("codex", "model-4k").maxInputChars).toBe(120_000);
+  it("respects small known windows and caps large ones", () => {
+    expect(budget("codex", "model-4k").maxInputChars).toBe(5_600);
+    expect(
+      budget("claudeAgent", "small", undefined, [
+        { slug: "small", fixedContextWindowTokens: 8_192 },
+      ]).maxInputChars,
+    ).toBe(11_468);
     expect(budget("codex", "model-10m").maxInputChars).toBe(1_400_000);
   });
 });

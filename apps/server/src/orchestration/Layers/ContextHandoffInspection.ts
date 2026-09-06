@@ -28,7 +28,7 @@ import type { ContextHandoffDocument as ContextHandoffDocumentType } from "../co
 import {
   ContextHandoffDeliveryArtifact,
   type ContextHandoffDeliveryArtifact as ContextHandoffDeliveryArtifactType,
-  digestContextHandoffUtf8,
+  hasValidContextHandoffDeliveryDigests,
 } from "../contextHandoff/ContextHandoffArtifacts.ts";
 import {
   contextHandoffDeliveryLabel,
@@ -96,11 +96,9 @@ function assertDeliveryArtifact(
   record: ContextHandoffRecord,
   artifact: ContextHandoffDeliveryArtifactType,
 ): ContextHandoffDeliveryArtifactType {
-  const renderedJson = stableStringifyContextHandoff(artifact.renderedContext);
   if (
     artifact.triggeringMessage.messageId !== record.firstMessageId ||
-    artifact.providerInputDigest !== digestContextHandoffUtf8(artifact.providerInput) ||
-    artifact.renderedContextDigest !== digestContextHandoffUtf8(renderedJson)
+    !hasValidContextHandoffDeliveryDigests(artifact)
   ) {
     throw inspectionError("invalid-artifact", "The stored context handoff artifact is invalid.");
   }
