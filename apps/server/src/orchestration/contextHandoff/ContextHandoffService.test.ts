@@ -232,6 +232,9 @@ it.effect("ContextHandoffService persists and reuses the exact delivery artifact
       preparedAt: "2026-08-04T00:00:04.000Z",
     });
     const retry = yield* service.prepareDeliveryArtifact({
+      maxInputChars: 1_400_000,
+      budgetSource: "manifest",
+      contextWindowTokens: 1_000_000,
       handoffId,
       triggeringMessageId: targetMessageId,
       currentMessage,
@@ -244,6 +247,59 @@ it.effect("ContextHandoffService persists and reuses the exact delivery artifact
     assert.strictEqual(retry.preparedAt, first.preparedAt);
     assert.strictEqual(first.triggeringMessage.text, currentMessage);
     assert.deepStrictEqual(repository.record().deliveryArtifact, first);
+    assert.strictEqual(retry.maxInputChars, first.maxInputChars);
+    assert.strictEqual(retry.budgetSource, first.budgetSource);
+    assert.strictEqual(retry.contextWindowTokens, first.contextWindowTokens);
+
+    for (const change of [
+      { currentMessage: "different message" },
+      { triggeringMessageId: MessageId.make("different-message") },
+    ]) {
+      const error = yield* service
+        .prepareDeliveryArtifact({
+          handoffId,
+          triggeringMessageId: targetMessageId,
+          currentMessage,
+          preparedAt: "2026-08-04T00:00:05.000Z",
+          ...change,
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(error, ContextHandoffArtifactError);
+      assert.strictEqual(error.reason, "delivery-artifact-conflict");
+    }
+
+    // Legacy artifacts without budget metadata still reuse the original bytes.
+    const {
+      maxInputChars: _budget,
+      budgetSource: _source,
+      contextWindowTokens: _tokens,
+      ...legacy
+    } = first;
+    repository.replace({ ...repository.record(), deliveryArtifact: legacy });
+    const legacyRetry = yield* service.prepareDeliveryArtifact({
+      handoffId,
+      triggeringMessageId: targetMessageId,
+      currentMessage,
+      preparedAt: "2026-08-04T00:00:05.000Z",
+    });
+    assert.strictEqual(legacyRetry.providerInput, first.providerInput);
+
+    for (const corrupt of [
+      { ...first, providerInput: "corrupted payload" },
+      { ...first, renderedContext: { ...first.renderedContext, messages: [] } },
+    ]) {
+      repository.replace({ ...repository.record(), deliveryArtifact: corrupt });
+      const error = yield* service
+        .prepareDeliveryArtifact({
+          handoffId,
+          triggeringMessageId: targetMessageId,
+          currentMessage,
+          preparedAt: "2026-08-04T00:00:05.000Z",
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(error, ContextHandoffArtifactError);
+      assert.strictEqual(error.reason, "invalid-delivery-artifact");
+    }
   }).pipe(Effect.provide(repository.layer));
 });
 

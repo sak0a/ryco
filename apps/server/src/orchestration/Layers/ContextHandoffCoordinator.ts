@@ -20,9 +20,12 @@ import {
   type ThreadId,
   type TurnId,
 } from "@ryco/contracts";
+import { DEFAULT_CONTEXT_HANDOFF_INPUT_BUDGET } from "@ryco/shared/contextWindow";
 import { getModelDisplayLabel } from "@ryco/shared/model";
 import { Cause, Effect, Layer, Option, Ref, Schema } from "effect";
 
+import { ModelManifest, BUNDLED_MODEL_MANIFEST } from "../../provider/ModelManifest.ts";
+import { resolveHandoffBudgetFromManifest } from "../../provider/ModelContextWindow.ts";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import {
   contextHandoffContextBytesTotal,
@@ -255,6 +258,7 @@ function refreshEndpointPresentation(
 }
 
 export const makeContextHandoffCoordinator = Effect.gen(function* () {
+  const manifestService = yield* Effect.serviceOption(ModelManifest);
   const repository = yield* ContextHandoffRepository;
   const contextService = yield* ContextHandoffService;
   const providerService = yield* ProviderService;
@@ -615,7 +619,18 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
       if (!message) {
         return yield* Effect.die("Context handoff target message is unavailable.");
       }
+      const budget = yield* Effect.gen(function* () {
+        const manifest = Option.isSome(manifestService)
+          ? yield* manifestService.value.current
+          : BUNDLED_MODEL_MANIFEST;
+        return resolveHandoffBudgetFromManifest(
+          manifest,
+          presentation.target.driverKind,
+          input.record.targetSelection,
+        );
+      }).pipe(Effect.catchCause(() => Effect.succeed(DEFAULT_CONTEXT_HANDOFF_INPUT_BUDGET)));
       const deliveryArtifact = yield* contextService.prepareDeliveryArtifact({
+        ...budget,
         handoffId: input.record.handoffId,
         triggeringMessageId: input.record.firstMessageId,
         currentMessage: message.text,

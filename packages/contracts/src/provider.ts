@@ -16,6 +16,7 @@ import {
   ProjectCustomSystemPrompt,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  CONTEXT_HANDOFF_MAX_INPUT_CHARS,
   ProviderApprovalDecision,
   ProviderApprovalPolicy,
   ProviderInteractionMode,
@@ -94,7 +95,7 @@ export type ProviderSessionStartInput = Omit<DecodedProviderSessionStartInput, "
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,
   input: Schema.optional(
-    TrimmedNonEmptyString.check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_INPUT_CHARS)),
+    TrimmedNonEmptyString.check(Schema.isMaxLength(CONTEXT_HANDOFF_MAX_INPUT_CHARS)),
   ),
   attachments: Schema.optional(
     Schema.Array(ChatAttachment).check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS)),

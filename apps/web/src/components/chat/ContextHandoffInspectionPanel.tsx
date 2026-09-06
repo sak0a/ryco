@@ -372,6 +372,16 @@ export function ContextHandoffInspectionPanel(props: {
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span>{activeScope.entryCount} context entries</span>
                 <span>{formatBytes(activeScope.byteCount)}</span>
+                {scope === "sent" && summary?.maxInputChars != null ? (
+                  <span>
+                    Budget: {summary.maxInputChars.toLocaleString()} characters (
+                    {summary.budgetSource ?? "unknown"}
+                    {summary.contextWindowTokens != null
+                      ? `, ${summary.contextWindowTokens.toLocaleString()} token window`
+                      : ""}
+                    )
+                  </span>
+                ) : null}
                 {activeScope.truncated ? <span>Trimmed to the target input budget</span> : null}
               </div>
             ) : (

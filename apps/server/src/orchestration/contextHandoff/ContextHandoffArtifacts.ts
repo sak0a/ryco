@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   CONTEXT_HANDOFF_CONTEXT_VERSION,
+  ContextHandoffAppliedBudget,
   ContextHandoffDigest,
   IsoDateTime,
   MessageId,
@@ -41,6 +42,7 @@ export const ContextHandoffRenderedDocument = Schema.Struct({
 export type ContextHandoffRenderedDocument = typeof ContextHandoffRenderedDocument.Type;
 
 export const ContextHandoffDeliveryArtifact = Schema.Struct({
+  ...ContextHandoffAppliedBudget.fields,
   artifactVersion: Schema.Literal(CONTEXT_HANDOFF_DELIVERY_ARTIFACT_VERSION),
   rendererVersion: Schema.Literal(CONTEXT_HANDOFF_RENDERER_VERSION),
   renderedContext: ContextHandoffRenderedDocument,
@@ -64,24 +66,39 @@ export function digestContextHandoffUtf8(value: string): ContextHandoffDigest {
   return ContextHandoffDigest.make(createHash("sha256").update(value, "utf8").digest("hex"));
 }
 
-export function makeContextHandoffDeliveryArtifact(input: {
-  readonly renderedContext: ContextHandoffRenderedDocument;
-  readonly renderedContextJson: string;
-  readonly providerInput: string;
-  readonly triggeringMessageId: MessageId;
-  readonly triggeringMessage: string;
-  readonly includedEntryCount: number;
-  readonly totalEntryCount: number;
-  readonly contextChars: number;
-  readonly inputChars: number;
-  readonly truncated: boolean;
-  readonly preparedAt: string;
-}): ContextHandoffDeliveryArtifact {
+export function hasValidContextHandoffDeliveryDigests(
+  artifact: ContextHandoffDeliveryArtifact,
+): boolean {
+  return (
+    artifact.providerInputDigest === digestContextHandoffUtf8(artifact.providerInput) &&
+    artifact.renderedContextDigest ===
+      digestContextHandoffUtf8(stableStringifyContextHandoff(artifact.renderedContext))
+  );
+}
+
+export function makeContextHandoffDeliveryArtifact(
+  input: typeof ContextHandoffAppliedBudget.Type & {
+    readonly renderedContext: ContextHandoffRenderedDocument;
+    readonly renderedContextJson: string;
+    readonly providerInput: string;
+    readonly triggeringMessageId: MessageId;
+    readonly triggeringMessage: string;
+    readonly includedEntryCount: number;
+    readonly totalEntryCount: number;
+    readonly contextChars: number;
+    readonly inputChars: number;
+    readonly truncated: boolean;
+    readonly preparedAt: string;
+  },
+): ContextHandoffDeliveryArtifact {
   const canonicalRenderedContext = stableStringifyContextHandoff(input.renderedContext);
   if (canonicalRenderedContext !== input.renderedContextJson) {
     throw new Error("Rendered context JSON does not match its structured document");
   }
   return Schema.decodeUnknownSync(ContextHandoffDeliveryArtifact)({
+    maxInputChars: input.maxInputChars ?? null,
+    budgetSource: input.budgetSource ?? null,
+    contextWindowTokens: input.contextWindowTokens ?? null,
     artifactVersion: CONTEXT_HANDOFF_DELIVERY_ARTIFACT_VERSION,
     rendererVersion: CONTEXT_HANDOFF_RENDERER_VERSION,
     renderedContext: input.renderedContext,

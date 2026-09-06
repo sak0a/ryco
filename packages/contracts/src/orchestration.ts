@@ -315,7 +315,33 @@ export const ContextHandoffInspectionSummaryInput = Schema.Struct({
 });
 export type ContextHandoffInspectionSummaryInput = typeof ContextHandoffInspectionSummaryInput.Type;
 
+export const CONTEXT_HANDOFF_MAX_INPUT_CHARS = 1_400_000;
+
+export const ModelContextWindowMetadata = Schema.Array(
+  Schema.Struct({
+    slug: Schema.String,
+    aliases: Schema.optional(Schema.Array(Schema.String)),
+    defaultContextWindow: Schema.optional(Schema.String),
+    contextWindowTokens: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
+    fixedContextWindowTokens: Schema.optional(Schema.Number),
+  }),
+);
+
+export const ContextHandoffInputBudget = Schema.Struct({
+  maxInputChars: PositiveInt,
+  budgetSource: Schema.Literals(["default", "manifest", "slug"]),
+  contextWindowTokens: Schema.NullOr(PositiveInt),
+});
+export type ContextHandoffInputBudget = typeof ContextHandoffInputBudget.Type;
+
+export const ContextHandoffAppliedBudget = Schema.Struct({
+  maxInputChars: Schema.optional(Schema.NullOr(PositiveInt)),
+  budgetSource: Schema.optional(Schema.NullOr(ContextHandoffInputBudget.fields.budgetSource)),
+  contextWindowTokens: Schema.optional(Schema.NullOr(PositiveInt)),
+});
+
 export const ContextHandoffInspectionSummary = Schema.Struct({
+  ...ContextHandoffAppliedBudget.fields,
   threadId: ThreadId,
   handoffId: ContextHandoffId,
   status: Schema.Literals([

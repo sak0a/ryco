@@ -133,6 +133,13 @@ describe("ProviderSessionStartInput", () => {
 });
 
 describe("ProviderSendTurnInput", () => {
+  it("accepts expanded handoff input and rejects input over the ceiling", () => {
+    const input = "x".repeat(1_400_000);
+    expect(decodeProviderSendTurnInput({ threadId: "thread-1", input }).input).toBe(input);
+    expect(() =>
+      decodeProviderSendTurnInput({ threadId: "thread-1", input: input + "x" }),
+    ).toThrow();
+  });
   it("accepts codex modelSelection", () => {
     const parsed = decodeProviderSendTurnInput({
       threadId: "thread-1",

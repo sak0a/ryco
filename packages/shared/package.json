@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./contextWindow": {
+      "types": "./src/contextWindow.ts",
+      "import": "./src/contextWindow.ts"
+    },
     "./advertisedEndpoint": {
       "types": "./src/advertisedEndpoint.ts",
       "import": "./src/advertisedEndpoint.ts"
