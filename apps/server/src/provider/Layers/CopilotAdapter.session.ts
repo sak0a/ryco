@@ -19,9 +19,14 @@ import {
   type SessionEvent,
 } from "@github/copilot-sdk";
 import { Effect, Option } from "effect";
+import {
+  appendAttachmentPathLines,
+  formatAttachmentPathLines,
+  type AttachmentPathLineEntry,
+} from "@ryco/shared/attachmentPrompt";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 
-import { readPersistedAttachment } from "../../attachmentStore.ts";
+import { isPersistableChatAttachment, readPersistedAttachment } from "../../attachmentStore.ts";
 import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import {
   ProviderAdapterProcessError,
@@ -100,7 +105,7 @@ function parseResumeCursor(resumeCursor: unknown): string | undefined {
 }
 
 function attachmentMimeType(attachment: ChatAttachment): string {
-  return attachment.mimeType;
+  return attachment.mimeType ?? "application/octet-stream";
 }
 
 function createTurnStartWaiter(record: ActiveCopilotSession) {
@@ -392,7 +397,7 @@ export const makeSendTurn =
     Effect.gen(function* () {
       const record = yield* deps.requireSession(input.threadId);
       const declaredAttachmentBytes = (input.attachments ?? []).reduce(
-        (total, attachment) => total + attachment.sizeBytes,
+        (total, attachment) => total + (attachment.sizeBytes ?? 0),
         0,
       );
       if (declaredAttachmentBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
@@ -403,10 +408,15 @@ export const makeSendTurn =
         });
       }
       let attachmentTotalBytes = 0;
-      const attachments: MessageOptions["attachments"] = yield* Effect.forEach(
+      const pathLineEntries: AttachmentPathLineEntry[] = [];
+      const attachments: MessageOptions["attachments"] = (yield* Effect.forEach(
         input.attachments ?? [],
         (attachment) =>
           Effect.gen(function* () {
+            if (!isPersistableChatAttachment(attachment)) {
+              pathLineEntries.push({ attachment });
+              return null;
+            }
             const persisted = readPersistedAttachment({
               attachmentsDir: deps.serverConfig.attachmentsDir,
               attachment,
@@ -431,9 +441,9 @@ export const makeSendTurn =
               data: persisted.bytes.toString("base64"),
               mimeType: attachmentMimeType(attachment),
               displayName: attachment.name,
-            };
+            } satisfies NonNullable<MessageOptions["attachments"]>[number];
           }),
-      );
+      )).filter((attachment) => attachment !== null);
       const copilotModelSelection = selectionTargetsCopilotInstance(
         input.modelSelection,
         deps.instanceId,
@@ -475,7 +485,11 @@ export const makeSendTurn =
       record.updatedAt = new Date().toISOString();
 
       const sendPayload: Parameters<typeof record.session.send>[0] = {
-        prompt: input.input ?? "",
+        prompt:
+          appendAttachmentPathLines(
+            input.input ?? "",
+            formatAttachmentPathLines(pathLineEntries),
+          ) ?? "",
         ...(attachments.length > 0 ? { attachments } : {}),
         mode: "immediate",
       };

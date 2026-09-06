@@ -1,4 +1,10 @@
-import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from "@ryco/contracts";
+import type {
+  ChatAttachment,
+  ChatFileAttachment,
+  ChatImageAttachment,
+  ProviderApprovalDecision,
+  RuntimeMode,
+} from "@ryco/contracts";
 import type {
   Agent,
   FilePartInput,
@@ -27,6 +33,7 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { isWindowsCommandNotFound } from "../processRunner.ts";
+import { isPersistableChatAttachment } from "../attachmentStore.ts";
 import { compareCliVersions } from "./cliVersion.ts";
 import { collectStreamAsString } from "./providerSnapshot.ts";
 import { NetService } from "@ryco/shared/Net";
@@ -260,6 +267,30 @@ export function openCodeQuestionId(
   return header.length > 0 ? `question-${index}-${header}` : `question-${index}`;
 }
 
+export const OPENCODE_NATIVE_ATTACHMENT_MAX_BYTES = 20_000_000;
+
+const OPENCODE_NATIVE_IMAGE_MIME_TYPES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+export function isOpenCodeNativeAttachment(
+  attachment: ChatAttachment,
+): attachment is ChatImageAttachment | ChatFileAttachment {
+  if (!isPersistableChatAttachment(attachment)) {
+    return false;
+  }
+  if (attachment.sizeBytes > OPENCODE_NATIVE_ATTACHMENT_MAX_BYTES) {
+    return false;
+  }
+  if (attachment.type === "image") {
+    return OPENCODE_NATIVE_IMAGE_MIME_TYPES.has(attachment.mimeType);
+  }
+  return attachment.mimeType === "application/pdf" || attachment.mimeType.startsWith("text/");
+}
+
 export function toOpenCodeFileParts(input: {
   readonly attachments: ReadonlyArray<ChatAttachment> | undefined;
   readonly resolveAttachmentUrl: (attachment: ChatAttachment) => string | null;
@@ -274,8 +305,8 @@ export function toOpenCodeFileParts(input: {
 
     parts.push({
       type: "file",
-      mime: attachment.mimeType,
-      filename: attachment.name,
+      mime: attachment.mimeType ?? "application/octet-stream",
+      filename: attachment.name ?? "attachment",
       url: attachmentUrl,
     });
   }

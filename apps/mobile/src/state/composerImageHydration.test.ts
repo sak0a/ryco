@@ -32,4 +32,53 @@ describe("hydrateMobileComposerImages", () => {
   it("maps an empty list to no images", () => {
     expect(hydrateMobileComposerImages([])).toEqual([]);
   });
+
+  it("hydrates a token-backed persisted file row with its token metadata", () => {
+    const images = hydrateMobileComposerImages([
+      {
+        type: "file",
+        id: "file-1",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 2048,
+        uploadToken: "tok-1",
+        expiresAt: "2026-09-06T00:00:00.000Z",
+      } as PersistedComposerImageAttachment,
+    ]);
+
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({
+      type: "file",
+      id: "file-1",
+      name: "report.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 2048,
+      uploadToken: "tok-1",
+      expiresAt: "2026-09-06T00:00:00.000Z",
+      previewUrl: "",
+    });
+  });
+
+  it("hydrates a needsReattach persisted file row as an attach-again stub", () => {
+    const images = hydrateMobileComposerImages([
+      {
+        type: "file",
+        id: "file-2",
+        name: "video.mp4",
+        mimeType: "video/mp4",
+        sizeBytes: 4096,
+        uploadState: "needsReattach",
+      } as PersistedComposerImageAttachment,
+    ]);
+
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({
+      type: "file",
+      id: "file-2",
+      name: "video.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 4096,
+      uploadState: "needsReattach",
+    });
+  });
 });

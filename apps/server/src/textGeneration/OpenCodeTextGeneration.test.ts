@@ -1,4 +1,5 @@
 import { OpenCodeSettings, ProviderInstanceId, TextGenerationError } from "@ryco/contracts";
+import type { ChatFileAttachment, ChatImageAttachment } from "@ryco/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { Duration, Effect, Layer, Result, Schema } from "effect";
@@ -6,8 +7,11 @@ import { TestClock } from "effect/testing";
 import { NetService } from "@ryco/shared/Net";
 import { beforeEach, expect } from "vite-plus/test";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 
 import { ServerConfig } from "../config.ts";
+import { attachmentRelativePath } from "../attachmentStore.ts";
 import {
   OpenCodeRuntime,
   OpenCodeRuntimeError,
@@ -26,6 +30,7 @@ const runtimeMock = {
     promptResult: undefined as
       | { data?: { info?: { error?: unknown }; parts?: Array<{ type: string; text?: string }> } }
       | undefined,
+    promptParts: [] as Array<Array<{ type: string; text?: string }>>,
   },
   reset() {
     this.state.startCalls.length = 0;
@@ -33,6 +38,7 @@ const runtimeMock = {
     this.state.authHeaders.length = 0;
     this.state.closeCalls.length = 0;
     this.state.promptResult = undefined;
+    this.state.promptParts.length = 0;
   },
 };
 
@@ -70,8 +76,9 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
       },
       session: {
         create: async () => ({ data: { id: `${baseUrl}/session` } }),
-        prompt: async () => {
+        prompt: async (input?: { parts?: Array<{ type: string; text?: string }> }) => {
           runtimeMock.state.promptUrls.push(baseUrl);
+          runtimeMock.state.promptParts.push(input?.parts ?? []);
           runtimeMock.state.authHeaders.push(
             serverPassword ? `Basic ${btoa(`opencode:${serverPassword}`)}` : null,
           );
@@ -196,6 +203,64 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
         expect(runtimeMock.state.closeCalls).toEqual(["http://127.0.0.1:4301"]);
       }),
     ).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect(
+    "degrades non-native attachments to metadata lines while native ones become file parts",
+    () =>
+      withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+        Effect.gen(function* () {
+          const serverConfig = yield* ServerConfig;
+          const nativeAttachment: ChatImageAttachment = {
+            type: "image",
+            id: "native-image-0001",
+            name: "shot.png",
+            mimeType: "image/png",
+            sizeBytes: 4,
+          };
+          const zipAttachment: ChatFileAttachment = {
+            type: "file",
+            id: "zip-attachment-0001",
+            name: "archive.zip",
+            mimeType: "application/zip",
+            sizeBytes: 4,
+          };
+          const nativePath = path.join(
+            serverConfig.attachmentsDir,
+            attachmentRelativePath(nativeAttachment) ?? "",
+          );
+          const zipPath = path.join(
+            serverConfig.attachmentsDir,
+            attachmentRelativePath(zipAttachment) ?? "",
+          );
+          yield* Effect.promise(async () => {
+            await writeFile(nativePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+            await writeFile(zipPath, Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+          });
+          runtimeMock.state.promptResult = {
+            data: {
+              parts: [{ type: "text", text: JSON.stringify({ title: "Attachment title" }) }],
+            },
+          };
+
+          yield* textGeneration.generateThreadTitle({
+            cwd: process.cwd(),
+            message: "Summarize from attachments",
+            attachments: [nativeAttachment, zipAttachment],
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+
+          const parts = runtimeMock.state.promptParts.at(-1) ?? [];
+          const textPart = parts.find((part) => part.type === "text");
+          expect(textPart?.text).toContain(
+            "[Attached file] archive.zip (application/zip, 4 bytes)",
+          );
+          expect(textPart?.text).toContain(`saved at: ${zipPath}`);
+          const fileParts = parts.filter((part) => part.type === "file");
+          expect(fileParts).toHaveLength(1);
+          expect(fileParts[0]).toMatchObject({ filename: "shot.png", mime: "image/png" });
+        }),
+      ),
   );
 
   it.effect("ranks inbox threads with the configured OpenCode model", () =>

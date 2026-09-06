@@ -188,6 +188,10 @@
       "types": "./src/sourceControlContextFormatter.ts",
       "import": "./src/sourceControlContextFormatter.ts"
     },
+    "./attachmentPrompt": {
+      "types": "./src/attachmentPrompt.ts",
+      "import": "./src/attachmentPrompt.ts"
+    },
     "./taskClassification": {
       "types": "./src/taskClassification.ts",
       "import": "./src/taskClassification.ts"

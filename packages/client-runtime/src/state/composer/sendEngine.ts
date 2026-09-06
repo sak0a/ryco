@@ -131,7 +131,10 @@ export interface SendTurnDispatchAttachment {
   readonly name: string;
   readonly mimeType: string;
   readonly sizeBytes: number;
-  readonly dataUrl: string;
+  /** Inline bytes (images and legacy file attach). */
+  readonly dataUrl?: string;
+  /** Single-use token for a file already streamed to the server. */
+  readonly uploadToken?: string;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -172,6 +175,26 @@ export function buildSendTurnDispatchAttachment(input: {
     mimeType: input.attachment.mime,
     sizeBytes: input.attachment.size,
     dataUrl: encodeComposerAttachmentDataUrl(input.attachment),
+  };
+}
+
+/**
+ * Builds the dispatch attachment for a file whose bytes were already streamed
+ * to the server: the dispatch carries the single-use upload token and no
+ * inline bytes.
+ */
+export function buildSendTurnUploadTokenDispatchAttachment(input: {
+  readonly name: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+  readonly uploadToken: string;
+}): SendTurnDispatchAttachment {
+  return {
+    type: "file",
+    name: input.name,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    uploadToken: input.uploadToken,
   };
 }
 

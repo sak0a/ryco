@@ -11,13 +11,16 @@ import {
   ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   buildSendTurnBootstrap,
   buildSendTurnDispatchAttachment,
+  buildSendTurnUploadTokenDispatchAttachment,
   commitSendTurnDispatch,
+  isFileUploadTokenUsable,
   resolveThreadCreateModelSelection,
 } from "@ryco/client-runtime/state/composer";
 
 import { mobileAttachmentCodec } from "../../platform/attachmentCodec";
 import { newCommandId, newMessageId } from "../../lib/ids";
-import type { MobileComposerImageAttachment } from "../../state/composerImageHydration";
+import type { DraftComposerAttachment } from "../../lib/composerFiles";
+import { isDraftComposerFileAttachment } from "../../lib/composerFiles";
 
 // §2.3 pt5 / send pipeline. Mirrors apps/web/src/hooks/executeChatSendTurn.ts but
 // omits the web-only pieces (blob revocation, undo window, ChatComposerHandle
@@ -39,7 +42,7 @@ export interface ExecuteSendTurnInput {
   };
   readonly composer: {
     readonly prompt: string;
-    readonly images: ReadonlyArray<MobileComposerImageAttachment>;
+    readonly images: ReadonlyArray<DraftComposerAttachment>;
     readonly selectedModelSelection: ModelSelection;
     readonly selectedModel: string;
     readonly hasSelectedModel: boolean;
@@ -60,7 +63,7 @@ export interface ExecuteSendTurnInput {
   /** Restores the snapshotted prompt + images if the dispatch fails. */
   readonly restoreDraft: (input: {
     readonly prompt: string;
-    readonly images: ReadonlyArray<MobileComposerImageAttachment>;
+    readonly images: ReadonlyArray<DraftComposerAttachment>;
   }) => void;
   readonly setThreadError: (threadId: ThreadId, error: string | null) => void;
   readonly beginLocalDispatch?: (options: { readonly preparingWorktree: boolean }) => void;
@@ -80,19 +83,37 @@ export async function executeSendTurn(input: ExecuteSendTurnInput): Promise<bool
 
   try {
     // Attachment-neutral send path: encode each RN uri/bytes to the outgoing
-    // turn attachment (no DOM File).
+    // turn attachment (no DOM File). Uploaded streamed files dispatch by
+    // single-use token; images keep the dataUrl path.
     const turnAttachments = await Promise.all(
-      imagesSnapshot.map(async (image) =>
-        buildSendTurnDispatchAttachment({
+      imagesSnapshot.map(async (attachment) => {
+        if (isDraftComposerFileAttachment(attachment)) {
+          if (
+            attachment.uploadToken === undefined ||
+            (attachment.expiresAt !== undefined &&
+              !isFileUploadTokenUsable(attachment.expiresAt, Date.now()))
+          ) {
+            throw new Error(`Attach '${attachment.name}' again to send this message.`);
+          }
+          return buildSendTurnUploadTokenDispatchAttachment({
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            sizeBytes: attachment.sizeBytes,
+            uploadToken: attachment.uploadToken,
+          });
+        }
+        return buildSendTurnDispatchAttachment({
           attachment: await mobileAttachmentCodec.encode({
-            id: image.id,
-            mime: image.mimeType,
-            size: image.sizeBytes,
-            uri: image.previewUrl,
+            id: attachment.id,
+            mime: attachment.mimeType,
+            size: attachment.sizeBytes,
+            // The runtime attachment pipeline expects the outgoing data URL,
+            // not the image-picker preview file URI.
+            uri: attachment.dataUrl,
           }),
-          name: image.name,
-        }),
-      ),
+          name: attachment.name,
+        });
+      }),
     );
 
     // Optimistic: clear the draft now; on failure it is restored below.

@@ -56,9 +56,27 @@ export interface ChatFileAttachment {
   name: string;
   mimeType: string;
   sizeBytes: number;
+  /** Download URL resolved from the environment attachment endpoint. */
+  previewUrl?: string;
 }
 
-export type ChatAttachment = ChatImageAttachment | ChatFileAttachment;
+export interface ChatUnknownAttachment {
+  type: string;
+  id?: string | undefined;
+  name?: string | undefined;
+  mimeType?: string | undefined;
+  sizeBytes?: number | undefined;
+  /** Never resolved for unknown attachments; optional keeps mapping tolerant. */
+  previewUrl?: string;
+}
+
+export type ChatAttachment = ChatImageAttachment | ChatFileAttachment | ChatUnknownAttachment;
+
+export function isChatImageAttachment(
+  attachment: ChatAttachment,
+): attachment is ChatImageAttachment {
+  return attachment.type === "image";
+}
 
 export interface ChatMessage {
   id: MessageId;

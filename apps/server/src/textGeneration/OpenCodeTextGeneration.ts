@@ -7,11 +7,16 @@ import {
   type ModelSelection,
   type OpenCodeSettings,
 } from "@ryco/contracts";
+import {
+  appendAttachmentPathLines,
+  formatAttachmentPathLines,
+  type AttachmentPathLineEntry,
+} from "@ryco/shared/attachmentPrompt";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@ryco/shared/git";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 
 import { ServerConfig } from "../config.ts";
-import { readPersistedAttachment } from "../attachmentStore.ts";
+import { readPersistedAttachment, resolveAttachmentPath } from "../attachmentStore.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
@@ -31,6 +36,7 @@ import {
 import {
   OpenCodeRuntime,
   type OpenCodeServerConnection,
+  isOpenCodeNativeAttachment,
   openCodeRuntimeErrorDetail,
   parseOpenCodeModelSlug,
   toOpenCodeFileParts,
@@ -120,7 +126,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     }
 
     const declaredAttachmentBytes = (input.attachments ?? []).reduce(
-      (total, attachment) => total + attachment.sizeBytes,
+      (total, attachment) => total + (attachment.sizeBytes ?? 0),
       0,
     );
     if (declaredAttachmentBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
@@ -131,7 +137,26 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     }
     const attachmentUrlById = new Map<string, string>();
     let attachmentTotalBytes = 0;
+    const pathLineEntries: AttachmentPathLineEntry[] = [];
     for (const attachment of input.attachments ?? []) {
+      if (!isOpenCodeNativeAttachment(attachment)) {
+        pathLineEntries.push({
+          attachment,
+          ...(attachment.id === undefined
+            ? {}
+            : {
+                resolvedPath:
+                  resolveAttachmentPath({
+                    attachmentsDir: serverConfig.attachmentsDir,
+                    attachment,
+                  }) ?? undefined,
+              }),
+        });
+        continue;
+      }
+      if (attachment.id === undefined) {
+        continue;
+      }
       const persisted = readPersistedAttachment({
         attachmentsDir: serverConfig.attachmentsDir,
         attachment,
@@ -156,8 +181,14 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     }
     const fileParts = toOpenCodeFileParts({
       attachments: input.attachments,
-      resolveAttachmentUrl: (attachment) => attachmentUrlById.get(attachment.id) ?? null,
+      resolveAttachmentUrl: (attachment) =>
+        attachment.id === undefined ? null : (attachmentUrlById.get(attachment.id) ?? null),
     });
+    const promptWithAttachmentLines = appendAttachmentPathLines(
+      input.prompt,
+      formatAttachmentPathLines(pathLineEntries),
+    );
+    const finalPrompt = promptWithAttachmentLines ?? input.prompt;
 
     const runAgainstServer = (server: Pick<OpenCodeServerConnection, "url" | "serverPassword">) =>
       Effect.gen(function* () {
@@ -207,7 +238,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
               model: parsedModel,
               ...(selectedAgent ? { agent: selectedAgent } : {}),
               ...(selectedVariant ? { variant: selectedVariant } : {}),
-              parts: [{ type: "text", text: input.prompt }, ...fileParts],
+              parts: [{ type: "text", text: finalPrompt }, ...fileParts],
             });
             const info = result.data?.info;
             const errorMessage = getOpenCodePromptErrorMessage(info?.error);

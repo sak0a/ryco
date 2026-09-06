@@ -26,7 +26,8 @@ import {
   DEFAULT_AGENT_TOKEN_MODE,
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
-  type ChatAttachment,
+  type ChatFileAttachment,
+  type ChatImageAttachment,
 } from "../threads/types.ts";
 import {
   type TerminalContextDraft,
@@ -68,7 +69,10 @@ export type DraftId = typeof DraftId.Type;
  * adapter extends this with a DOM `File` (`ComposerImageAttachment`); the
  * package never references `File`/`Blob` (blob-preview lifecycle stays app-side).
  */
-export interface ComposerDraftImage extends Omit<ChatAttachment, "previewUrl"> {
+export interface ComposerDraftImage extends Omit<
+  ChatImageAttachment | ChatFileAttachment,
+  "previewUrl"
+> {
   previewUrl: string;
 }
 
@@ -316,6 +320,12 @@ export interface ComposerDraftStoreState<TImage extends ComposerDraftImage = Com
   addImage: (threadRef: ComposerThreadTarget, image: TImage) => void;
   addImages: (threadRef: ComposerThreadTarget, images: TImage[]) => void;
   removeImage: (threadRef: ComposerThreadTarget, imageId: string) => void;
+  /** Applies an in-place update to one staged attachment (e.g. upload token). */
+  updateImage: (
+    threadRef: ComposerThreadTarget,
+    imageId: string,
+    update: (image: TImage) => TImage,
+  ) => void;
   insertTerminalContext: (
     threadRef: ComposerThreadTarget,
     prompt: string,
@@ -1768,6 +1778,38 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
                 nextDraftsByThreadKey[threadKey] = nextDraft;
               }
               return { draftsByThreadKey: nextDraftsByThreadKey };
+            });
+          },
+          updateImage: (threadRef, imageId, update) => {
+            const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+            if (threadKey.length === 0) {
+              return;
+            }
+            set((state) => {
+              const current = state.draftsByThreadKey[threadKey];
+              if (!current) {
+                return state;
+              }
+              const index = current.images.findIndex((image) => image.id === imageId);
+              if (index === -1) {
+                return state;
+              }
+              const updated = update(current.images[index]!);
+              if (updated === current.images[index]) {
+                return state;
+              }
+              const nextImages = [...current.images];
+              nextImages[index] = updated;
+              const nextDraft: ComposerThreadDraftState<TImage> = {
+                ...current,
+                images: nextImages,
+              };
+              return {
+                draftsByThreadKey: {
+                  ...state.draftsByThreadKey,
+                  [threadKey]: nextDraft,
+                },
+              };
             });
           },
           insertTerminalContext: (threadRef, prompt, context, index) => {

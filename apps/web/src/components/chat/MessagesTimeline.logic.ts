@@ -8,6 +8,7 @@ import {
 import type { AgentPanelModel } from "../../threadWorkspaceViewModel";
 import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import {
+  isChatImageAttachment,
   type ChatAttachment,
   type ChatMessage,
   type ProposedPlan,
@@ -1155,7 +1156,8 @@ function areChatAttachmentUnchanged(previous: ChatAttachment, next: ChatAttachme
   ) {
     return false;
   }
-  return previous.type !== "image" || next.type !== "image"
-    ? true
-    : previous.previewUrl === next.previewUrl;
+  if (!isChatImageAttachment(previous) || !isChatImageAttachment(next)) {
+    return true;
+  }
+  return previous.previewUrl === next.previewUrl;
 }

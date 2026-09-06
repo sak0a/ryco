@@ -205,7 +205,7 @@ function mapSession(session: OrchestrationSession): ThreadSession {
 
 function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage): ChatMessage {
   const attachments = message.attachments?.map((attachment) =>
-    attachment.type === "image"
+    (attachment.type === "image" || attachment.type === "file") && attachment.id !== undefined
       ? {
           ...attachment,
           ...(getThreadsRuntimeConfiguration().isHostedHubMode()

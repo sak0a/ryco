@@ -8,6 +8,7 @@ import {
   type TurnId,
 } from "@ryco/contracts";
 import {
+  isChatImageAttachment,
   type ChatMessage,
   DEFAULT_AGENT_TOKEN_MODE,
   type SessionPhase,
@@ -138,7 +139,7 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
     return;
   }
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") {
+    if (!isChatImageAttachment(attachment)) {
       continue;
     }
     revokeBlobPreviewUrl(attachment.previewUrl);
@@ -151,7 +152,7 @@ export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[
   }
   const previewUrls: string[] = [];
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") continue;
+    if (!isChatImageAttachment(attachment)) continue;
     if (!attachment.previewUrl || !attachment.previewUrl.startsWith("blob:")) continue;
     previewUrls.push(attachment.previewUrl);
   }
@@ -246,7 +247,7 @@ export function buildChatSendTitleSeed(input: {
 export function cloneComposerImageForRetry(
   image: ComposerImageAttachment,
 ): ComposerImageAttachment {
-  if (typeof URL === "undefined" || !image.previewUrl.startsWith("blob:")) {
+  if (typeof URL === "undefined" || !image.previewUrl.startsWith("blob:") || !image.file) {
     return image;
   }
   try {

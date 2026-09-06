@@ -21,10 +21,17 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { parseCliArgs } from "@ryco/shared/cliArgs";
 import {
+  appendAttachmentPathLines,
+  formatAttachmentPathLines,
+  type AttachmentPathLineEntry,
+} from "@ryco/shared/attachmentPrompt";
+import {
   ApprovalRequestId,
   type AgentTokenMode,
   type CanonicalItemType,
   type CanonicalRequestType,
+  type ChatFileAttachment,
+  type ChatImageAttachment,
   type ClaudeSettings,
   EventId,
   type ProviderApprovalDecision,
@@ -77,7 +84,7 @@ import {
   Stream,
 } from "effect";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { isPersistableChatAttachment, resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import {
@@ -1100,6 +1107,8 @@ const SUPPORTED_CLAUDE_IMAGE_MIME_TYPES = new Set([
   "image/png",
   "image/webp",
 ]);
+const CLAUDE_PDF_MIME_TYPE = "application/pdf";
+export const CLAUDE_NATIVE_PDF_MAX_BYTES = 25_000_000;
 const CLAUDE_SETTING_SOURCES = [
   "user",
   "project",
@@ -1155,6 +1164,31 @@ function buildClaudeImageContentBlock(input: {
   };
 }
 
+function buildClaudeDocumentContentBlock(input: {
+  readonly bytes: Uint8Array;
+  readonly title: string;
+}): Record<string, unknown> {
+  return {
+    type: "document",
+    source: {
+      type: "base64",
+      media_type: CLAUDE_PDF_MIME_TYPE,
+      data: Buffer.from(input.bytes).toString("base64"),
+    },
+    title: input.title,
+  };
+}
+
+function isClaudeNativeAttachment(attachment: ChatImageAttachment | ChatFileAttachment): boolean {
+  if (attachment.type === "image") {
+    return SUPPORTED_CLAUDE_IMAGE_MIME_TYPES.has(attachment.mimeType);
+  }
+  return (
+    attachment.mimeType === CLAUDE_PDF_MIME_TYPE &&
+    attachment.sizeBytes <= CLAUDE_NATIVE_PDF_MAX_BYTES
+  );
+}
+
 const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
   input: ProviderSendTurnInput,
   dependencies: {
@@ -1163,24 +1197,25 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
     readonly boundInstanceId: ProviderInstanceId;
   },
 ) {
-  const text = buildPromptText(input, dependencies.boundInstanceId);
-  const sdkContent: Array<Record<string, unknown>> = [];
-
-  if (text.length > 0) {
-    sdkContent.push({ type: "text", text });
-  }
+  const promptText = buildPromptText(input, dependencies.boundInstanceId);
+  const nativeBlocks: Array<Record<string, unknown>> = [];
+  const pathLineEntries: AttachmentPathLineEntry[] = [];
 
   for (const attachment of input.attachments ?? []) {
-    if (attachment.type !== "image") {
-      continue;
-    }
-
-    if (!SUPPORTED_CLAUDE_IMAGE_MIME_TYPES.has(attachment.mimeType)) {
-      return yield* new ProviderAdapterRequestError({
-        provider: PROVIDER,
-        method: "turn/start",
-        detail: `Unsupported Claude image attachment type '${attachment.mimeType}'.`,
+    if (!isPersistableChatAttachment(attachment) || !isClaudeNativeAttachment(attachment)) {
+      pathLineEntries.push({
+        attachment,
+        ...(attachment.id === undefined
+          ? {}
+          : {
+              resolvedPath:
+                resolveAttachmentPath({
+                  attachmentsDir: dependencies.attachmentsDir,
+                  attachment,
+                }) ?? undefined,
+            }),
       });
+      continue;
     }
 
     const attachmentPath = resolveAttachmentPath({
@@ -1207,12 +1242,26 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
       ),
     );
 
-    sdkContent.push(
-      buildClaudeImageContentBlock({
-        mimeType: attachment.mimeType,
-        bytes,
-      }),
+    nativeBlocks.push(
+      attachment.type === "image"
+        ? buildClaudeImageContentBlock({
+            mimeType: attachment.mimeType,
+            bytes,
+          })
+        : buildClaudeDocumentContentBlock({
+            bytes,
+            title: attachment.name,
+          }),
     );
+  }
+
+  const text = appendAttachmentPathLines(promptText, formatAttachmentPathLines(pathLineEntries));
+  const sdkContent: Array<Record<string, unknown>> = [];
+  if (text !== undefined && text.length > 0) {
+    sdkContent.push({ type: "text", text });
+  }
+  for (const block of nativeBlocks) {
+    sdkContent.push(block);
   }
 
   return buildUserMessage({ sdkContent });

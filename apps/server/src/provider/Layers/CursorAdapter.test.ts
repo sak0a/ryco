@@ -444,6 +444,68 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
     }),
   );
 
+  it.effect("degrades file attachments to on-disk path lines in the prompt text", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const serverSettings = yield* ServerSettingsService;
+      const { attachmentsDir } = yield* ServerConfig;
+      const threadId = ThreadId.make("cursor-file-attachment-probe");
+      const tempDir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "cursor-acp-")));
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      const argvLogPath = path.join(tempDir, "argv.txt");
+      yield* Effect.promise(() => writeFile(requestLogPath, "", "utf8"));
+      const wrapperPath = yield* Effect.promise(() =>
+        makeProbeWrapper(requestLogPath, argvLogPath),
+      );
+      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-cursoradapter-file-attachment"),
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+
+      const fileAttachment = {
+        type: "file" as const,
+        id: "cursor-file-attachment-12345678-1234-1234-1234-123456789abc",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 123456,
+      };
+      yield* adapter.sendTurn({
+        threadId,
+        input: "review the file",
+        attachments: [fileAttachment],
+      });
+      yield* adapter.stopSession(threadId);
+
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const promptRequest = requests.find((entry) => entry.method === "session/prompt");
+      assert.isDefined(promptRequest);
+      const prompt = (promptRequest?.params as { prompt: Array<Record<string, unknown>> }).prompt;
+      const textBlock = prompt.find((block) => block.type === "text") as
+        | { text: string }
+        | undefined;
+      assert.isDefined(textBlock);
+      assert.ok(textBlock.text.includes("review the file"));
+      assert.ok(
+        textBlock.text.includes(
+          `[Attached file] report.pdf (application/pdf, 123456 bytes) saved at: ${path.join(
+            attachmentsDir,
+            `${fileAttachment.id}.bin`,
+          )}`,
+        ),
+      );
+      assert.equal(
+        prompt.some((block) => block.type === "image"),
+        false,
+      );
+    }),
+  );
+
   it.effect(
     "applies initial model and mode configuration during startSession and skips repeating it on first send",
     () =>

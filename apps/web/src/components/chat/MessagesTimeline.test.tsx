@@ -386,4 +386,58 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Close diff");
     expect(markup).not.toContain("View diff");
   });
+
+  it("renders file attachments as download rows and unknown attachments inert", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "message",
+            createdAt: "2026-07-24T12:00:00.000Z",
+            message: {
+              id: MessageId.make("user-1"),
+              role: "user",
+              text: "See attachments",
+              createdAt: "2026-07-24T12:00:00.000Z",
+              streaming: false,
+              attachments: [
+                {
+                  type: "file",
+                  id: "file-1",
+                  name: "report.pdf",
+                  mimeType: "application/pdf",
+                  sizeBytes: 2048,
+                  previewUrl: "http://localhost:0/attachments/file-1",
+                },
+                {
+                  type: "file",
+                  id: "file-2",
+                  name: "orphan.bin",
+                  mimeType: "application/octet-stream",
+                  sizeBytes: 8,
+                },
+                {
+                  type: "vendorX/telemetry",
+                  name: "opaque-blob",
+                  sizeBytes: 16,
+                },
+              ],
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('href="http://localhost:0/attachments/file-1"');
+    expect(markup).toContain('download="report.pdf"');
+    expect(markup).toContain("report.pdf");
+    expect(markup).toContain("2 KB");
+    expect(markup).not.toContain('download="orphan.bin"');
+    expect(markup).toContain("orphan.bin");
+    expect(markup).toContain("opaque-blob");
+    expect(markup).not.toContain("Preview unavailable");
+  });
 });

@@ -1,7 +1,9 @@
 import type { ComposerSourceControlContext, ServerProviderSkill } from "@ryco/contracts";
 import { memo } from "react";
-import { CircleAlertIcon, XIcon } from "lucide-react";
+import { CircleAlertIcon, FileIcon, PaperclipIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import type { ComposerImageAttachment } from "../../composerDraftStore";
+import type { ChatFileUploadRecord } from "../../composerFileUpload";
+import { isFileUploadTokenUsable } from "../../composerFileUpload";
 import type { ComposerTrigger } from "../../composer-logic";
 import type { TerminalContextDraft } from "../../lib/terminalContext";
 import type { SessionPhase, Thread } from "../../types";
@@ -14,6 +16,16 @@ import { SourceControlContextChip } from "./SourceControlContextChip";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
+
+function formatComposerFileBytes(sizeBytes: number): string {
+  if (sizeBytes >= 1024 * 1024) {
+    return `${Math.round((sizeBytes / (1024 * 1024)) * 10) / 10} MB`;
+  }
+  if (sizeBytes >= 1024) {
+    return `${Math.ceil(sizeBytes / 1024)} KB`;
+  }
+  return `${sizeBytes} B`;
+}
 
 interface ComposerPromptShellPendingProgress {
   customAnswer: string;
@@ -53,8 +65,11 @@ export interface ComposerPromptShellProps {
   // Image attachments
   composerImages: ComposerImageAttachment[];
   nonPersistedComposerImageIdSet: ReadonlySet<string>;
+  fileUploadRecords: ReadonlyMap<string, ChatFileUploadRecord>;
   onExpandImage: (preview: ExpandedImagePreview) => void;
   onRemoveImage: (imageId: string) => void;
+  onRetryFileUpload: (imageId: string) => void;
+  onReattachFile: (imageId: string) => void;
 
   // Prompt editor
   pendingUserInputCount: number;
@@ -134,8 +149,11 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
     onRemoveSourceControlContext,
     composerImages,
     nonPersistedComposerImageIdSet,
+    fileUploadRecords,
     onExpandImage,
     onRemoveImage,
+    onRetryFileUpload,
+    onReattachFile,
     pendingUserInputCount,
     prompt,
     composerCursor,
@@ -206,62 +224,73 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
         pendingUserInputCount === 0 &&
         composerImages.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
-            {composerImages.map((image) => (
-              <div
-                key={image.id}
-                className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
-              >
-                {image.previewUrl ? (
-                  <button
-                    type="button"
-                    className="h-full w-full cursor-zoom-in"
-                    aria-label={`Preview ${image.name}`}
-                    onClick={() => {
-                      const preview = buildExpandedImagePreview(composerImages, image.id);
-                      if (!preview) return;
-                      onExpandImage(preview);
-                    }}
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt={image.name}
-                      className="h-full w-full object-cover"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] text-muted-foreground/70">
-                    {image.name}
-                  </div>
-                )}
-                {nonPersistedComposerImageIdSet.has(image.id) && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          role="img"
-                          aria-label="Draft attachment may not persist"
-                          className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
-                        >
-                          <CircleAlertIcon className="size-3" />
-                        </span>
-                      }
-                    />
-                    <TooltipPopup side="top" className="max-w-64 whitespace-normal leading-tight">
-                      Draft attachment could not be saved locally and may be lost on navigation.
-                    </TooltipPopup>
-                  </Tooltip>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
-                  onClick={() => onRemoveImage(image.id)}
-                  aria-label={`Remove ${image.name}`}
+            {composerImages.map((image) =>
+              image.type === "file" ? (
+                <ComposerFileAttachmentRow
+                  key={image.id}
+                  image={image}
+                  status={fileUploadRecords.get(image.id)?.status}
+                  onRemove={onRemoveImage}
+                  onRetry={onRetryFileUpload}
+                  onReattach={onReattachFile}
+                />
+              ) : (
+                <div
+                  key={image.id}
+                  className="relative h-16 w-16 overflow-hidden rounded-lg border border-border/80 bg-background"
                 >
-                  <XIcon />
-                </Button>
-              </div>
-            ))}
+                  {image.previewUrl ? (
+                    <button
+                      type="button"
+                      className="h-full w-full cursor-zoom-in"
+                      aria-label={`Preview ${image.name}`}
+                      onClick={() => {
+                        const preview = buildExpandedImagePreview(composerImages, image.id);
+                        if (!preview) return;
+                        onExpandImage(preview);
+                      }}
+                    >
+                      <img
+                        src={image.previewUrl}
+                        alt={image.name}
+                        className="h-full w-full object-cover"
+                      />
+                    </button>
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] text-muted-foreground/70">
+                      {image.name}
+                    </div>
+                  )}
+                  {nonPersistedComposerImageIdSet.has(image.id) && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span
+                            role="img"
+                            aria-label="Draft attachment may not persist"
+                            className="absolute left-1 top-1 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-amber-600"
+                          >
+                            <CircleAlertIcon className="size-3" />
+                          </span>
+                        }
+                      />
+                      <TooltipPopup side="top" className="max-w-64 whitespace-normal leading-tight">
+                        Draft attachment could not be saved locally and may be lost on navigation.
+                      </TooltipPopup>
+                    </Tooltip>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+                    onClick={() => onRemoveImage(image.id)}
+                    aria-label={`Remove ${image.name}`}
+                  >
+                    <XIcon />
+                  </Button>
+                </div>
+              ),
+            )}
           </div>
         )}
 
@@ -374,6 +403,99 @@ export const ComposerPromptShell = memo(function ComposerPromptShell(
           </div>
         ) : null}
       </div>
+    </div>
+  );
+});
+
+const ComposerFileAttachmentRow = memo(function ComposerFileAttachmentRow({
+  image,
+  status,
+  onRemove,
+  onRetry,
+  onReattach,
+}: {
+  image: ComposerImageAttachment;
+  status: ChatFileUploadRecord["status"] | undefined;
+  onRemove: (imageId: string) => void;
+  onRetry: (imageId: string) => void;
+  onReattach: (imageId: string) => void;
+}) {
+  // A byte-less row without an engine record can still carry a valid upload
+  // token (rolled-back send or stash snapshot); only genuinely unattached
+  // files need the "attach again" flow.
+  const hasValidUploadToken =
+    image.uploadToken !== undefined &&
+    image.expiresAt !== undefined &&
+    isFileUploadTokenUsable(image.expiresAt, Date.now());
+  const needsReattach =
+    status === undefined
+      ? image.file === null && !hasValidUploadToken
+      : status.kind === "needsReattach";
+  const isUploading = status?.kind === "uploading" || status?.kind === "pending";
+  const isUploaded = status?.kind === "uploaded";
+  const progress = status?.kind === "uploading" ? status.progress : null;
+  return (
+    <div
+      className="relative flex h-16 min-w-44 max-w-56 items-center gap-2 overflow-hidden rounded-lg border border-border/80 bg-background px-3 py-2"
+      data-composer-file-state={
+        needsReattach ? "reattach" : isUploading ? "uploading" : isUploaded ? "uploaded" : "ready"
+      }
+    >
+      <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium">{image.name}</span>
+        {needsReattach ? (
+          <span className="flex items-center gap-1 text-[10px] text-amber-600">
+            <span>Attach again to send</span>
+            <button
+              type="button"
+              className="cursor-pointer font-medium underline underline-offset-2"
+              onClick={() => onReattach(image.id)}
+              aria-label={`Attach ${image.name} again`}
+            >
+              <PaperclipIcon className="inline size-3 align-[-2px]" /> Attach again
+            </button>
+          </span>
+        ) : status?.kind === "failed" ? (
+          <span className="flex items-center gap-1 text-[10px] text-destructive">
+            <span>Upload failed</span>
+            <button
+              type="button"
+              className="cursor-pointer font-medium underline underline-offset-2"
+              onClick={() => onRetry(image.id)}
+              aria-label={`Retry uploading ${image.name}`}
+            >
+              <RotateCcwIcon className="inline size-3 align-[-2px]" /> Retry
+            </button>
+          </span>
+        ) : isUploading ? (
+          <span className="block text-[10px] text-muted-foreground">
+            Uploading{progress !== null ? ` ${Math.round(progress * 100)}%` : "…"}
+          </span>
+        ) : (
+          <span className="block text-[10px] text-muted-foreground">
+            {formatComposerFileBytes(image.sizeBytes)}
+            {isUploaded ? " · Uploaded" : ""}
+          </span>
+        )}
+      </span>
+      {progress !== null && (
+        <span className="absolute bottom-0 left-0 h-0.5 w-full bg-muted">
+          <span
+            className="block h-full bg-primary transition-[width] duration-200"
+            style={{ width: `${Math.round(progress * 100)}%` }}
+          />
+        </span>
+      )}
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
+        onClick={() => onRemove(image.id)}
+        aria-label={`Remove ${image.name}`}
+      >
+        <XIcon />
+      </Button>
     </div>
   );
 });

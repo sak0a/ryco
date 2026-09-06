@@ -51,6 +51,11 @@ import {
 } from "@ryco/client-runtime/state/composer";
 import { webAttachmentCodec } from "../../platform/attachmentCodec";
 import {
+  composerFileUploadEngine,
+  deriveComposerFileUploadSendBlock,
+  useComposerFileUploadRecords,
+} from "../../composerFileUpload";
+import {
   deriveComposerFooterActionLayoutKey,
   deriveComposerSendState,
   isComposerPrimaryActionDisabled,
@@ -507,6 +512,7 @@ export const ChatComposer = memo(
       (store) => store.clearPromptAndImages,
     );
     const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
+    const updateComposerDraftImage = useComposerDraftStore((store) => store.updateImage);
     const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
     const addSourceControlContextToDraft = useComposerDraftStore(
       (store) => store.addSourceControlContext,
@@ -863,6 +869,55 @@ export const ChatComposer = memo(
     );
 
     // ------------------------------------------------------------------
+    // File upload state (streamed attachments)
+    // ------------------------------------------------------------------
+    const fileUploadRecords = useComposerFileUploadRecords();
+    // Recomputed on every upload-record change: the engine subscription in
+    // useComposerFileUploadRecords re-renders the composer as uploads progress.
+    const composerFileUploadSendBlock = deriveComposerFileUploadSendBlock({
+      attachments: composerImages,
+      nowMs: Date.now(),
+    });
+    const composerSendBlockedReason = composerFileUploadSendBlock;
+    const composerHasSendableContent =
+      composerSendState.hasSendableContent && composerFileUploadSendBlock === null;
+
+    // Upload completion flows back into the draft entry so dispatch, draft
+    // persistence, and stash snapshots all read the token from the attachment.
+    useEffect(() => {
+      for (const image of composerImages) {
+        if (image.type !== "file") continue;
+        const status = fileUploadRecords.get(image.id)?.status;
+        if (!status || status.kind !== "uploaded") continue;
+        if (image.uploadToken === status.uploadToken && image.expiresAt === status.expiresAt) {
+          continue;
+        }
+        updateComposerDraftImage(composerDraftTarget, image.id, (draftImage) => ({
+          ...draftImage,
+          uploadToken: status.uploadToken,
+          expiresAt: status.expiresAt,
+        }));
+      }
+    }, [composerDraftTarget, composerImages, fileUploadRecords, updateComposerDraftImage]);
+
+    // Engine records are process-transient: drop the ones whose attachment
+    // left the composer (removal, send clear, discard), except those still
+    // referenced by a stash snapshot that may be restored this session.
+    useEffect(() => {
+      const liveIds = new Set(composerImages.map((image) => image.id));
+      const stashedIds = new Set(
+        [...stashSnapshotsRef.current.values()].flatMap((snapshot) =>
+          snapshot.images.map((image) => image.id),
+        ),
+      );
+      for (const attachmentId of composerFileUploadEngine.snapshot().keys()) {
+        if (!liveIds.has(attachmentId) && !stashedIds.has(attachmentId)) {
+          composerFileUploadEngine.release(attachmentId);
+        }
+      }
+    }, [composerImages]);
+
+    // ------------------------------------------------------------------
     // Derived: composer trigger / menu
     // ------------------------------------------------------------------
     const composerTriggerKind = composerTrigger?.kind ?? null;
@@ -928,7 +983,7 @@ export const ChatComposer = memo(
           phase,
           showPlanFollowUpPrompt,
           promptHasText: prompt.trim().length > 0,
-          hasSendableContent: composerSendState.hasSendableContent,
+          hasSendableContent: composerHasSendableContent,
           isSendBusy,
           isConnecting,
           isPreparingWorktree,
@@ -936,7 +991,7 @@ export const ChatComposer = memo(
       [
         activePendingIsResponding,
         activePendingProgress,
-        composerSendState.hasSendableContent,
+        composerHasSendableContent,
         isConnecting,
         isPreparingWorktree,
         isSendBusy,
@@ -1020,7 +1075,7 @@ export const ChatComposer = memo(
       phase,
       isSendBusy,
       isConnecting,
-      hasSendableContent: composerSendState.hasSendableContent,
+      hasSendableContent: composerHasSendableContent,
     });
     const collapsedComposerPrimaryActionLabel = "Send message";
     const showMobilePendingAnswerActions =
@@ -1241,6 +1296,34 @@ export const ChatComposer = memo(
           const stagedAttachmentById = new Map<string, PersistedComposerImageAttachment>();
           await Promise.all(
             composerImages.map(async (image) => {
+              // Streamed file attachments persist token metadata only; the
+              // bytes stay out of localStorage by design.
+              if (image.type === "file") {
+                const status = fileUploadRecords.get(image.id)?.status;
+                if (status?.kind === "uploaded") {
+                  stagedAttachmentById.set(image.id, {
+                    type: "file",
+                    id: image.id,
+                    name: image.name,
+                    mimeType: image.mimeType,
+                    sizeBytes: image.sizeBytes,
+                    uploadToken: status.uploadToken,
+                    expiresAt: status.expiresAt,
+                  });
+                  return;
+                }
+                if (status) {
+                  stagedAttachmentById.set(image.id, {
+                    type: "file",
+                    id: image.id,
+                    name: image.name,
+                    mimeType: image.mimeType,
+                    sizeBytes: image.sizeBytes,
+                    uploadState: "needsReattach",
+                  });
+                  return;
+                }
+              }
               try {
                 // Encode from the neutral union via the AttachmentCodec so the
                 // persisted dataUrl is produced through the same attachment path
@@ -1288,6 +1371,7 @@ export const ChatComposer = memo(
       composerDraftTarget,
       clearComposerDraftPersistedAttachments,
       composerImages,
+      fileUploadRecords,
       getComposerDraft,
       syncComposerDraftPersistedAttachments,
     ]);
@@ -1617,12 +1701,12 @@ export const ChatComposer = memo(
           pendingProgress: activePendingProgress,
           hasResolvedAnswers: Boolean(activePendingResolvedAnswers),
           showPlanFollowUpPrompt,
-          hasSendableContent: composerSendState.hasSendableContent,
+          hasSendableContent: composerHasSendableContent,
         }),
       [
         activePendingProgress,
         activePendingResolvedAnswers,
-        composerSendState.hasSendableContent,
+        composerHasSendableContent,
         isConnecting,
         isMobileViewport,
         isSendBusy,
@@ -1684,6 +1768,7 @@ export const ChatComposer = memo(
       isDragOverComposer,
       addComposerAttachments,
       removeComposerImage,
+      retryComposerFileUpload,
       onComposerPaste,
       onComposerDragEnter,
       onComposerDragOver,
@@ -1710,6 +1795,30 @@ export const ChatComposer = memo(
         removeSourceControlContextFromDraft(composerDraftTarget, id);
       },
       [composerDraftTarget, removeSourceControlContextFromDraft],
+    );
+
+    // ------------------------------------------------------------------
+    // Re-attach flow for interrupted streamed uploads
+    // ------------------------------------------------------------------
+    const reattachFileInputRef = useRef<HTMLInputElement>(null);
+    const reattachingAttachmentIdRef = useRef<string | null>(null);
+    const handleReattachFile = useCallback((imageId: string) => {
+      reattachingAttachmentIdRef.current = imageId;
+      reattachFileInputRef.current?.click();
+    }, []);
+    const handleReattachFileChange = useCallback(
+      (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        const deadAttachmentId = reattachingAttachmentIdRef.current;
+        reattachingAttachmentIdRef.current = null;
+        if (!file) return;
+        if (deadAttachmentId) {
+          removeComposerImage(deadAttachmentId);
+        }
+        void addComposerAttachments([file]);
+      },
+      [addComposerAttachments, removeComposerImage],
     );
 
     // ------------------------------------------------------------------
@@ -1951,6 +2060,23 @@ export const ChatComposer = memo(
       void (async () => {
         const encodedImages = await Promise.all(
           images.map(async (image) => {
+            if (image.type === "file") {
+              const status = fileUploadRecords.get(image.id)?.status;
+              if (status?.kind === "uploaded") {
+                return {
+                  attachment: {
+                    type: "file",
+                    id: image.id,
+                    name: image.name,
+                    mimeType: image.mimeType,
+                    sizeBytes: image.sizeBytes,
+                    uploadToken: status.uploadToken,
+                    expiresAt: status.expiresAt,
+                  } satisfies PersistedComposerImageAttachment,
+                  unreadableName: null,
+                };
+              }
+            }
             try {
               return {
                 attachment: {
@@ -2029,6 +2155,7 @@ export const ChatComposer = memo(
       clearComposerDraftPromptAndImages,
       composerDraftTarget,
       composerImagesRef,
+      fileUploadRecords,
       finalizeStashEntryImages,
       getComposerDraft,
       isComposerApprovalState,
@@ -2292,6 +2419,14 @@ export const ChatComposer = memo(
         className="relative mx-auto w-full min-w-0 max-w-208"
         data-chat-composer-form="true"
       >
+        <input
+          ref={reattachFileInputRef}
+          type="file"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden
+          onChange={handleReattachFileChange}
+        />
         {pendingContextHandoff ? (
           <div
             className={cn(
@@ -2544,8 +2679,11 @@ export const ChatComposer = memo(
               onRemoveSourceControlContext={handleRemoveSourceControlContext}
               composerImages={composerImages}
               nonPersistedComposerImageIdSet={nonPersistedComposerImageIdSet}
+              fileUploadRecords={fileUploadRecords}
               onExpandImage={onExpandImage}
               onRemoveImage={removeComposerImage}
+              onRetryFileUpload={retryComposerFileUpload}
+              onReattachFile={handleReattachFile}
               pendingUserInputCount={pendingUserInputs.length}
               prompt={prompt}
               composerCursor={composerCursor}
@@ -2633,7 +2771,8 @@ export const ChatComposer = memo(
                 isConnecting={isConnecting}
                 isEnvironmentUnavailable={environmentUnavailable !== null}
                 isPreparingWorktree={isPreparingWorktree}
-                hasSendableContent={composerSendState.hasSendableContent}
+                hasSendableContent={composerHasSendableContent}
+                sendDisabledReason={composerSendBlockedReason}
                 onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                 onInterrupt={handleInterruptPrimaryAction}
                 onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}

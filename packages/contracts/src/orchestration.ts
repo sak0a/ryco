@@ -492,6 +492,7 @@ export const PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024;
 const PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS = 14_000_000;
 const PROVIDER_SEND_TURN_MAX_FILE_DATA_URL_CHARS = 70_000_000;
 const CHAT_ATTACHMENT_ID_MAX_CHARS = 128;
+const FILE_ATTACHMENT_UPLOAD_TOKEN_MAX_CHARS = 256;
 // Correlation id is command id by design in this model.
 export const CorrelationId = CommandId;
 export type CorrelationId = typeof CorrelationId.Type;
@@ -509,6 +510,11 @@ const ChatAttachmentName = TrimmedNonEmptyString.check(
 const ChatAttachmentMimeType = TrimmedNonEmptyString.check(
   Schema.isMaxLength(100),
   Schema.isPattern(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i),
+);
+const UnknownChatAttachmentType = Schema.String.check(
+  Schema.makeFilter((type) =>
+    type === "image" || type === "file" ? "reserved chat attachment type" : true,
+  ),
 );
 
 export const ChatImageAttachment = Schema.Struct({
@@ -540,20 +546,71 @@ export const ChatFileAttachment = Schema.Struct({
 });
 export type ChatFileAttachment = typeof ChatFileAttachment.Type;
 
+export const FileAttachmentUploadToken = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(FILE_ATTACHMENT_UPLOAD_TOKEN_MAX_CHARS),
+);
+export type FileAttachmentUploadToken = typeof FileAttachmentUploadToken.Type;
+
 const UploadChatFileAttachment = Schema.Struct({
   type: Schema.Literal("file"),
   name: ChatAttachmentName,
   mimeType: ChatAttachmentMimeType,
   sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_FILE_BYTES)),
-  dataUrl: TrimmedNonEmptyString.check(
-    Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_FILE_DATA_URL_CHARS),
+  dataUrl: Schema.optionalKey(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_FILE_DATA_URL_CHARS)),
   ),
-});
+  uploadToken: Schema.optionalKey(FileAttachmentUploadToken),
+}).check(
+  Schema.makeFilter((attachment) => {
+    const hasDataUrl = attachment.dataUrl !== undefined;
+    const hasUploadToken = attachment.uploadToken !== undefined;
+    return hasDataUrl !== hasUploadToken
+      ? true
+      : {
+          path: ["dataUrl"],
+          issue: hasDataUrl
+            ? "provide either dataUrl or uploadToken, not both"
+            : "provide exactly one of dataUrl or uploadToken",
+        };
+  }),
+);
 export type UploadChatFileAttachment = typeof UploadChatFileAttachment.Type;
 
-export const ChatAttachment = Schema.Union([ChatImageAttachment, ChatFileAttachment]);
+export const FileAttachmentCreateUploadUrlInput = Schema.Struct({
+  threadId: ThreadId,
+  name: ChatAttachmentName,
+  mimeType: ChatAttachmentMimeType,
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_FILE_BYTES)),
+});
+export type FileAttachmentCreateUploadUrlInput = typeof FileAttachmentCreateUploadUrlInput.Type;
+
+export const FileAttachmentCreateUploadUrlResult = Schema.Struct({
+  uploadToken: FileAttachmentUploadToken,
+  expiresAt: IsoDateTime,
+  maxUploadBytes: NonNegativeInt,
+});
+export type FileAttachmentCreateUploadUrlResult = typeof FileAttachmentCreateUploadUrlResult.Type;
+
+export const ChatUnknownAttachment = Schema.Struct({
+  type: UnknownChatAttachmentType,
+  id: Schema.optional(ChatAttachmentId),
+  name: Schema.optional(ChatAttachmentName),
+  mimeType: Schema.optional(Schema.String),
+  sizeBytes: Schema.optional(NonNegativeInt),
+});
+export type ChatUnknownAttachment = typeof ChatUnknownAttachment.Type;
+
+export const ChatAttachment = Schema.Union([
+  ChatImageAttachment,
+  ChatFileAttachment,
+  ChatUnknownAttachment,
+]);
 export type ChatAttachment = typeof ChatAttachment.Type;
-const UploadChatAttachment = Schema.Union([UploadChatImageAttachment, UploadChatFileAttachment]);
+const UploadChatAttachment = Schema.Union([
+  UploadChatImageAttachment,
+  UploadChatFileAttachment,
+  ChatUnknownAttachment,
+]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 const ChatAttachments = Schema.Array(ChatAttachment).check(
   Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS),
@@ -2726,6 +2783,14 @@ export class OrchestrationGetFullThreadDiffError extends Schema.TaggedError<Orch
 
 export class OrchestrationReplayEventsError extends Schema.TaggedError<OrchestrationReplayEventsError>()(
   "OrchestrationReplayEventsError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class FileAttachmentCreateUploadUrlError extends Schema.TaggedError<FileAttachmentCreateUploadUrlError>()(
+  "FileAttachmentCreateUploadUrlError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),

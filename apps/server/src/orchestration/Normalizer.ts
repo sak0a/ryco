@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import {
   type ClientOrchestrationCommand,
   DEFAULT_PROJECT_METADATA_DIR,
@@ -8,13 +8,23 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type UploadChatAttachment,
+  type UploadChatFileAttachment,
+  type UploadChatImageAttachment,
 } from "@ryco/contracts";
 
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
+import { ChatAttachmentUploads } from "../attachmentUpload.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
 import { WorkspaceAccessPolicy } from "../workspace/Services/WorkspaceAccessPolicy.ts";
 import { WorkspacePaths } from "../workspace/Services/WorkspacePaths.ts";
+
+function isKnownUploadAttachment(
+  attachment: UploadChatAttachment,
+): attachment is UploadChatImageAttachment | UploadChatFileAttachment {
+  return attachment.type === "image" || attachment.type === "file";
+}
 
 export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
   Effect.gen(function* () {
@@ -23,6 +33,11 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
     const serverConfig = yield* ServerConfig;
     const workspaceAccessPolicy = yield* WorkspaceAccessPolicy;
     const workspacePaths = yield* WorkspacePaths;
+    // Optional so deployments without the streaming-upload service keep
+    // rejecting upload references instead of crashing on context resolution.
+    const chatAttachmentUploads = Option.getOrUndefined(
+      yield* Effect.serviceOption(ChatAttachmentUploads),
+    );
 
     const normalizeProjectWorkspaceRoot = (workspaceRoot: string) =>
       workspaceAccessPolicy
@@ -113,7 +128,73 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       command.message.attachments,
       (attachment) =>
         Effect.gen(function* () {
-          const parsed = parseBase64DataUrl(attachment.dataUrl);
+          if (!isKnownUploadAttachment(attachment)) {
+            return { kind: "passthrough" as const, attachment };
+          }
+          if (attachment.type === "file" && attachment.uploadToken !== undefined) {
+            if (!chatAttachmentUploads) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `Attachment '${attachment.name}' uses an upload reference, which this server does not support.`,
+              });
+            }
+            const adopted = yield* chatAttachmentUploads
+              .claimForAdoption({
+                uploadToken: attachment.uploadToken,
+                threadId: command.threadId,
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                sizeBytes: attachment.sizeBytes,
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationDispatchCommandError({
+                      message: cause.message,
+                    }),
+                ),
+              );
+            const persistedAttachment = {
+              type: "file" as const,
+              id: adopted.attachmentId,
+              name: attachment.name,
+              mimeType: attachment.mimeType.toLowerCase(),
+              sizeBytes: attachment.sizeBytes,
+            };
+            const attachmentPath = resolveAttachmentPath({
+              attachmentsDir: serverConfig.attachmentsDir,
+              attachment: persistedAttachment,
+            });
+            if (!attachmentPath) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `Failed to resolve persisted path for '${attachment.name}'.`,
+              });
+            }
+            const fileInfo = yield* fileSystem
+              .stat(attachmentPath)
+              .pipe(Effect.catch(() => Effect.succeed(null)));
+            if (
+              !fileInfo ||
+              fileInfo.type !== "File" ||
+              fileInfo.size !== BigInt(attachment.sizeBytes)
+            ) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `Attachment '${attachment.name}' is missing or incomplete on the server; attach it again.`,
+              });
+            }
+            return {
+              kind: "adopted" as const,
+              attachment: persistedAttachment,
+              attachmentPath,
+              byteCount: attachment.sizeBytes,
+            };
+          }
+          const dataUrl = attachment.dataUrl;
+          if (dataUrl === undefined) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: `Attachment '${attachment.name}' must include inline attachment data.`,
+            });
+          }
+          const parsed = parseBase64DataUrl(dataUrl);
           if (!parsed) {
             return yield* new OrchestrationDispatchCommandError({
               message: `Attachment '${attachment.name}' must use a valid base64 data URL.`,
@@ -178,13 +259,24 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
             });
           }
 
-          return { attachment: persistedAttachment, attachmentPath, bytes };
+          return {
+            kind: "prepared" as const,
+            attachment: persistedAttachment,
+            attachmentPath,
+            bytes,
+          };
         }),
       { concurrency: 1 },
     );
 
     const totalAttachmentBytes = preparedAttachments.reduce(
-      (total, prepared) => total + prepared.bytes.byteLength,
+      (total, prepared) =>
+        total +
+        (prepared.kind === "prepared"
+          ? prepared.bytes.byteLength
+          : prepared.kind === "adopted"
+            ? prepared.byteCount
+            : 0),
       0,
     );
     if (totalAttachmentBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
@@ -195,37 +287,44 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
 
     yield* Effect.forEach(
       preparedAttachments,
-      ({ attachment, attachmentPath, bytes }) =>
-        fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true }).pipe(
-          Effect.mapError(
-            () =>
-              new OrchestrationDispatchCommandError({
-                message: `Failed to create attachment directory for '${attachment.name}'.`,
-              }),
-          ),
-          Effect.andThen(
-            fileSystem.writeFile(attachmentPath, bytes).pipe(
-              Effect.mapError(
-                () =>
-                  new OrchestrationDispatchCommandError({
-                    message: `Failed to persist attachment '${attachment.name}'.`,
-                  }),
-              ),
-            ),
-          ),
-        ),
+      (prepared) =>
+        prepared.kind === "prepared"
+          ? fileSystem
+              .makeDirectory(path.dirname(prepared.attachmentPath), { recursive: true })
+              .pipe(
+                Effect.mapError(
+                  () =>
+                    new OrchestrationDispatchCommandError({
+                      message: `Failed to create attachment directory for '${prepared.attachment.name}'.`,
+                    }),
+                ),
+                Effect.andThen(
+                  fileSystem.writeFile(prepared.attachmentPath, prepared.bytes).pipe(
+                    Effect.mapError(
+                      () =>
+                        new OrchestrationDispatchCommandError({
+                          message: `Failed to persist attachment '${prepared.attachment.name}'.`,
+                        }),
+                    ),
+                  ),
+                ),
+              )
+          : Effect.void,
       { concurrency: 1, discard: true },
     ).pipe(
       Effect.onError(() =>
         Effect.forEach(
           preparedAttachments,
-          ({ attachmentPath }) => fileSystem.remove(attachmentPath).pipe(Effect.ignore),
+          (prepared) =>
+            prepared.kind === "prepared"
+              ? fileSystem.remove(prepared.attachmentPath).pipe(Effect.ignore)
+              : Effect.void,
           { concurrency: 1, discard: true },
         ),
       ),
     );
 
-    const normalizedAttachments = preparedAttachments.map(({ attachment }) => attachment);
+    const normalizedAttachments = preparedAttachments.map((prepared) => prepared.attachment);
 
     return {
       ...command,

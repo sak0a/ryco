@@ -1,6 +1,6 @@
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { MessageId } from "@ryco/contracts";
-import type { ChatMessage } from "../../types";
+import { isChatImageAttachment, type ChatMessage } from "../../types";
 import { revokeBlobPreviewUrl, revokeUserMessagePreviewUrls } from "../ChatView.logic";
 
 export interface UseChatAttachmentPreviewHandoffInput {
@@ -115,7 +115,7 @@ export function useChatAttachmentPreviewHandoff(
       }
 
       const serverPreviewUrls = serverMessage.attachments.flatMap((attachment) =>
-        attachment.type === "image" && attachment.previewUrl ? [attachment.previewUrl] : [],
+        isChatImageAttachment(attachment) && attachment.previewUrl ? [attachment.previewUrl] : [],
       );
       if (
         serverPreviewUrls.length === 0 ||

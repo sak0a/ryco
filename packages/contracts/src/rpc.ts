@@ -126,6 +126,9 @@ import {
   ContextHandoffInspectionSummaryInput,
   ContextHandoffRawPayloadChunk,
   ContextHandoffRawPayloadChunkInput,
+  FileAttachmentCreateUploadUrlError,
+  FileAttachmentCreateUploadUrlInput,
+  FileAttachmentCreateUploadUrlResult,
   ORCHESTRATION_WS_METHODS,
   OrchestrationDispatchCommandError,
   OrchestrationGetTaskOutputError,
@@ -268,6 +271,9 @@ export const WS_METHODS = {
   projectsReadFileBinary: "projects.readFileBinary",
   projectsWriteFile: "projects.writeFile",
   projectsStageFileReference: "projects.stageFileReference",
+
+  // Chat attachment methods
+  chatAttachmentsCreateFileUpload: "chatAttachments.createFileUpload",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -1063,6 +1069,15 @@ export const WsProjectsStageFileReferenceRpc = Rpc.make(WS_METHODS.projectsStage
   error: Schema.Union([ProjectStageFileReferenceError, AuthRpcError]),
 });
 
+export const WsChatAttachmentsCreateFileUploadRpc = Rpc.make(
+  WS_METHODS.chatAttachmentsCreateFileUpload,
+  {
+    payload: FileAttachmentCreateUploadUrlInput,
+    success: FileAttachmentCreateUploadUrlResult,
+    error: Schema.Union([FileAttachmentCreateUploadUrlError, AuthRpcError]),
+  },
+);
+
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
   payload: OpenInEditorInput,
   error: Schema.Union([OpenError, AuthRpcError]),
@@ -1672,6 +1687,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsReadFileBinaryRpc,
   WsProjectsWriteFileRpc,
   WsProjectsStageFileReferenceRpc,
+  WsChatAttachmentsCreateFileUploadRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsSubscribeVcsStatusRpc,
@@ -1745,6 +1761,9 @@ export const WsRpcGroup = RpcGroup.make(
 /**
  * Hosted relay channels carry both groups through one lifecycle-owned encrypted
  * channel. Direct clients keep the device group on its own low-priority socket
- * so video-adjacent work cannot contend with chat RPC.
+ * so video-adjacent work cannot contend with chat RPC. The explicit annotation
+ * keeps the merged RPC union within the compiler's serializable type limit.
  */
-export const WsHostedRpcGroup = WsRpcGroup.merge(WsDeviceRpcGroup);
+export const WsHostedRpcGroup: RpcGroup.RpcGroup<
+  RpcGroup.Rpcs<typeof WsRpcGroup> | RpcGroup.Rpcs<typeof WsDeviceRpcGroup>
+> = WsRpcGroup.merge(WsDeviceRpcGroup);

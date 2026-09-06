@@ -952,31 +952,28 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const sessions = yield* provider.listSessions();
       assert.equal(sessions.length, 1);
 
-      const unsupportedFileError = yield* provider
-        .sendTurn({
-          threadId: session.threadId,
-          input: "review this",
-          attachments: [
-            {
-              type: "file",
-              id: "thread-1-file",
-              name: "notes.txt",
-              mimeType: "text/plain",
-              sizeBytes: 3,
-            },
-          ],
-        })
-        .pipe(Effect.flip);
-      assert.equal(unsupportedFileError._tag, "ProviderValidationError");
-      assert.match(unsupportedFileError.message, /does not accept general file attachments/);
-      assert.equal(routing.codex.sendTurn.mock.calls.length, 0);
+      const fileAttachment = {
+        type: "file" as const,
+        id: "thread-1-file",
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 3,
+      };
+      const turnWithFile = yield* provider.sendTurn({
+        threadId: session.threadId,
+        input: "review this",
+        attachments: [fileAttachment],
+      });
+      assert.equal(turnWithFile.turnId, TurnId.make("turn-thread-1"));
+      assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+      assert.deepEqual(routing.codex.sendTurn.mock.calls[0]?.[0].attachments, [fileAttachment]);
 
       const turn = yield* provider.sendTurn({
         threadId: session.threadId,
         input: "hello",
         attachments: [],
       });
-      assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+      assert.equal(routing.codex.sendTurn.mock.calls.length, 2);
 
       yield* provider.steerTurn({
         threadId: session.threadId,

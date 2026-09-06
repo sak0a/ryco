@@ -54,7 +54,13 @@ export const PersistedComposerImageAttachment = Schema.Struct({
   name: Schema.String,
   mimeType: Schema.String,
   sizeBytes: Schema.Number,
-  dataUrl: Schema.String,
+  /** Absent for uploaded streamed files; those carry uploadToken instead. */
+  dataUrl: Schema.optionalKey(Schema.String),
+  /** Uploaded file attachments carry a single-use token instead of bytes. */
+  uploadToken: Schema.optionalKey(Schema.String),
+  expiresAt: Schema.optionalKey(Schema.String),
+  /** Non-uploaded streamed files restore as "attach again" rows. */
+  uploadState: Schema.optionalKey(Schema.Literals(["needsReattach"])),
 });
 export type PersistedComposerImageAttachment = typeof PersistedComposerImageAttachment.Type;
 
@@ -510,6 +516,12 @@ function normalizePersistedAttachment(value: unknown): PersistedComposerImageAtt
   const mimeType = candidate.mimeType;
   const sizeBytes = candidate.sizeBytes;
   const dataUrl = candidate.dataUrl;
+  const uploadToken = candidate.uploadToken;
+  const expiresAt = candidate.expiresAt;
+  const uploadState = candidate.uploadState;
+  const hasDataUrl = typeof dataUrl === "string" && dataUrl.length > 0;
+  const hasUploadToken = typeof uploadToken === "string" && uploadToken.length > 0;
+  const isNeedsReattach = uploadState === "needsReattach";
   if (
     typeof id !== "string" ||
     (type !== undefined && type !== "image" && type !== "file") ||
@@ -517,9 +529,8 @@ function normalizePersistedAttachment(value: unknown): PersistedComposerImageAtt
     typeof mimeType !== "string" ||
     typeof sizeBytes !== "number" ||
     !Number.isFinite(sizeBytes) ||
-    typeof dataUrl !== "string" ||
     id.length === 0 ||
-    dataUrl.length === 0
+    (!hasDataUrl && !hasUploadToken && !isNeedsReattach)
   ) {
     return null;
   }
@@ -529,7 +540,10 @@ function normalizePersistedAttachment(value: unknown): PersistedComposerImageAtt
     name,
     mimeType,
     sizeBytes,
-    dataUrl,
+    ...(hasDataUrl ? { dataUrl } : {}),
+    ...(hasUploadToken ? { uploadToken } : {}),
+    ...(typeof expiresAt === "string" && expiresAt.length > 0 ? { expiresAt } : {}),
+    ...(uploadState === "needsReattach" ? { uploadState } : {}),
   };
 }
 

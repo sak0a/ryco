@@ -5,6 +5,7 @@ import {
   flattenQueuedThreadMessages,
   groupQueuedThreadMessages,
   modelSelectionsEqual,
+  normalizePersistedQueuedThreadMessageAttachments,
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxFailureAction,
   threadOutboxRetryDelayMs,
@@ -147,5 +148,92 @@ describe("threadOutboxModel", () => {
     const c = { instanceId: "i1", model: "other", options: [] } as unknown as ModelSelection;
     expect(modelSelectionsEqual(a, b)).toBe(true);
     expect(modelSelectionsEqual(a, c)).toBe(false);
+  });
+
+  describe("normalizePersistedQueuedThreadMessageAttachments", () => {
+    it("keeps image rows with their dataUrl and previews from it", () => {
+      const rows = normalizePersistedQueuedThreadMessageAttachments([
+        {
+          type: "image",
+          id: "img-1",
+          name: "shot.png",
+          mimeType: "image/png",
+          sizeBytes: 10,
+          dataUrl: "data:image/png;base64,AA",
+        },
+      ]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toEqual({
+        type: "image",
+        id: "img-1",
+        name: "shot.png",
+        mimeType: "image/png",
+        sizeBytes: 10,
+        dataUrl: "data:image/png;base64,AA",
+        previewUri: "data:image/png;base64,AA",
+      });
+    });
+
+    it("keeps a token-backed file row with token metadata and no byte source", () => {
+      const rows = normalizePersistedQueuedThreadMessageAttachments([
+        {
+          type: "file",
+          id: "file-1",
+          name: "report.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 2048,
+          uploadToken: "tok-1",
+          expiresAt: "2026-09-06T00:00:00.000Z",
+          readUri: "file:///tmp/report.pdf",
+        },
+      ]);
+      expect(rows).toEqual([
+        {
+          type: "file",
+          id: "file-1",
+          name: "report.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 2048,
+          readUri: "",
+          expiresAt: "2026-09-06T00:00:00.000Z",
+          uploadToken: "tok-1",
+        },
+      ]);
+    });
+
+    it("restores a file without a token as a needsReattach row", () => {
+      const rows = normalizePersistedQueuedThreadMessageAttachments([
+        {
+          type: "file",
+          id: "file-2",
+          name: "video.mp4",
+          mimeType: "video/mp4",
+          sizeBytes: 4096,
+        },
+      ]);
+      expect(rows).toEqual([
+        {
+          type: "file",
+          id: "file-2",
+          name: "video.mp4",
+          mimeType: "video/mp4",
+          sizeBytes: 4096,
+          readUri: "",
+          uploadState: "needsReattach",
+        },
+      ]);
+    });
+
+    it("drops malformed entries and images without bytes", () => {
+      expect(
+        normalizePersistedQueuedThreadMessageAttachments([
+          null,
+          "junk",
+          { id: "", name: "a", mimeType: "image/png", sizeBytes: 1, dataUrl: "data:" },
+          { id: "img-2", name: "a", mimeType: "image/png", sizeBytes: 1 },
+          { id: "file-3", name: "b", mimeType: "video/mp4", sizeBytes: -5 },
+        ]),
+      ).toEqual([]);
+    });
   });
 });

@@ -297,6 +297,63 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
     }),
   );
 
+  it.effect("degrades file attachments to on-disk path lines in the prompt text", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-file-attachment");
+      const tempDir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "grok-acp-")));
+      const requestLogPath = path.join(tempDir, "requests.ndjson");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ RYCO_ACP_REQUEST_LOG_PATH: requestLogPath }),
+      );
+      const { attachmentsDir } = yield* ServerConfig;
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-grokadapter-file-attachment"),
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      const fileAttachment = {
+        type: "file" as const,
+        id: "grok-file-attachment-12345678-1234-1234-1234-123456789abc",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 123456,
+      };
+      yield* adapter.sendTurn({
+        threadId,
+        input: "review the file",
+        attachments: [fileAttachment],
+      });
+      yield* adapter.stopSession(threadId);
+
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const promptRequest = requests.find((entry) => entry.method === "session/prompt");
+      assert.isDefined(promptRequest);
+      const prompt = (promptRequest?.params as { prompt: Array<Record<string, unknown>> }).prompt;
+      const textBlock = prompt.find((block) => block.type === "text") as
+        | { text: string }
+        | undefined;
+      assert.isDefined(textBlock);
+      assert.ok(textBlock.text.includes("review the file"));
+      assert.ok(
+        textBlock.text.includes(
+          `[Attached file] report.pdf (application/pdf, 123456 bytes) saved at: ${path.join(
+            attachmentsDir,
+            `${fileAttachment.id}.bin`,
+          )}`,
+        ),
+      );
+      assert.equal(
+        prompt.some((block) => block.type === "image"),
+        false,
+      );
+    }),
+  );
+
   it.effect("responds to ACP approvals using provider-supplied option ids", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-custom-approval-option-id");

@@ -27,10 +27,15 @@ import type {
   QuestionRequest,
   Session,
 } from "@opencode-ai/sdk/v2";
+import {
+  appendAttachmentPathLines,
+  formatAttachmentPathLines,
+  type AttachmentPathLineEntry,
+} from "@ryco/shared/attachmentPrompt";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
 
-import { readPersistedAttachment } from "../../attachmentStore.ts";
+import { readPersistedAttachment, resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
@@ -48,6 +53,7 @@ import { requireRuntimeSessionId, stampRuntimeEvent } from "../runtimeSession.ts
 import type { OpenCodeServerOwner } from "../OpenCodeServerOwner.ts";
 import {
   buildOpenCodePermissionRules,
+  isOpenCodeNativeAttachment,
   OpenCodeRuntime,
   OpenCodeRuntimeError,
   openCodeQuestionId,
@@ -2127,7 +2133,7 @@ export function makeOpenCodeAdapter(
             : input.input?.trim();
           const attachmentUrlById = new Map<string, string>();
           const declaredAttachmentBytes = (input.attachments ?? []).reduce(
-            (total, attachment) => total + attachment.sizeBytes,
+            (total, attachment) => total + (attachment.sizeBytes ?? 0),
             0,
           );
           if (declaredAttachmentBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
@@ -2138,7 +2144,23 @@ export function makeOpenCodeAdapter(
             });
           }
           let attachmentTotalBytes = 0;
+          const pathLineEntries: AttachmentPathLineEntry[] = [];
           for (const attachment of input.attachments ?? []) {
+            if (!isOpenCodeNativeAttachment(attachment)) {
+              pathLineEntries.push({
+                attachment,
+                ...(attachment.id === undefined
+                  ? {}
+                  : {
+                      resolvedPath:
+                        resolveAttachmentPath({
+                          attachmentsDir: serverConfig.attachmentsDir,
+                          attachment,
+                        }) ?? undefined,
+                    }),
+              });
+              continue;
+            }
             const persisted = readPersistedAttachment({
               attachmentsDir: serverConfig.attachmentsDir,
               attachment,
@@ -2163,9 +2185,11 @@ export function makeOpenCodeAdapter(
               });
             }
           }
+          text = appendAttachmentPathLines(text, formatAttachmentPathLines(pathLineEntries));
           const fileParts = toOpenCodeFileParts({
             attachments: input.attachments,
-            resolveAttachmentUrl: (attachment) => attachmentUrlById.get(attachment.id) ?? null,
+            resolveAttachmentUrl: (attachment) =>
+              attachment.id === undefined ? null : (attachmentUrlById.get(attachment.id) ?? null),
           });
           if ((!text || text.length === 0) && fileParts.length === 0) {
             return yield* new ProviderAdapterValidationError({

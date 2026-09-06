@@ -67,6 +67,24 @@ describe("user asset response headers", () => {
       "Content-Security-Policy": "default-src 'none'; sandbox",
       "Content-Type": "application/octet-stream",
     });
+    expect(userAssetResponseHeaders("/attachments/report.xml", testPath)).toMatchObject({
+      "Content-Disposition": 'attachment; filename="report.xml"',
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Type": "application/octet-stream",
+    });
+    expect(userAssetResponseHeaders("/attachments/report.docx", testPath)).toMatchObject({
+      "Content-Disposition": 'attachment; filename="report.docx"',
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Type": "application/octet-stream",
+    });
+  });
+
+  it("keeps extensionless streamed uploads inert with a UTF-8 disposition", () => {
+    expect(userAssetResponseHeaders("/attachments/thread-uuid-pdf", testPath)).toMatchObject({
+      "Content-Disposition": 'attachment; filename="thread-uuid-pdf"',
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Content-Type": "application/octet-stream",
+    });
   });
 });
 

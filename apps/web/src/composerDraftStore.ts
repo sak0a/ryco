@@ -4,7 +4,7 @@ import {
   type ComposerThreadDraftState as RuntimeComposerThreadDraftState,
 } from "@ryco/client-runtime/state/composer";
 
-import type { ChatAttachment } from "./types";
+import type { ChatFileAttachment, ChatImageAttachment } from "./types";
 import {
   composerDebouncedStorage,
   hydrateImagesFromPersisted,
@@ -22,10 +22,18 @@ export * from "@ryco/client-runtime/state/composer";
  * In-memory composer image on the web: the neutral draft image plus the live
  * DOM `File` and blob-preview URL the UI renders and sends. `File`/`Blob` never
  * cross into the package; the persisted shape stays `{ …, dataUrl }`.
+ * Streamed file attachments restored from persisted state carry `file: null`
+ * and are dispatched by upload token instead of inline bytes.
  */
-export interface ComposerImageAttachment extends Omit<ChatAttachment, "previewUrl"> {
+export interface ComposerImageAttachment extends Omit<
+  ChatImageAttachment | ChatFileAttachment,
+  "previewUrl"
+> {
   previewUrl: string;
-  file: File;
+  file: File | null;
+  /** Single-use token for an already-streamed file; dispatches without bytes. */
+  uploadToken?: string | undefined;
+  expiresAt?: string | undefined;
 }
 
 /** Concrete store state/draft types bound to the web image attachment. */

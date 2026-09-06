@@ -1,4 +1,4 @@
-import { Data, Effect, FileSystem, Option, Path } from "effect";
+import { Data, Effect, FileSystem, Option, Path, Stream } from "effect";
 import { cast } from "effect/Function";
 import {
   HttpBody,
@@ -9,6 +9,7 @@ import {
   HttpServerRequest,
   Multipart,
 } from "effect/unstable/http";
+import { open, rename, unlink } from "node:fs/promises";
 import * as Schema from "effect/Schema";
 import { OtlpTracer } from "effect/unstable/observability";
 
@@ -18,6 +19,11 @@ import {
   resolveAttachmentRelativePath,
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
+import {
+  ChatAttachmentUploadError,
+  ChatAttachmentUploads,
+  type ChatAttachmentUploadLease,
+} from "./attachmentUpload.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
@@ -301,6 +307,150 @@ export const attachmentsRouteLayer = HttpRouter.add(
         Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
       ),
     );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const UPLOAD_BODY_TOO_LARGE_STATUS = 413;
+
+class UploadBodyTooLargeError extends Data.TaggedError("UploadBodyTooLargeError")<{}> {}
+
+/**
+ * Streams the upload request body to the `<final>.part` staging file without
+ * buffering it in memory. The staging file lives outside the attachment id
+ * namespace so orphan sweeps can never touch a mid-upload file, and it is
+ * removed on every failure path.
+ */
+const streamUploadBodyToPartFile = <E>(input: {
+  readonly stream: Stream.Stream<Uint8Array, E>;
+  readonly lease: ChatAttachmentUploadLease;
+}) =>
+  Effect.acquireUseRelease(
+    Effect.tryPromise(() => open(input.lease.partPath, "w")),
+    (handle) =>
+      Effect.gen(function* () {
+        let written = 0;
+        yield* Stream.runForEach(input.stream, (chunk) =>
+          Effect.gen(function* () {
+            written += chunk.byteLength;
+            if (written > input.lease.maxBytes) {
+              return yield* Effect.fail(new UploadBodyTooLargeError());
+            }
+            yield* Effect.tryPromise(() => handle.write(chunk));
+          }),
+        );
+        if (written !== input.lease.sizeBytes) {
+          return yield* Effect.fail(
+            new ChatAttachmentUploadError({
+              reason: "invalid-request",
+              status: 400,
+              message: "File upload ended before the declared size was received.",
+            }),
+          );
+        }
+        yield* Effect.tryPromise(() => handle.sync());
+      }),
+    (handle, exit) =>
+      Effect.tryPromise(() => handle.close()).pipe(
+        Effect.ignore,
+        Effect.andThen(
+          exit._tag === "Failure"
+            ? Effect.tryPromise(() => unlink(input.lease.partPath)).pipe(Effect.ignore)
+            : Effect.void,
+        ),
+      ),
+  );
+
+const removePartFile = (partPath: string) =>
+  Effect.tryPromise(() => unlink(partPath)).pipe(Effect.ignore);
+
+export const attachmentUploadRouteLayer = HttpRouter.add(
+  "POST",
+  `${ATTACHMENTS_ROUTE_PREFIX}/upload`,
+  Effect.gen(function* () {
+    yield* requireAuthenticatedRequest;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+    const uploadToken = url.value.searchParams.get("token");
+    if (!uploadToken) {
+      return HttpServerResponse.text("Missing upload token", { status: 400 });
+    }
+
+    const uploads = yield* ChatAttachmentUploads;
+    const beginResult = yield* Effect.result(uploads.beginUpload(uploadToken));
+    if (beginResult._tag === "Failure") {
+      return HttpServerResponse.text(beginResult.failure.message, {
+        status: beginResult.failure.status,
+      });
+    }
+    const lease = beginResult.success;
+
+    const contentLength = Number(request.headers["content-length"] ?? "0");
+    if (Number.isFinite(contentLength) && contentLength > lease.maxBytes) {
+      yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
+      return HttpServerResponse.text("Upload exceeds the declared attachment size.", {
+        status: UPLOAD_BODY_TOO_LARGE_STATUS,
+      });
+    }
+
+    const streamResult = yield* Effect.result(
+      streamUploadBodyToPartFile({ stream: request.stream, lease }).pipe(
+        Effect.catchTag("UploadBodyTooLargeError", () =>
+          Effect.fail(
+            new ChatAttachmentUploadError({
+              reason: "invalid-request",
+              status: UPLOAD_BODY_TOO_LARGE_STATUS,
+              message: "Upload exceeds the declared attachment size.",
+            }),
+          ),
+        ),
+        Effect.mapError((cause) =>
+          cause instanceof ChatAttachmentUploadError
+            ? cause
+            : new ChatAttachmentUploadError({
+                reason: "invalid-request",
+                status: 400,
+                message: "File upload stream failed before completion.",
+              }),
+        ),
+      ),
+    );
+    if (streamResult._tag === "Failure") {
+      yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
+      yield* removePartFile(lease.partPath);
+      return HttpServerResponse.text(streamResult.failure.message, {
+        status: streamResult.failure.status,
+      });
+    }
+
+    const renameResult = yield* Effect.result(
+      Effect.tryPromise(() => rename(lease.partPath, lease.finalPath)),
+    );
+    if (renameResult._tag === "Failure") {
+      yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
+      yield* removePartFile(lease.partPath);
+      return HttpServerResponse.text("Failed to persist the uploaded attachment.", {
+        status: 500,
+      });
+    }
+
+    const completeResult = yield* Effect.result(uploads.completeUpload(uploadToken));
+    if (completeResult._tag === "Failure") {
+      yield* Effect.tryPromise(() => unlink(lease.finalPath)).pipe(Effect.ignore);
+      return HttpServerResponse.text(completeResult.failure.message, {
+        status: completeResult.failure.status,
+      });
+    }
+
+    return HttpServerResponse.jsonUnsafe({
+      attachmentTokenRef: uploadToken,
+      id: lease.attachmentId,
+      name: lease.name,
+      mimeType: lease.mimeType,
+      sizeBytes: lease.sizeBytes,
+    });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

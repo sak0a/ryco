@@ -7,9 +7,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   attachmentRelativePath,
   createAttachmentId,
+  createFileAttachmentId,
+  parseAttachmentIdFromRelativePath,
   parseThreadSegmentFromAttachmentId,
   readPersistedAttachment,
   resolveAttachmentPathById,
+  toSafeFileAttachmentExtensionSegment,
 } from "./attachmentStore.ts";
 
 describe("attachmentStore", () => {
@@ -95,6 +98,83 @@ describe("attachmentStore", () => {
         sizeBytes: 5,
       }),
     ).toBe("thread-1-attachment.bin");
+  });
+
+  it("derives safe extension segments from upload names", () => {
+    expect(toSafeFileAttachmentExtensionSegment("notes.txt")).toBe("txt");
+    expect(toSafeFileAttachmentExtensionSegment("REPORT.PDF")).toBe("pdf");
+    expect(toSafeFileAttachmentExtensionSegment("archive.tar.gz")).toBe("gz");
+    expect(toSafeFileAttachmentExtensionSegment("no-extension")).toBe("bin");
+    expect(toSafeFileAttachmentExtensionSegment("trailing.")).toBe("bin");
+    expect(toSafeFileAttachmentExtensionSegment("staged.part")).toBe("bin");
+    expect(toSafeFileAttachmentExtensionSegment("we!rd@name.docx")).toBe("docx");
+    expect(toSafeFileAttachmentExtensionSegment("x.abcdefghijklmnopqrstuvwxyz")).toBe(
+      "abcdefghijkl",
+    );
+  });
+
+  it("bakes extension segments into streamed upload ids and resolves them directly", () => {
+    const attachmentId = createFileAttachmentId("thread.folder/unsafe space", "notes.pdf");
+    expect(attachmentId).toBeTruthy();
+    if (!attachmentId) {
+      return;
+    }
+    expect(attachmentId).toMatch(/^[a-z0-9_]+(?:-[a-z0-9_]+)*-[0-9a-f-]{36}-pdf$/i);
+    expect(parseThreadSegmentFromAttachmentId(attachmentId)).toBe("thread-folder-unsafe-space");
+
+    const stagedFileAttachment = {
+      type: "file" as const,
+      id: attachmentId,
+      name: "notes.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 3,
+    };
+    expect(attachmentRelativePath(stagedFileAttachment)).toBe(attachmentId);
+    expect(parseAttachmentIdFromRelativePath(attachmentId)).toBe(attachmentId);
+
+    expect(
+      attachmentRelativePath({
+        type: "file",
+        id: createFileAttachmentId("thread-1", "staged.part") ?? "",
+        name: "staged.part",
+        mimeType: "application/octet-stream",
+        sizeBytes: 1,
+      }),
+    ).not.toMatch(/\.part$/);
+
+    const legacyAttachment = {
+      type: "file" as const,
+      id: "thread-1-attachment",
+      name: "notes.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 3,
+    };
+    expect(attachmentRelativePath(legacyAttachment)).toBe("thread-1-attachment.bin");
+    expect(
+      parseThreadSegmentFromAttachmentId("thread-1-00000000-0000-4000-8000-000000000001"),
+    ).toBe("thread-1");
+    expect(parseAttachmentIdFromRelativePath("thread-1-attachment.bin")).toBe(
+      "thread-1-attachment",
+    );
+  });
+
+  it("resolves streamed upload ids directly before probing extensions", () => {
+    const attachmentsDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-attachment-store-"));
+    try {
+      const uploadId = "thread-1-00000000-0000-4000-8000-000000000001-pdf";
+      fs.writeFileSync(path.join(attachmentsDir, uploadId), Buffer.from("hello"));
+      expect(resolveAttachmentPathById({ attachmentsDir, attachmentId: uploadId })).toBe(
+        path.join(attachmentsDir, uploadId),
+      );
+
+      const legacyId = "thread-1-00000000-0000-4000-8000-000000000002";
+      fs.writeFileSync(path.join(attachmentsDir, `${legacyId}.bin`), Buffer.from("abc"));
+      expect(resolveAttachmentPathById({ attachmentsDir, attachmentId: legacyId })).toBe(
+        path.join(attachmentsDir, `${legacyId}.bin`),
+      );
+    } finally {
+      fs.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
   });
 
   it("rejects changed and symlinked persisted attachments", () => {

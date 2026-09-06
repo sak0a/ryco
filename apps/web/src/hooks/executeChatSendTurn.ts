@@ -17,7 +17,9 @@ import {
   ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   buildSendTurnBootstrap,
   buildSendTurnDispatchAttachment,
+  buildSendTurnUploadTokenDispatchAttachment,
   commitSendTurnDispatch,
+  isFileUploadTokenUsable,
   resolveThreadCreateModelSelection,
 } from "@ryco/client-runtime/state/composer";
 import { truncate } from "@ryco/shared/String";
@@ -275,18 +277,36 @@ export function buildOutgoingMessageText(input: {
   });
 }
 
-export async function buildOutgoingTurnAttachments(images: readonly ComposerImageAttachment[]) {
+export async function buildOutgoingTurnAttachments(
+  images: readonly ComposerImageAttachment[],
+  options?: { nowMs?: number },
+) {
+  const nowMs = options?.nowMs ?? Date.now();
   return Promise.all(
-    images.map(async (image) =>
-      buildSendTurnDispatchAttachment({
+    images.map(async (image) => {
+      // Uploaded streamed files dispatch by token; images and legacy inline
+      // files keep the dataUrl path.
+      if (
+        image.type === "file" &&
+        image.uploadToken !== undefined &&
+        (image.expiresAt === undefined || isFileUploadTokenUsable(image.expiresAt, nowMs))
+      ) {
+        return buildSendTurnUploadTokenDispatchAttachment({
+          name: image.name,
+          mimeType: image.mimeType,
+          sizeBytes: image.sizeBytes,
+          uploadToken: image.uploadToken,
+        });
+      }
+      return buildSendTurnDispatchAttachment({
         attachment: await webAttachmentCodec.encode({
           id: image.id,
           file: image.file,
         }),
         name: image.name,
         type: image.type,
-      }),
-    ),
+      });
+    }),
   );
 }
 

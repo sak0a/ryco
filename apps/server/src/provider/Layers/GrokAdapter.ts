@@ -32,7 +32,13 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import {
+  appendAttachmentPathLines,
+  formatAttachmentPathLines,
+  type AttachmentPathLineEntry,
+} from "@ryco/shared/attachmentPrompt";
+
+import { isPersistableChatAttachment, resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import {
@@ -768,9 +774,24 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
             });
 
-            const text = input.input?.trim();
+            const pathLineEntries: AttachmentPathLineEntry[] = [];
             const imagePromptParts = yield* Effect.forEach(input.attachments ?? [], (attachment) =>
               Effect.gen(function* () {
+                if (!isPersistableChatAttachment(attachment) || attachment.type !== "image") {
+                  pathLineEntries.push({
+                    attachment,
+                    ...(attachment.id === undefined
+                      ? {}
+                      : {
+                          resolvedPath:
+                            resolveAttachmentPath({
+                              attachmentsDir: serverConfig.attachmentsDir,
+                              attachment,
+                            }) ?? undefined,
+                        }),
+                  });
+                  return null;
+                }
                 const attachmentPath = resolveAttachmentPath({
                   attachmentsDir: serverConfig.attachmentsDir,
                   attachment,
@@ -800,9 +821,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 } satisfies EffectAcpSchema.ContentBlock;
               }),
             );
+            const promptText = appendAttachmentPathLines(
+              input.input?.trim(),
+              formatAttachmentPathLines(pathLineEntries),
+            );
             const promptParts: Array<EffectAcpSchema.ContentBlock> = [
-              ...(text ? [{ type: "text" as const, text }] : []),
-              ...imagePromptParts,
+              ...(promptText && promptText.trim().length > 0
+                ? [{ type: "text" as const, text: promptText }]
+                : []),
+              ...imagePromptParts.filter((part) => part !== null),
             ];
 
             if (promptParts.length === 0) {

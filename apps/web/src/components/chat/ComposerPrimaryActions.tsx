@@ -23,6 +23,8 @@ interface ComposerPrimaryActionsProps {
   isEnvironmentUnavailable: boolean;
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
+  /** Reason the send action is held back (e.g. an attachment still uploading). */
+  sendDisabledReason?: string | null | undefined;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
@@ -62,6 +64,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
+  sendDisabledReason = null,
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
   onInterrupt,
@@ -196,6 +199,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       className="flex h-9 w-9 enabled:cursor-pointer items-center justify-center rounded-lg bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
       {...pointerFocusProps}
       disabled={isSendBusy || isConnecting || isEnvironmentUnavailable || !hasSendableContent}
+      title={sendDisabledReason ?? undefined}
       aria-label={
         isEnvironmentUnavailable
           ? "Environment disconnected"

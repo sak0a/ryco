@@ -42,3 +42,21 @@ describe("ExecutionEnvironmentCapabilities.threadSettlement", () => {
     ).toBe(true);
   });
 });
+
+describe("ExecutionEnvironmentCapabilities.fileAttachments", () => {
+  it("stays absent for older servers and decodes when advertised", () => {
+    const absent = decodeDescriptor(descriptor({})).capabilities;
+    expect("fileAttachments" in absent).toBe(false);
+
+    const advertised = decodeDescriptor(
+      descriptor({ fileAttachments: { maxUploadBytes: 50 * 1024 * 1024 } }),
+    ).capabilities;
+    expect(advertised.fileAttachments).toEqual({ maxUploadBytes: 50 * 1024 * 1024 });
+  });
+
+  it("rejects a malformed capability payload", () => {
+    expect(() =>
+      decodeDescriptor(descriptor({ fileAttachments: { maxUploadBytes: -1 } })),
+    ).toThrow();
+  });
+});

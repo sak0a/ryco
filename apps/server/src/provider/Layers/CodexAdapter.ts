@@ -59,6 +59,11 @@ import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
 } from "@ryco/shared/model";
+import {
+  appendAttachmentPathLines,
+  formatAttachmentPathLines,
+  type AttachmentPathLineEntry,
+} from "@ryco/shared/attachmentPrompt";
 import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
 
 import {
@@ -2101,8 +2106,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       });
     }
 
+    const native = attachments.filter((attachment) => attachment.type === "image");
     const resolved = yield* Effect.forEach(
-      attachments,
+      native,
       (attachment) => resolveAttachmentForPreflight(attachment, method),
       { concurrency: 1 },
     );
@@ -2114,6 +2120,21 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         detail: `Turn attachments total ${totalBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES} bytes.`,
       });
     }
+
+    const pathLineEntries: AttachmentPathLineEntry[] = attachments
+      .filter((attachment) => attachment.type !== "image")
+      .map((attachment) => ({
+        attachment,
+        ...(attachment.id === undefined
+          ? {}
+          : {
+              resolvedPath:
+                resolveAttachmentPath({
+                  attachmentsDir: serverConfig.attachmentsDir,
+                  attachment,
+                }) ?? undefined,
+            }),
+      }));
 
     if (resolved.length > 0) {
       yield* Effect.annotateCurrentSpan({
@@ -2132,7 +2153,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       });
     }
 
-    return resolved;
+    return {
+      native: resolved,
+      pathLines: formatAttachmentPathLines(pathLineEntries),
+    };
   });
 
   const toCodexAttachment = Effect.fn("toCodexAttachment")(function* (
@@ -2158,9 +2182,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   });
 
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
-    const resolvedAttachments = yield* preflightAttachments(input, "turn/start");
+    const { native, pathLines } = yield* preflightAttachments(input, "turn/start");
     const codexAttachments = yield* Effect.forEach(
-      resolvedAttachments,
+      native,
       (attachment) => toCodexAttachment(attachment, "turn/start"),
       { concurrency: 1 },
     );
@@ -2175,7 +2199,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         ? getModelSelectionBooleanOptionValue(input.modelSelection, "fastMode")
         : undefined;
     const formatted = formatSourceControlContextsForAgent(input.sourceControlContexts ?? []);
-    const codexInput = formatted ? formatted + "\n\n" + (input.input ?? "") : input.input;
+    const codexInput = appendAttachmentPathLines(
+      formatted ? formatted + "\n\n" + (input.input ?? "") : input.input,
+      pathLines,
+    );
     const result = yield* session.runtime
       .sendTurn({
         ...(codexInput !== undefined ? { input: codexInput } : {}),
@@ -2211,18 +2238,19 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   const steerTurn: NonNullable<CodexAdapterShape["steerTurn"]> = Effect.fn("steerTurn")(
     function* (input) {
-      const resolvedAttachments = yield* preflightAttachments(input, "turn/steer");
+      const { native, pathLines } = yield* preflightAttachments(input, "turn/steer");
       const codexAttachments = yield* Effect.forEach(
-        resolvedAttachments,
+        native,
         (attachment) => toCodexAttachment(attachment, "turn/steer"),
         { concurrency: 1 },
       );
       const session = yield* requireSession(input.threadId);
+      const steerInput = appendAttachmentPathLines(input.input, pathLines);
       return yield* session.runtime
         .steerTurn({
           expectedTurnId: input.expectedTurnId,
           messageId: input.messageId,
-          ...(input.input !== undefined ? { input: input.input } : {}),
+          ...(steerInput !== undefined ? { input: steerInput } : {}),
           ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
         })
         .pipe(

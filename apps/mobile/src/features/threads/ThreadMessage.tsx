@@ -1,6 +1,12 @@
-import type { ChatMessage } from "@ryco/client-runtime/state/threads";
+import {
+  isChatImageAttachment,
+  type ChatFileAttachment,
+  type ChatImageAttachment,
+  type ChatMessage,
+  type ChatUnknownAttachment,
+} from "@ryco/client-runtime/state/threads";
 import * as Linking from "expo-linking";
-import { Image, ScrollView, View } from "react-native";
+import { Image, Pressable, ScrollView, Share, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { resolveNativeMarkdownTypography } from "../../lib/appearancePreferences";
@@ -13,6 +19,20 @@ import {
 } from "../../native/SelectableMarkdownText";
 import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
 import { threadMessagePresentation } from "./threadPresentation";
+
+function isChatFileAttachment(
+  attachment: ChatFileAttachment | ChatImageAttachment | ChatUnknownAttachment,
+): attachment is ChatFileAttachment {
+  return attachment.type === "file";
+}
+
+async function shareAttachmentFile(previewUrl: string): Promise<void> {
+  try {
+    await Share.share({ url: previewUrl });
+  } catch {
+    // The user dismissed the share sheet; nothing to report.
+  }
+}
 
 export function ThreadMessage(props: { readonly message: ChatMessage }) {
   const isUser = props.message.role === "user";
@@ -92,7 +112,7 @@ export function ThreadMessage(props: { readonly message: ChatMessage }) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-2 grow-0">
             <View className="flex-row gap-2">
               {attachments.map((attachment) =>
-                attachment.type === "image" && attachment.previewUrl ? (
+                isChatImageAttachment(attachment) && attachment.previewUrl ? (
                   <Image
                     key={attachment.id}
                     source={{ uri: attachment.previewUrl }}
@@ -100,16 +120,36 @@ export function ThreadMessage(props: { readonly message: ChatMessage }) {
                     resizeMode="cover"
                     accessibilityLabel={attachment.name}
                   />
-                ) : (
-                  <View
+                ) : isChatFileAttachment(attachment) && attachment.previewUrl ? (
+                  <Pressable
                     key={attachment.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${attachment.name}`}
+                    onPress={() => void shareAttachmentFile(attachment.previewUrl!)}
                     className="min-h-20 w-44 justify-center rounded-2xl bg-subtle px-3 py-2"
                   >
                     <Text className="font-ryco-bold text-sm text-foreground" numberOfLines={2}>
                       {attachment.name}
                     </Text>
                     <Text className="mt-1 text-xs text-foreground-muted" numberOfLines={1}>
-                      {attachment.mimeType} · {Math.ceil(attachment.sizeBytes / 1024)} KB
+                      {attachment.mimeType} · {Math.ceil(attachment.sizeBytes / 1024)} KB · Tap to
+                      open
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <View
+                    key={attachment.id ?? attachment.type}
+                    className="min-h-20 w-44 justify-center rounded-2xl bg-subtle px-3 py-2"
+                  >
+                    <Text className="font-ryco-bold text-sm text-foreground" numberOfLines={2}>
+                      {attachment.name ?? attachment.type}
+                    </Text>
+                    <Text className="mt-1 text-xs text-foreground-muted" numberOfLines={1}>
+                      {attachment.mimeType ?? "file"} ·{" "}
+                      {attachment.sizeBytes !== undefined
+                        ? Math.ceil(attachment.sizeBytes / 1024)
+                        : 0}{" "}
+                      KB
                     </Text>
                   </View>
                 ),
