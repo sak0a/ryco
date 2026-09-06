@@ -335,7 +335,7 @@ const streamUploadBodyToPartFile = <E>(input: {
             if (written > input.lease.maxBytes) {
               return yield* Effect.fail(new UploadBodyTooLargeError());
             }
-            yield* Effect.tryPromise(() => handle.write(chunk));
+            yield* Effect.tryPromise(() => handle.writeFile(chunk));
           }),
         );
         if (written !== input.lease.sizeBytes) {
@@ -387,70 +387,80 @@ export const attachmentUploadRouteLayer = HttpRouter.add(
     }
     const lease = beginResult.success;
 
-    const contentLength = Number(request.headers["content-length"] ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > lease.maxBytes) {
-      yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
-      return HttpServerResponse.text("Upload exceeds the declared attachment size.", {
-        status: UPLOAD_BODY_TOO_LARGE_STATUS,
-      });
-    }
+    return yield* Effect.gen(function* () {
+      const contentLength = Number(request.headers["content-length"] ?? "0");
+      if (Number.isFinite(contentLength) && contentLength > lease.maxBytes) {
+        yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
+        return HttpServerResponse.text("Upload exceeds the declared attachment size.", {
+          status: UPLOAD_BODY_TOO_LARGE_STATUS,
+        });
+      }
 
-    const streamResult = yield* Effect.result(
-      streamUploadBodyToPartFile({ stream: request.stream, lease }).pipe(
-        Effect.catchTag("UploadBodyTooLargeError", () =>
-          Effect.fail(
-            new ChatAttachmentUploadError({
-              reason: "invalid-request",
-              status: UPLOAD_BODY_TOO_LARGE_STATUS,
-              message: "Upload exceeds the declared attachment size.",
-            }),
+      const streamResult = yield* Effect.result(
+        streamUploadBodyToPartFile({ stream: request.stream, lease }).pipe(
+          Effect.catchTag("UploadBodyTooLargeError", () =>
+            Effect.fail(
+              new ChatAttachmentUploadError({
+                reason: "invalid-request",
+                status: UPLOAD_BODY_TOO_LARGE_STATUS,
+                message: "Upload exceeds the declared attachment size.",
+              }),
+            ),
+          ),
+          Effect.mapError((cause) =>
+            cause instanceof ChatAttachmentUploadError
+              ? cause
+              : new ChatAttachmentUploadError({
+                  reason: "invalid-request",
+                  status: 400,
+                  message: "File upload stream failed before completion.",
+                }),
           ),
         ),
-        Effect.mapError((cause) =>
-          cause instanceof ChatAttachmentUploadError
-            ? cause
-            : new ChatAttachmentUploadError({
-                reason: "invalid-request",
-                status: 400,
-                message: "File upload stream failed before completion.",
-              }),
-        ),
+      );
+      if (streamResult._tag === "Failure") {
+        yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
+        yield* removePartFile(lease.partPath);
+        return HttpServerResponse.text(streamResult.failure.message, {
+          status: streamResult.failure.status,
+        });
+      }
+
+      const renameResult = yield* Effect.result(
+        Effect.tryPromise(() => rename(lease.partPath, lease.finalPath)),
+      );
+      if (renameResult._tag === "Failure") {
+        yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
+        yield* removePartFile(lease.partPath);
+        return HttpServerResponse.text("Failed to persist the uploaded attachment.", {
+          status: 500,
+        });
+      }
+
+      const completeResult = yield* Effect.result(uploads.completeUpload(uploadToken));
+      if (completeResult._tag === "Failure") {
+        yield* Effect.tryPromise(() => unlink(lease.finalPath)).pipe(Effect.ignore);
+        return HttpServerResponse.text(completeResult.failure.message, {
+          status: completeResult.failure.status,
+        });
+      }
+
+      return HttpServerResponse.jsonUnsafe({
+        attachmentTokenRef: uploadToken,
+        id: lease.attachmentId,
+        name: lease.name,
+        mimeType: lease.mimeType,
+        sizeBytes: lease.sizeBytes,
+      });
+    }).pipe(
+      Effect.onError(() =>
+        Effect.gen(function* () {
+          yield* uploads.abortUpload(uploadToken);
+          yield* removePartFile(lease.partPath);
+          yield* removePartFile(lease.finalPath);
+        }),
       ),
     );
-    if (streamResult._tag === "Failure") {
-      yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
-      yield* removePartFile(lease.partPath);
-      return HttpServerResponse.text(streamResult.failure.message, {
-        status: streamResult.failure.status,
-      });
-    }
-
-    const renameResult = yield* Effect.result(
-      Effect.tryPromise(() => rename(lease.partPath, lease.finalPath)),
-    );
-    if (renameResult._tag === "Failure") {
-      yield* uploads.abortUpload(uploadToken).pipe(Effect.ignore);
-      yield* removePartFile(lease.partPath);
-      return HttpServerResponse.text("Failed to persist the uploaded attachment.", {
-        status: 500,
-      });
-    }
-
-    const completeResult = yield* Effect.result(uploads.completeUpload(uploadToken));
-    if (completeResult._tag === "Failure") {
-      yield* Effect.tryPromise(() => unlink(lease.finalPath)).pipe(Effect.ignore);
-      return HttpServerResponse.text(completeResult.failure.message, {
-        status: completeResult.failure.status,
-      });
-    }
-
-    return HttpServerResponse.jsonUnsafe({
-      attachmentTokenRef: uploadToken,
-      id: lease.attachmentId,
-      name: lease.name,
-      mimeType: lease.mimeType,
-      sizeBytes: lease.sizeBytes,
-    });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

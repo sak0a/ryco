@@ -272,7 +272,7 @@ export function resolveAttachmentPathById(input: {
 
 export function parseAttachmentIdFromRelativePath(relativePath: string): string | null {
   const normalized = normalizeAttachmentRelativePath(relativePath);
-  if (!normalized || normalized.includes("/")) {
+  if (!normalized || normalized.includes("/") || normalized.toLowerCase().endsWith(".part")) {
     return null;
   }
   const extensionIndex = normalized.lastIndexOf(".");

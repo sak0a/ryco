@@ -150,12 +150,19 @@ export function createChatFileUploadEngine(
       void pump();
       return;
     }
+    let activeRecord = record;
+    const isCurrent = () => records.get(attachmentId) === activeRecord;
+    const update = (next: ChatFileUploadRecord) => {
+      if (!isCurrent()) return;
+      activeRecord = next;
+      put(next);
+    };
     inFlightCount += 1;
     try {
       if (record.status.kind === "needsReattach" || record.status.kind === "uploaded") {
         return;
       }
-      put({ ...record, status: { kind: "uploading", progress: 0 } });
+      update({ ...record, status: { kind: "uploading", progress: 0 } });
       let token: string;
       let expiresAt: string;
       try {
@@ -169,7 +176,7 @@ export function createChatFileUploadEngine(
         token = minted.uploadToken;
         expiresAt = minted.expiresAt;
       } catch (error) {
-        put({
+        update({
           ...record,
           status: {
             kind: "failed",
@@ -180,17 +187,19 @@ export function createChatFileUploadEngine(
         return;
       }
       try {
+        if (!isCurrent()) return;
         const bytes = await record.readBytes();
+        if (!isCurrent()) return;
         const confirmed = await transport.transferBytes({
           environmentId: record.environmentId,
           uploadToken: token,
           bytes,
           onProgress: (progress) => {
             const current = records.get(record.attachmentId);
-            if (!current || current.status.kind !== "uploading") {
+            if (!isCurrent() || !current || current.status.kind !== "uploading") {
               return;
             }
-            put({ ...current, status: { kind: "uploading", progress } });
+            update({ ...current, status: { kind: "uploading", progress } });
           },
         });
         const confirmedSizeBytes =
@@ -199,7 +208,7 @@ export function createChatFileUploadEngine(
           confirmed.sizeBytes >= 0
             ? confirmed.sizeBytes
             : record.sizeBytes;
-        put({
+        update({
           ...record,
           sizeBytes: confirmedSizeBytes,
           status: {
@@ -209,7 +218,7 @@ export function createChatFileUploadEngine(
           },
         });
       } catch (error) {
-        put({
+        update({
           ...record,
           status: {
             kind: "failed",
@@ -242,7 +251,7 @@ export function createChatFileUploadEngine(
     },
     retry: (attachmentId) => {
       const record = records.get(attachmentId);
-      if (!record || record.status.kind === "uploaded" || record.status.kind === "needsReattach") {
+      if (!record || record.status.kind !== "failed" || !record.status.retryable) {
         return;
       }
       put({ ...record, status: { kind: "pending" } });

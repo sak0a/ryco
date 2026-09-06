@@ -7,6 +7,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -253,6 +254,7 @@ export function ThreadDetailScreen(props: {
   const [stagedModelSelection, setStagedModelSelection] = useState<ModelSelection | null>(null);
   const [sendBusy, setSendBusy] = useState(false);
   const [attachments, setAttachments] = useState<ReadonlyArray<DraftComposerAttachment>>([]);
+  const ownedUploadIds = useRef(new Set<string>());
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [steeringMessageIds, setSteeringMessageIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -775,6 +777,7 @@ export function ThreadDetailScreen(props: {
 
   const enqueueFileUpload = useCallback(
     (attachment: DraftComposerFileAttachment) => {
+      ownedUploadIds.current.add(attachment.id);
       composerFileUploadEngine.enqueue({
         attachmentId: attachment.id,
         threadId,
@@ -868,10 +871,21 @@ export function ThreadDetailScreen(props: {
   // the composer (removal, send clear, discard).
   useEffect(() => {
     const liveIds = new Set(attachments.map((attachment) => attachment.id));
-    for (const attachmentId of composerFileUploadEngine.snapshot().keys()) {
-      if (!liveIds.has(attachmentId)) composerFileUploadEngine.release(attachmentId);
+    for (const attachmentId of ownedUploadIds.current) {
+      if (!liveIds.has(attachmentId)) {
+        composerFileUploadEngine.release(attachmentId);
+        ownedUploadIds.current.delete(attachmentId);
+      }
     }
   }, [attachments]);
+
+  useEffect(() => {
+    const ownedIds = ownedUploadIds.current;
+    return () => {
+      for (const attachmentId of ownedIds) composerFileUploadEngine.release(attachmentId);
+      ownedIds.clear();
+    };
+  }, []);
 
   const onSend = async (
     text: string,

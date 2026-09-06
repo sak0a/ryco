@@ -16,6 +16,13 @@ import {
 } from "./attachmentStore.ts";
 
 describe("attachmentStore", () => {
+  it("keeps in-flight staging files out of the persisted attachment namespace", () => {
+    const id = createFileAttachmentId("thread-1", "notes.pdf")!;
+    expect(parseAttachmentIdFromRelativePath(`${id}.part`)).toBeNull();
+    expect(parseAttachmentIdFromRelativePath(`${id}.PART`)).toBeNull();
+    expect(parseAttachmentIdFromRelativePath(id)).toBe(id);
+  });
+
   it("sanitizes thread ids when creating attachment ids", () => {
     const attachmentId = createAttachmentId("thread.folder/unsafe space");
     expect(attachmentId).toBeTruthy();

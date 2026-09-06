@@ -92,6 +92,61 @@ describe("upload pure helpers", () => {
 });
 
 describe("upload engine", () => {
+  it.each(["release", "releaseAll"] as const)("ignores completion after %s", async (release) => {
+    const transfer = Promise.withResolvers<{}>();
+    const transport = makeTransport({ transferBytes: vi.fn(() => transfer.promise) });
+    const engine = createChatFileUploadEngine(transport);
+    engine.enqueue(makeRequest());
+    await flushMicrotasks();
+    if (release === "release") engine.release("att-1");
+    else engine.releaseAll();
+    transfer.resolve({});
+    await flushMicrotasks();
+    expect(engine.snapshot().size).toBe(0);
+  });
+
+  it("does not transfer bytes or restore errors after release during token minting", async () => {
+    const mint =
+      Promise.withResolvers<Awaited<ReturnType<ChatFileUploadTransport["createFileUploadUrl"]>>>();
+    const transport = makeTransport({ createFileUploadUrl: vi.fn(() => mint.promise) });
+    const engine = createChatFileUploadEngine(transport);
+    engine.enqueue(makeRequest());
+    engine.release("att-1");
+    mint.resolve({ uploadToken: "old", expiresAt: FUTURE, maxUploadBytes: 1024 });
+    await flushMicrotasks();
+    expect(transport.transferBytes).not.toHaveBeenCalled();
+    expect(engine.get("att-1")).toBeNull();
+  });
+
+  it("does not overwrite a replacement with a stale upload failure", async () => {
+    const transfer = Promise.withResolvers<{}>();
+    const transport = makeTransport({
+      transferBytes: vi.fn().mockReturnValueOnce(transfer.promise).mockResolvedValue({}),
+    });
+    const engine = createChatFileUploadEngine(transport);
+    engine.enqueue(makeRequest());
+    await flushMicrotasks();
+    engine.release("att-1");
+    engine.enqueue(makeRequest({ name: "replacement.txt" }));
+    transfer.reject(new Error("old transfer failed"));
+    await flushMicrotasks();
+    expect(engine.get("att-1")?.name).toBe("replacement.txt");
+    expect(engine.get("att-1")?.status.kind).toBe("uploaded");
+  });
+
+  it("ignores retry while an upload is active", async () => {
+    const transfer = Promise.withResolvers<{}>();
+    const transport = makeTransport({ transferBytes: vi.fn(() => transfer.promise) });
+    const engine = createChatFileUploadEngine(transport);
+    engine.enqueue(makeRequest());
+    await flushMicrotasks();
+    engine.retry("att-1");
+    expect(engine.get("att-1")?.status.kind).toBe("uploading");
+    transfer.resolve({});
+    await flushMicrotasks();
+    expect(transport.createFileUploadUrl).toHaveBeenCalledTimes(1);
+  });
+
   it("moves an attachment pending → uploading → uploaded and reports progress", async () => {
     const transport = makeTransport();
     const engine = createChatFileUploadEngine(transport);
