@@ -2218,6 +2218,55 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("serves streamed videos with their media type and seekable byte ranges", () =>
+    Effect.gen(function* () {
+      const { uploads } = yield* makeUploadTestContext;
+      const created = yield* uploads.create({
+        threadId: ThreadId.make("upload-thread"),
+        name: "clip.mp4",
+        mimeType: "video/mp4",
+        sizeBytes: 10,
+      });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const response = yield* postAttachmentUpload({
+        uploadToken: created.uploadToken,
+        cookie,
+        body: HttpBody.uint8Array(new TextEncoder().encode("0123456789")),
+      });
+      assert.equal(response.status, 200);
+      const payload = (yield* response.json) as { id: string };
+      const url = `/attachments/${payload.id}`;
+      const full = yield* HttpClient.get(url, { headers: { cookie } });
+      assert.equal(full.status, 200);
+      assert.equal(full.headers["content-type"], "video/mp4");
+      assert.equal(full.headers["content-disposition"], undefined);
+      assert.equal(full.headers["accept-ranges"], "bytes");
+      assert.equal(yield* full.text, "0123456789");
+      for (const [range, contentRange, body] of [
+        ["bytes=0-1", "bytes 0-1/10", "01"],
+        ["bytes=7-", "bytes 7-9/10", "789"],
+        ["bytes=-3", "bytes 7-9/10", "789"],
+        ["bytes=8-100", "bytes 8-9/10", "89"],
+      ]) {
+        const partial = yield* HttpClient.get(url, { headers: { cookie, range: range! } });
+        assert.equal(partial.status, 206);
+        assert.equal(partial.headers["content-range"], contentRange);
+        assert.equal(partial.headers["content-type"], "video/mp4");
+        assert.equal(yield* partial.text, body);
+      }
+      for (const range of ["bytes=10-", "bytes=-0", "bytes=5-3"]) {
+        const invalid = yield* HttpClient.get(url, { headers: { cookie, range } });
+        assert.equal(invalid.status, 416);
+        assert.equal(invalid.headers["content-range"], "bytes */10");
+      }
+      const conditional = yield* HttpClient.get(url, {
+        headers: { cookie, range: "bytes=0-1", "if-range": '"old-version"' },
+      });
+      assert.equal(conditional.status, 200);
+      assert.equal(yield* conditional.text, "0123456789");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("reports probed media dimensions on upload and attachment GET", () =>
     Effect.gen(function* () {
       const { uploads } = yield* makeUploadTestContext;

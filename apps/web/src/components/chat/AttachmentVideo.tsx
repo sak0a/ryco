@@ -45,10 +45,10 @@ export const AttachmentVideo = memo(function AttachmentVideo(props: {
   attachment: ChatFileAttachment;
 }) {
   const { attachment } = props;
-  const [videoFailed, setVideoFailed] = useState(false);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const { previewUrl, width, height } = attachment;
 
-  if (videoFailed || !previewUrl) {
+  if (!previewUrl || failedUrl === previewUrl) {
     return <AttachmentFileRow attachment={attachment} />;
   }
 
@@ -56,10 +56,12 @@ export const AttachmentVideo = memo(function AttachmentVideo(props: {
     <div className="flex flex-col">
       <video
         controls
+        playsInline
         preload="metadata"
         src={previewUrl}
-        onError={() => setVideoFailed(true)}
+        onError={() => setFailedUrl(previewUrl)}
         {...(width !== undefined && height !== undefined ? { width, height } : {})}
+        style={{ aspectRatio: width && height ? `${width} / ${height}` : "16 / 9" }}
         className="block h-auto w-full bg-black"
       />
       <a

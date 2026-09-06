@@ -12,6 +12,7 @@ export interface AttachmentMediaDimensions {
 
 const MEDIA_PROBE_TIMEOUT_MILLIS = 5_000;
 const MP4_BOX_HEADER_SIZE = 8;
+const MP4_MAX_PROBE_READS = 2048;
 const MP4_LARGE_SIZE_FIELD_SIZE = 8;
 const MP4_TKHD_V0_WIDTH_OFFSET = 76;
 const MP4_TKHD_V1_WIDTH_OFFSET = 88;
@@ -136,8 +137,8 @@ const parseTkhdDimensions = (
   reader: MediaBoxReader,
   box: Mp4Box,
 ): AttachmentMediaDimensions | null => {
-  const body = reader.readAt(box.bodyStart, box.end - box.bodyStart);
-  if (!body) {
+  const body = reader.readAt(box.bodyStart, Math.min(96, box.end - box.bodyStart));
+  if (!body || (body[0] !== 0 && body[0] !== 1)) {
     return null;
   }
   const widthOffset = body[0] === 1 ? MP4_TKHD_V1_WIDTH_OFFSET : MP4_TKHD_V0_WIDTH_OFFSET;
@@ -151,7 +152,15 @@ const parseTkhdDimensions = (
   };
   const width = toDimension(view.getUint32(widthOffset));
   const height = toDimension(view.getUint32(widthOffset + 4));
-  return width !== null && height !== null ? { width, height } : null;
+  if (width === null || height === null) return null;
+  // Phone videos commonly store landscape pixels with a quarter-turn matrix.
+  const matrixOffset = widthOffset - 36;
+  const quarterTurn =
+    view.getInt32(matrixOffset) === 0 &&
+    view.getInt32(matrixOffset + 16) === 0 &&
+    Math.abs(view.getInt32(matrixOffset + 4)) === MP4_TKHD_FIXED_POINT_SCALE &&
+    Math.abs(view.getInt32(matrixOffset + 12)) === MP4_TKHD_FIXED_POINT_SCALE;
+  return quarterTurn ? { width: height, height: width } : { width, height };
 };
 
 const findHdlrHandlerType = (reader: MediaBoxReader, start: number, end: number): string | null => {
@@ -160,7 +169,7 @@ const findHdlrHandlerType = (reader: MediaBoxReader, start: number, end: number)
     if (box.type !== "hdlr" || handlerType !== null) {
       return;
     }
-    const body = reader.readAt(box.bodyStart, box.end - box.bodyStart);
+    const body = box.end - box.bodyStart >= 12 ? reader.readAt(box.bodyStart, 12) : null;
     if (body && body.length >= 12) {
       handlerType = String.fromCharCode(body[8]!, body[9]!, body[10]!, body[11]!);
     }
@@ -188,7 +197,16 @@ const findTrakDimensions = (
   return dimensions;
 };
 
-const probeMp4DimensionsFromReader = (reader: MediaBoxReader): AttachmentMediaDimensions | null => {
+const probeMp4DimensionsFromReader = (source: MediaBoxReader): AttachmentMediaDimensions | null => {
+  let reads = 0;
+  const reader: MediaBoxReader = {
+    size: source.size,
+    readAt: (offset, length) => {
+      // The synchronous file reader must never scan arbitrarily many tiny boxes.
+      if (++reads > MP4_MAX_PROBE_READS) throw new Error("MP4 probe budget exhausted");
+      return source.readAt(offset, length);
+    },
+  };
   let dimensions: AttachmentMediaDimensions | null = null;
   let fallbackDimensions: AttachmentMediaDimensions | null = null;
   walkBoxes(reader, 0, reader.size, (topBox) => {
@@ -263,7 +281,7 @@ export const probeAttachmentMediaDimensionsFromBytes = (
 ): Effect.Effect<AttachmentMediaDimensions | null> => {
   const normalizedMimeType = mimeType.toLowerCase();
   if (normalizedMimeType.startsWith("image/")) {
-    return probeImageDimensions(() => sharp(bytes).metadata());
+    return probeImageDimensions(async () => (await sharp(bytes).metadata()).autoOrient);
   }
   if (normalizedMimeType === "video/mp4" || normalizedMimeType === "video/quicktime") {
     return Effect.try(() => probeMp4DimensionsFromReader(makeBufferBoxReader(bytes))).pipe(
@@ -279,7 +297,7 @@ export const probeAttachmentMediaDimensions = (
 ): Effect.Effect<AttachmentMediaDimensions | null> => {
   const normalizedMimeType = mimeType.toLowerCase();
   if (normalizedMimeType.startsWith("image/")) {
-    return probeImageDimensions(() => sharp(absPath).metadata());
+    return probeImageDimensions(async () => (await sharp(absPath).metadata()).autoOrient);
   }
   if (normalizedMimeType === "video/mp4" || normalizedMimeType === "video/quicktime") {
     return Effect.try(() => withFileBoxReader(absPath, probeMp4DimensionsFromReader)).pipe(

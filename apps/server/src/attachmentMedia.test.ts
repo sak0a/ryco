@@ -50,6 +50,79 @@ const buildMp4 = (tracks: ReadonlyArray<Buffer>): Buffer =>
 const makeTempDir = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "ryco-attachment-media-"));
 
 describe("attachment media probing", () => {
+  it.effect("reports displayed dimensions for EXIF-rotated images", () =>
+    Effect.gen(function* () {
+      const bytes = yield* Effect.promise(() =>
+        sharp({ create: { width: 20, height: 30, channels: 3, background: "red" } })
+          .jpeg()
+          .withMetadata({ orientation: 6 })
+          .toBuffer(),
+      );
+      expect(yield* probeAttachmentMediaDimensionsFromBytes(bytes, "image/jpeg")).toEqual({
+        width: 30,
+        height: 20,
+      });
+    }),
+  );
+
+  it.effect("applies quarter-turn video track rotation", () =>
+    Effect.gen(function* () {
+      for (const version of [0, 1]) {
+        const tkhd = version === 0 ? buildTkhdV0(1920, 1080) : buildTkhdV1(1920, 1080);
+        const matrixOffset = 8 + (version === 0 ? 40 : 52);
+        tkhd.writeInt32BE(65536, matrixOffset + 4);
+        tkhd.writeInt32BE(-65536, matrixOffset + 12);
+        const bytes = buildMp4([Buffer.concat([tkhd, buildMp4Box("mdia", buildHdlr("vide"))])]);
+        expect(yield* probeAttachmentMediaDimensionsFromBytes(bytes, "video/quicktime")).toEqual({
+          width: 1080,
+          height: 1920,
+        });
+      }
+    }),
+  );
+
+  it.effect("bounds scans of files containing thousands of tiny boxes", () =>
+    Effect.gen(function* () {
+      const bytes = Buffer.concat([
+        ...Array.from({ length: 3000 }, () => buildMp4Box("free", Buffer.alloc(0))),
+        buildMp4([Buffer.concat([buildTkhdV0(320, 240), buildMp4Box("mdia", buildHdlr("vide"))])]),
+      ]);
+      expect(yield* probeAttachmentMediaDimensionsFromBytes(bytes, "video/mp4")).toBeNull();
+      const dir = makeTempDir();
+      try {
+        const file = path.join(dir, "many-boxes.mp4");
+        fs.writeFileSync(file, bytes);
+        expect(yield* probeAttachmentMediaDimensions(file, "video/mp4")).toBeNull();
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("ignores padding in oversized metadata boxes", () =>
+    Effect.gen(function* () {
+      const tkhd = buildMp4Box(
+        "tkhd",
+        Buffer.concat([buildTkhdV0(320, 240).subarray(8), Buffer.alloc(1024 * 1024)]),
+      );
+      const hdlr = buildMp4Box(
+        "hdlr",
+        Buffer.concat([buildHdlr("vide").subarray(8), Buffer.alloc(1024 * 1024)]),
+      );
+      const dir = makeTempDir();
+      try {
+        const file = path.join(dir, "padded.mp4");
+        fs.writeFileSync(file, buildMp4([Buffer.concat([tkhd, buildMp4Box("mdia", hdlr)])]));
+        expect(yield* probeAttachmentMediaDimensions(file, "video/mp4")).toEqual({
+          width: 320,
+          height: 240,
+        });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }),
+  );
+
   it.effect("probes image dimensions from bytes", () =>
     Effect.gen(function* () {
       const pngBytes = yield* Effect.promise(() =>

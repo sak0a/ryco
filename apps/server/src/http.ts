@@ -259,6 +259,34 @@ export const otlpTracesProxyRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+const INLINE_VIDEO_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".ogv": "video/ogg",
+};
+
+/** A single byte range; malformed or multipart ranges are served in full. */
+export function parseAttachmentByteRange(
+  range: string | undefined,
+  size: number,
+): { start: number; end: number } | "unsatisfiable" | null {
+  const match = range?.match(/^bytes=(\d*)-(\d*)$/i);
+  if (!match || (!match[1] && !match[2])) return null;
+  const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+  const end = match[1] && match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    start > end ||
+    start >= size
+  ) {
+    return "unsatisfiable";
+  }
+  return { start, end };
+}
+
 export const attachmentsRouteLayer = HttpRouter.add(
   "GET",
   `${ATTACHMENTS_ROUTE_PREFIX}/*`,
@@ -303,12 +331,28 @@ export const attachmentsRouteLayer = HttpRouter.add(
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
 
-    const mediaDimensions = yield* probeAttachmentMediaForServing(
-      filePath,
+    const extension =
       path.extname(filePath) ||
-        (isIdLookup ? attachmentIdExtensionSegment(normalizedRelativePath) : null) ||
-        "",
-    );
+      (isIdLookup ? attachmentIdExtensionSegment(normalizedRelativePath) : null) ||
+      "";
+    const videoContentType = INLINE_VIDEO_CONTENT_TYPES[extension.toLowerCase()];
+    const size = Number(fileInfo.size);
+    // If-Range validators are not compared here: sending the complete response
+    // is the safe fallback instead of returning a potentially mismatched slice.
+    const range =
+      videoContentType && !request.headers["if-range"]
+        ? parseAttachmentByteRange(request.headers.range, size)
+        : null;
+    if (range === "unsatisfiable") {
+      return HttpServerResponse.empty({
+        status: 416,
+        headers: {
+          "Content-Range": `bytes */${size}`,
+          "Cache-Control": "private, max-age=3600",
+        },
+      });
+    }
+    const mediaDimensions = yield* probeAttachmentMediaForServing(filePath, extension);
     const mediaHeaders = mediaDimensions
       ? {
           "X-Attachment-Width": String(mediaDimensions.width),
@@ -317,9 +361,18 @@ export const attachmentsRouteLayer = HttpRouter.add(
       : {};
 
     return yield* HttpServerResponse.file(filePath, {
-      status: 200,
+      status: range ? 206 : 200,
+      ...(range ? { offset: range.start, bytesToRead: range.end - range.start + 1 } : {}),
       headers: {
-        ...userAssetResponseHeaders(filePath, path),
+        ...(videoContentType
+          ? {
+              "Content-Type": videoContentType,
+              "Cache-Control": "private, max-age=3600",
+              "X-Content-Type-Options": "nosniff",
+              "Accept-Ranges": "bytes",
+            }
+          : userAssetResponseHeaders(filePath, path)),
+        ...(range ? { "Content-Range": `bytes ${range.start}-${range.end}/${size}` } : {}),
         ...mediaHeaders,
       },
     }).pipe(

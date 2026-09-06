@@ -553,9 +553,12 @@ describe("MessagesTimeline", () => {
     expect(videoTags).toHaveLength(2);
     expect(videoTags[0]).toContain('src="http://localhost:0/attachments/video-1"');
     expect(videoTags[0]).toContain('width="1920"');
+    expect(videoTags[0]).toContain('playsInline=""');
+    expect(videoTags[0]).toContain("aspect-ratio:1920 / 1080");
     expect(videoTags[0]).toContain('height="1080"');
     expect(videoTags[1]).toContain('src="http://localhost:0/attachments/video-2"');
     expect(videoTags[1]).not.toContain("width=");
+    expect(videoTags[1]).toContain("aspect-ratio:16 / 9");
     expect(markup).toContain('preload="metadata"');
     expect(markup).toContain('download="clip.mp4"');
     expect(markup).toContain('download="stream.mov"');
