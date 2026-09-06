@@ -381,7 +381,11 @@ export function ThreadDetailScreen(props: {
     const timer = setTimeout(() => setSettlementNowMs(Date.now()), delayMs);
     return () => clearTimeout(timer);
   }, [settlementModel?.nextSettlementEvaluationAtMs]);
-  const settlementEntry = settlementModel?.active[0] ?? settlementModel?.settled[0] ?? null;
+  const settlementEntry =
+    settlementModel?.active[0] ??
+    settlementModel?.settled[0] ??
+    settlementModel?.snoozed[0] ??
+    null;
   const cachedView = useMemo(
     () =>
       deriveThreadCachedView({
@@ -408,7 +412,10 @@ export function ThreadDetailScreen(props: {
             ...(settlementEntry
               ? {
                   settlement: {
-                    attentionState: settlementEntry.lifecycle.classification,
+                    attentionState:
+                      settlementEntry.lifecycle.classification === "snoozed"
+                        ? "active"
+                        : settlementEntry.lifecycle.classification,
                     canSettle: settlementEntry.lifecycle.eligibility.canSettle,
                     settlementBlocker: settlementEntry.lifecycle.settlementBlocker,
                     mutationEnabled: settlementEntry.mutationEnabled,

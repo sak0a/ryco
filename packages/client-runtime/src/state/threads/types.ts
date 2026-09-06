@@ -135,6 +135,8 @@ export interface Thread {
   settledOverride?: ThreadSettlementOverride | null | undefined;
   /** Absent only for an object retained from a pre-settlement client snapshot. */
   settledAt?: string | null | undefined;
+  snoozedUntil?: string | null | undefined;
+  snoozedAt?: string | null | undefined;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
   goal?: ThreadGoal | null;
@@ -165,6 +167,8 @@ export interface ThreadShell {
   settledOverride?: ThreadSettlementOverride | null | undefined;
   /** Optional at the runtime boundary for mixed-version shell snapshots. */
   settledAt?: string | null | undefined;
+  snoozedUntil?: string | null | undefined;
+  snoozedAt?: string | null | undefined;
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
@@ -197,6 +201,8 @@ export interface SidebarThreadSummary {
   settledOverride?: ThreadSettlementOverride | null | undefined;
   /** Optional at the runtime boundary for mixed-version shell snapshots. */
   settledAt?: string | null | undefined;
+  snoozedUntil?: string | null | undefined;
+  snoozedAt?: string | null | undefined;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
   branch: string | null;

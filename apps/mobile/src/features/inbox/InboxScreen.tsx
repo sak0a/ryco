@@ -1,6 +1,10 @@
+import { resolveSnoozePresets } from "@ryco/shared/threadSnooze";
+import { ensureEnvironmentApi } from "../../connection/environmentApi";
+import { newCommandId } from "../../lib/ids";
+import { MenuView } from "@react-native-menu/menu";
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { useState } from "react";
-import { Pressable, View } from "react-native";
+import { Alert, Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
@@ -52,25 +56,31 @@ export function InboxScreen(props: {
   readonly onEmptyAction: (state: Exclude<InboxEmptyState, null>) => void;
   readonly onScrollOffset?: (offset: number) => void;
 }) {
+  const [snoozedOpen, setSnoozedOpen] = useState(false);
   const [settledOpen, setSettledOpen] = useState(false);
   const [settledVisibleCount, setSettledVisibleCount] = useState(MOBILE_SETTLED_PAGE_SIZE);
   const data = flattenInboxSections({
     sections: props.sections,
     settledOpen,
+    snoozedOpen,
     settledVisibleCount,
   });
   const empty = props.emptyState ? EMPTY_COPY[props.emptyState] : null;
 
   const renderItem = ({ item }: LegendListRenderItemProps<InboxListItem>) => {
     if (item.kind === "section") {
-      if (item.sectionKey === "settled") {
+      if (item.sectionKey === "settled" || item.sectionKey === "snoozed") {
         return (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Settled, ${item.count} tasks`}
+            accessibilityLabel={`${item.title}, ${item.count} tasks`}
             accessibilityState={{ expanded: item.expanded }}
             className="min-h-11 flex-row items-center gap-2 px-5 pt-4 pb-2 active:opacity-70"
-            onPress={() => setSettledOpen((open) => !open)}
+            onPress={() =>
+              item.sectionKey === "snoozed"
+                ? setSnoozedOpen((open) => !open)
+                : setSettledOpen((open) => !open)
+            }
           >
             <SymbolView
               name={item.expanded ? "chevron.down" : "chevron.right"}
@@ -103,7 +113,50 @@ export function InboxScreen(props: {
         </Pressable>
       );
     }
-    return <ThreadRow row={item.row} onPress={() => props.onOpenThread(item.row)} />;
+    const row = item.row;
+    const presets = resolveSnoozePresets(new Date());
+    const actions = row.snoozedUntil
+      ? [{ id: "unsnooze", title: "Unsnooze", attributes: { disabled: !row.canUnsnooze } }]
+      : presets.map((preset) => ({
+          id: preset.id,
+          title: preset.label,
+          attributes: { disabled: !row.canSnooze },
+        }));
+    return (
+      <MenuView
+        shouldOpenOnLongPress
+        actions={actions}
+        onPressAction={({ nativeEvent }) => {
+          const until =
+            nativeEvent.event === "unsnooze"
+              ? null
+              : resolveSnoozePresets(new Date()).find((preset) => preset.id === nativeEvent.event)
+                  ?.snoozedUntil;
+          if (until === undefined || !(until ? row.canSnooze : row.canUnsnooze)) return;
+          void (async () => {
+            try {
+              await ensureEnvironmentApi(row.environmentId).orchestration.dispatchCommand(
+                until
+                  ? {
+                      type: "thread.snooze",
+                      threadId: row.threadId,
+                      commandId: newCommandId(),
+                      snoozedUntil: until,
+                    }
+                  : { type: "thread.unsnooze", threadId: row.threadId, commandId: newCommandId() },
+              );
+            } catch (error) {
+              Alert.alert(
+                "Could not update snooze",
+                error instanceof Error ? error.message : "The request failed.",
+              );
+            }
+          })();
+        }}
+      >
+        <ThreadRow row={row} onPress={() => props.onOpenThread(row)} />
+      </MenuView>
+    );
   };
 
   return (

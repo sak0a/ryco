@@ -477,3 +477,63 @@ describe("thread inbox", () => {
     expect(inbox.settled[0]).toMatchObject({ key, current: true });
   });
 });
+
+describe("snoozed inbox entries", () => {
+  const until = "2026-07-31T13:00:00.000Z";
+  const since = "2026-07-31T11:00:00.000Z";
+  const build = (overrides: Partial<BuildThreadInboxInput> = {}) =>
+    buildThreadInbox({
+      projects: [],
+      worktrees: [],
+      threads: [
+        makeThread(environmentA, "snoozed", {
+          snoozedAt: since,
+          snoozedUntil: until,
+          settledOverride: "active",
+        }),
+      ],
+      environments: [makeEnvironment(environmentA, { threadSnoozeSupported: true })],
+      nowMs,
+      ...overrides,
+    });
+  it("keeps pins while suppressing focus and schedules the next wake", () => {
+    const key = scopedThreadKey({
+      environmentId: environmentA,
+      threadId: ThreadId.make("snoozed"),
+    });
+    const inbox = build({ pinnedThreadKeys: [key], aiFocusEnabled: true });
+    expect(inbox.active).toHaveLength(0);
+    expect(inbox.focus).toHaveLength(0);
+    expect(inbox.snoozed[0]).toMatchObject({ pinned: true, canSnooze: true });
+    expect(inbox.nextSettlementEvaluationAtMs).toBe(Date.parse(until));
+    const awake = build({ nowMs: Date.parse(until), pinnedThreadKeys: [key] });
+    expect(awake.snoozed).toHaveLength(0);
+    expect(awake.active[0]?.pinned).toBe(true);
+  });
+  it.each([
+    { threadSnoozeSupported: false },
+    { mutationReady: false },
+    { shellCurrent: false },
+    { connected: false },
+  ])("gates mutation for %j", (environment) => {
+    expect(
+      build({
+        environments: [
+          makeEnvironment(environmentA, { threadSnoozeSupported: true, ...environment }),
+        ],
+      }).snoozed[0]?.canSnooze,
+    ).toBe(false);
+  });
+  it("never suppresses pending requests or local undelivered work", () => {
+    const thread = makeThread(environmentA, "snoozed", {
+      snoozedAt: since,
+      snoozedUntil: until,
+      hasPendingApprovals: true,
+    });
+    expect(build({ threads: [thread] }).snoozed).toHaveLength(0);
+    const key = scopedThreadKey({ environmentId: environmentA, threadId: thread.id });
+    const inbox = build({ localQueuedThreadKeys: [key] });
+    expect(inbox.snoozed).toHaveLength(0);
+    expect(inbox.active[0]?.canSnooze).toBe(false);
+  });
+});

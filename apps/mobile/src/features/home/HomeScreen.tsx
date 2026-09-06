@@ -2,7 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { getQueuedThreadKeys } from "@ryco/client-runtime/state/message-queue";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useState } from "react";
-import { Pressable, TextInput, View } from "react-native";
+import { AppState, Pressable, TextInput, View } from "react-native";
 
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 
@@ -48,7 +48,13 @@ export function HomeScreen() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 30_000);
-    return () => clearInterval(timer);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") setNowMs(Date.now());
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
   }, []);
   const preferences = usePreferences();
   const groupingMode = resolveHomeGroupingMode(preferences.projectGroupingEnabled);

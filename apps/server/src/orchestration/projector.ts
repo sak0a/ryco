@@ -32,6 +32,8 @@ import {
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadSettledPayload,
+  ThreadSnoozedPayload,
+  ThreadUnsnoozedPayload,
   ThreadTokenModeSetPayload,
   ThreadGoalUpdatedPayload,
   ThreadGoalClearedPayload,
@@ -504,12 +506,42 @@ export function projectEvent(
         })),
       );
 
+    case "thread.snoozed":
+      return decodeForEvent(ThreadSnoozedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            settledOverride: "active",
+            settledAt: null,
+            snoozedUntil: payload.snoozedUntil,
+            snoozedAt: payload.snoozedAt,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.unsnoozed":
+      return decodeForEvent(ThreadUnsnoozedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            settledOverride: "active",
+            settledAt: null,
+            snoozedUntil: null,
+            snoozedAt: null,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
     case "thread.settled":
       return decodeForEvent(ThreadSettledPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             settledOverride: "settled",
+            snoozedUntil: null,
+            snoozedAt: null,
             settledAt: payload.settledAt,
             updatedAt: payload.updatedAt,
           }),

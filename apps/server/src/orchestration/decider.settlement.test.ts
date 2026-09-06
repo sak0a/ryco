@@ -375,3 +375,153 @@ describe("thread settlement decider", () => {
     expect(result.map((event) => event.type)).toEqual(["thread.activity-appended"]);
   });
 });
+
+describe("thread snooze commands", () => {
+  it("projects snooze and unsnooze without discarding conversation state", async () => {
+    const readModel = await seedThread();
+    const threadId = readModel.threads[0]!.id;
+    const snoozedUntil = new Date(Date.now() + 3_600_000).toISOString();
+    const events = asEvents(
+      await Effect.runPromise(
+        decideOrchestrationCommand({
+          readModel,
+          command: {
+            type: "thread.snooze",
+            commandId: asCommandId("snooze"),
+            threadId,
+            snoozedUntil,
+          },
+        }),
+      ),
+    );
+    expect(events[0]?.type).toBe("thread.snoozed");
+    const snoozed = await Effect.runPromise(
+      projectEvent(readModel, { ...events[0]!, sequence: 3 }),
+    );
+    expect(snoozed.threads[0]).toMatchObject({ snoozedUntil, settledOverride: "active" });
+    const wake = asEvents(
+      await Effect.runPromise(
+        decideOrchestrationCommand({
+          readModel: snoozed,
+          command: { type: "thread.unsnooze", commandId: asCommandId("wake"), threadId },
+        }),
+      ),
+    );
+    const awake = await Effect.runPromise(projectEvent(snoozed, { ...wake[0]!, sequence: 4 }));
+    expect(awake.threads[0]).toMatchObject({
+      snoozedUntil: null,
+      snoozedAt: null,
+      settledOverride: "active",
+      title: readModel.threads[0]!.title,
+    });
+  });
+  it("allows running work but wakes permanently when input is requested", async () => {
+    const original = await seedThread();
+    const thread = original.threads[0]!;
+    const now = new Date().toISOString();
+    const session = {
+      threadId: thread.id,
+      status: "running" as const,
+      providerName: "codex",
+      runtimeMode: "full-access" as const,
+      tokenMode: "balanced" as const,
+      activeTurnId: TurnId.make("running"),
+      lastError: null,
+      updatedAt: now,
+    };
+    const readModel: OrchestrationReadModel = { ...original, threads: [{ ...thread, session }] };
+    const snoozeEvents = asEvents(
+      await Effect.runPromise(
+        decideOrchestrationCommand({
+          readModel,
+          command: {
+            type: "thread.snooze",
+            threadId: thread.id,
+            commandId: asCommandId("snooze-running"),
+            snoozedUntil: new Date(Date.now() + 3_600_000).toISOString(),
+          },
+        }),
+      ),
+    );
+    const snoozed = await Effect.runPromise(
+      projectEvent(readModel, { ...snoozeEvents[0]!, sequence: 3 }),
+    );
+    const createdAt = new Date(Date.now() + 1_000).toISOString();
+    const request = {
+      id: asEventId("request-event"),
+      kind: "user-input.requested",
+      tone: "approval" as const,
+      summary: "Input required",
+      payload: { requestId: "input-request" },
+      turnId: null,
+      createdAt,
+    };
+    const progress = asEvents(
+      await Effect.runPromise(
+        decideOrchestrationCommand({
+          readModel: snoozed,
+          command: {
+            type: "thread.session.set",
+            threadId: thread.id,
+            commandId: asCommandId("progress"),
+            session: { ...session, updatedAt: createdAt },
+            createdAt,
+          },
+        }),
+      ),
+    );
+    expect(progress.map((event) => event.type)).toEqual(["thread.session-set"]);
+    const wake = asEvents(
+      await Effect.runPromise(
+        decideOrchestrationCommand({
+          readModel: snoozed,
+          command: {
+            type: "thread.activity.append",
+            threadId: thread.id,
+            commandId: asCommandId("request"),
+            activity: request,
+            createdAt,
+          },
+        }),
+      ),
+    );
+    expect(wake.map((event) => event.type)).toEqual([
+      "thread.unsnoozed",
+      "thread.activity-appended",
+    ]);
+    let awake = snoozed;
+    for (const [index, event] of wake.entries())
+      awake = await Effect.runPromise(projectEvent(awake, { ...event, sequence: 4 + index }));
+    expect(awake.threads[0]).toMatchObject({ snoozedUntil: null, snoozedAt: null });
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          readModel: awake,
+          command: {
+            type: "thread.snooze",
+            threadId: thread.id,
+            commandId: asCommandId("blocked"),
+            snoozedUntil: new Date(Date.now() + 3_600_000).toISOString(),
+          },
+        }),
+      ),
+    ).rejects.toThrow("pending requests");
+  });
+
+  it("rejects a past deadline", async () => {
+    const readModel = await seedThread();
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          readModel,
+          command: {
+            type: "thread.snooze",
+            commandId: asCommandId("past"),
+            threadId: readModel.threads[0]!.id,
+            snoozedUntil: "2020-01-01T00:00:00.000Z",
+          },
+        }),
+      ),
+    ).rejects.toThrow("future wake time");
+  });
+});

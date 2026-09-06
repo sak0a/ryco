@@ -109,6 +109,8 @@ export const ORCHESTRATION_EVENT_PROJECTORS = {
   "thread.runtime-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.interaction-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.token-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
+  "thread.snoozed": [ORCHESTRATION_PROJECTOR_NAMES.threads],
+  "thread.unsnoozed": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.settled": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.unsettled": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.goal-updated": [ORCHESTRATION_PROJECTOR_NAMES.threads],
@@ -784,6 +786,42 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.snoozed": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            settledOverride: "active",
+            settledAt: null,
+            snoozedUntil: event.payload.snoozedUntil,
+            snoozedAt: event.payload.snoozedAt,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.unsnoozed": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            settledOverride: "active",
+            settledAt: null,
+            snoozedUntil: null,
+            snoozedAt: null,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
         case "thread.settled": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
@@ -794,6 +832,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             settledOverride: "settled",
+            snoozedUntil: null,
+            snoozedAt: null,
             settledAt: event.payload.settledAt,
             updatedAt: event.payload.updatedAt,
           });

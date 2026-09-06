@@ -3,7 +3,13 @@ import "../../index.css";
 import { Schema } from "effect";
 import { ServerProvider } from "@ryco/contracts";
 import type { EnvironmentApi } from "@ryco/contracts";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@ryco/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  WorktreeId,
+} from "@ryco/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
 import { render } from "vitest-browser-react";
@@ -29,6 +35,8 @@ describe("Inbox sidebar rendering and settlement", () => {
     async (isWorktree) => {
       await page.viewport(1_280, 800);
       const now = Date.now();
+      const performThreadMenuAction = vi.fn(async () => undefined);
+      const onOpenThread = vi.fn();
       const dispatchCommand = vi.fn(async (_command: unknown) => undefined);
       const getThreadWindow = vi.fn(async () => ({
         thread: {
@@ -90,7 +98,38 @@ describe("Inbox sidebar rendering and settlement", () => {
               scripts: [],
             },
           ]}
-          worktrees={[]}
+          worktrees={
+            isWorktree
+              ? [
+                  {
+                    id: WorktreeId.make("pr-worktree"),
+                    environmentId: ENVIRONMENT_ID,
+                    projectId: PROJECT_ID,
+                    title: null,
+                    branch: "feat/settle",
+                    worktreePath: "/repo/worktrees/settle",
+                    origin: "pr",
+                    prNumber: 42,
+                    issueNumber: null,
+                    prTitle: "Inbox PR",
+                    issueTitle: null,
+                    prState: "open",
+                    prIsDraft: true,
+                    issueState: null,
+                    workItemProvider: null,
+                    workItemKey: null,
+                    workItemTitle: null,
+                    workItemState: null,
+                    workItemStateName: null,
+                    workItemUrl: null,
+                    createdAt: "2026-08-25T00:00:00.000Z",
+                    updatedAt: "2026-08-25T00:00:00.000Z",
+                    archivedAt: null,
+                    manualPosition: 0,
+                  },
+                ]
+              : []
+          }
           threads={[
             {
               environmentId: ENVIRONMENT_ID,
@@ -153,6 +192,7 @@ describe("Inbox sidebar rendering and settlement", () => {
               trust: "not-required",
               deliveryUnknown: false,
               threadSettlementSupported: true,
+              threadSnoozeSupported: true,
               mutationReady: true,
               shellCurrent: true,
             },
@@ -163,7 +203,15 @@ describe("Inbox sidebar rendering and settlement", () => {
           aiFocusEnabled
           autoSettleAfterDays={null}
           pinnedThreadKeys={new Set()}
-          onOpenThread={() => undefined}
+          onOpenThread={onOpenThread}
+          threadActions={{
+            listThreadMenuActions: () => [
+              { id: "pin", label: "Pin thread" },
+              { id: "rename", label: "Rename thread" },
+              { id: "close", label: "Delete thread", destructive: true },
+            ],
+            performThreadMenuAction,
+          }}
         />,
         { container: host },
       );
@@ -222,6 +270,7 @@ describe("Inbox sidebar rendering and settlement", () => {
         ).not.toBeNull();
         expect(popup.textContent).not.toContain("gpt-5.4");
         expect(rowElement.textContent).toContain("Ryco");
+        expect(rowElement.querySelector('[aria-label="PR #42 · Draft"]') !== null).toBe(isWorktree);
         expect(popup.textContent).toContain("Codex · GPT-5.4");
         expect(popup.textContent).toContain("Why focused? Now.");
         expect(popup.textContent).toContain("A release decision is waiting on this task.");
@@ -237,6 +286,25 @@ describe("Inbox sidebar rendering and settlement", () => {
           type: "thread.settle",
           threadId: THREAD_ID,
         });
+        await row.click({ button: "right" });
+        await page.getByRole("menuitem", { name: "Pin thread", exact: true }).click();
+        expect(performThreadMenuAction).toHaveBeenCalledWith(
+          { environmentId: ENVIRONMENT_ID, threadId: THREAD_ID },
+          "pin",
+        );
+        expect(onOpenThread).not.toHaveBeenCalled();
+        await vi.waitFor(() =>
+          expect(document.querySelector('[data-slot="context-menu-popup"]')).toBeNull(),
+        );
+        await page.getByRole("button", { name: "Thread actions for Hover target" }).click();
+        await page.getByRole("menuitem", { name: "Snooze", exact: true }).hover();
+        await page.getByRole("menuitem", { name: /In 1 hour/ }).click();
+        await vi.waitFor(() => expect(dispatchCommand).toHaveBeenCalledTimes(2));
+        expect(dispatchCommand.mock.calls[1]![0]).toMatchObject({
+          type: "thread.snooze",
+          threadId: THREAD_ID,
+        });
+        expect(onOpenThread).not.toHaveBeenCalled();
       } finally {
         await mounted.unmount();
         host.remove();

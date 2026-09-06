@@ -1,3 +1,4 @@
+import { canSnoozeThread } from "@ryco/shared/threadSnooze";
 import type {
   AgentTokenMode,
   OrchestrationCommand,
@@ -32,6 +33,39 @@ import {
   requireWorktree,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
+
+function threadSettlementInput(
+  readModel: OrchestrationReadModel,
+  thread: OrchestrationReadModel["threads"][number],
+  occurredAt: string,
+) {
+  const pendingRequests = derivePendingThreadRequestState(thread.activities);
+  const worktree = threadWorktree(readModel, thread);
+  return {
+    threadSettlementSupported: true,
+    archivedAt: thread.archivedAt,
+    deletedAt: thread.deletedAt,
+    worktreeArchivedAt: worktree?.archivedAt ?? null,
+    settledOverride: thread.settledOverride,
+    settledAt: thread.settledAt,
+    sessionStatus: thread.session?.status ?? null,
+    latestTurnState: thread.latestTurn?.state ?? null,
+    latestTurnRequestedAt: thread.latestTurn?.requestedAt ?? null,
+    latestTurnStartedAt: thread.latestTurn?.startedAt ?? null,
+    latestTurnCompletedAt: thread.latestTurn?.completedAt ?? null,
+    latestUserMessageAt: latestUserMessageAt(thread),
+    hasPendingApprovals: pendingRequests.hasPendingApprovals,
+    hasPendingUserInput: pendingRequests.hasPendingUserInput,
+    hasLocalQueuedMessage: false,
+    deliveryUnknown: false,
+    prState: worktree?.prState ?? null,
+    worktreeUpdatedAt: worktree?.updatedAt ?? null,
+    updatedAt: thread.updatedAt,
+    createdAt: thread.createdAt,
+    autoSettleAfterDays: null,
+    nowMs: Date.parse(occurredAt),
+  } satisfies import("@ryco/shared/threadSettlement").ThreadSettlementInput;
+}
 
 const nowIso = () => new Date().toISOString();
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
@@ -123,11 +157,39 @@ function settlementBlockerDetail(blocker: ThreadSettlementBlocker): string {
   }
 }
 
+function activityUnsnoozedEvent(input: {
+  readonly command: OrchestrationCommand;
+  readonly thread: OrchestrationReadModel["threads"][number];
+  readonly occurredAt: string;
+}): PlannedOrchestrationEvent | null {
+  if (
+    input.thread.snoozedUntil == null ||
+    input.thread.snoozedAt == null ||
+    Date.parse(input.occurredAt) < Date.parse(input.thread.snoozedAt)
+  )
+    return null;
+  return {
+    ...withEventBase({
+      aggregateKind: "thread",
+      aggregateId: input.thread.id,
+      occurredAt: input.occurredAt,
+      commandId: input.command.commandId,
+    }),
+    type: "thread.unsnoozed",
+    payload: { threadId: input.thread.id, updatedAt: input.occurredAt },
+  };
+}
+
 function activityUnsettledEvent(input: {
   readonly command: OrchestrationCommand;
   readonly thread: OrchestrationReadModel["threads"][number];
   readonly occurredAt: string;
 }): PlannedOrchestrationEvent | null {
+  if (input.thread.snoozedUntil != null) {
+    // Session progress does not undo an explicit deferral. New user turns and
+    // requests wake it permanently, so resolving a request cannot hide it again.
+    return input.command.type === "thread.session.set" ? null : activityUnsnoozedEvent(input);
+  }
   if (input.thread.settledOverride === null) {
     return null;
   }
@@ -467,6 +529,51 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.snooze": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const occurredAt = nowIso();
+      const eligibility = canSnoozeThread(threadSettlementInput(readModel, thread, occurredAt));
+      if (
+        !eligibility.canSnooze ||
+        !Number.isFinite(Date.parse(command.snoozedUntil)) ||
+        Date.parse(command.snoozedUntil) <= Date.parse(occurredAt)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Snooze requires a future wake time and a thread without pending requests or undelivered work.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.snoozed",
+        payload: {
+          threadId: command.threadId,
+          snoozedUntil: command.snoozedUntil,
+          snoozedAt: occurredAt,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+    case "thread.unsnooze": {
+      yield* requireThread({ readModel, command, threadId: command.threadId });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.unsnoozed",
+        payload: { threadId: command.threadId, updatedAt: occurredAt },
+      };
+    }
     case "thread.settle": {
       const thread = yield* requireThread({
         readModel,
@@ -490,33 +597,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         };
       }
 
-      const pendingRequests = derivePendingThreadRequestState(thread.activities);
-      const worktree = threadWorktree(readModel, thread);
       const occurredAt = nowIso();
-      const eligibility = canSettleThread({
-        threadSettlementSupported: true,
-        archivedAt: thread.archivedAt,
-        deletedAt: thread.deletedAt,
-        worktreeArchivedAt: worktree?.archivedAt ?? null,
-        settledOverride: thread.settledOverride,
-        settledAt: thread.settledAt,
-        sessionStatus: thread.session?.status ?? null,
-        latestTurnState: thread.latestTurn?.state ?? null,
-        latestTurnRequestedAt: thread.latestTurn?.requestedAt ?? null,
-        latestTurnStartedAt: thread.latestTurn?.startedAt ?? null,
-        latestTurnCompletedAt: thread.latestTurn?.completedAt ?? null,
-        latestUserMessageAt: latestUserMessageAt(thread),
-        hasPendingApprovals: pendingRequests.hasPendingApprovals,
-        hasPendingUserInput: pendingRequests.hasPendingUserInput,
-        hasLocalQueuedMessage: false,
-        deliveryUnknown: false,
-        prState: worktree?.prState ?? null,
-        worktreeUpdatedAt: worktree?.updatedAt ?? null,
-        updatedAt: thread.updatedAt,
-        createdAt: thread.createdAt,
-        autoSettleAfterDays: null,
-        nowMs: Date.parse(occurredAt),
-      });
+      const eligibility = canSettleThread(threadSettlementInput(readModel, thread, occurredAt));
       if (!eligibility.canSettle) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1364,6 +1446,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           session: command.session,
         },
       };
+      if (command.session.status === "error") {
+        const wake = activityUnsnoozedEvent({
+          command,
+          thread,
+          occurredAt: command.session.updatedAt,
+        });
+        if (wake) return [wake, sessionEvent];
+      }
       if (command.session.status !== "starting" && command.session.status !== "running") {
         return sessionEvent;
       }
@@ -1520,12 +1610,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.turn.diff.complete": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      return {
+      const event: PlannedOrchestrationEvent = {
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -1544,6 +1634,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           completedAt: command.completedAt,
         },
       };
+      const wake = activityUnsnoozedEvent({ command, thread, occurredAt: command.completedAt });
+      return wake ? [wake, event] : event;
     }
 
     case "thread.revert.complete": {

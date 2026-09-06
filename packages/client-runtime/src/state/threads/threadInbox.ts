@@ -1,3 +1,4 @@
+import { canSnoozeThread, isThreadSnoozed } from "@ryco/shared/threadSnooze";
 import { deriveThreadActivityStatus } from "./threadActivityStatus.ts";
 import type {
   EnvironmentId,
@@ -31,6 +32,7 @@ export interface ThreadInboxEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly threadSettlementSupported: boolean;
+  readonly threadSnoozeSupported?: boolean | undefined;
   readonly connected: boolean;
   readonly mutationReady: boolean;
   readonly shellCurrent: boolean;
@@ -63,7 +65,7 @@ export type ThreadInboxMutationBlocker =
   | "shell-stale";
 
 export interface ThreadInboxLifecycle {
-  readonly classification: Exclude<ThreadSettlementClassification, "excluded">;
+  readonly classification: Exclude<ThreadSettlementClassification, "excluded"> | "snoozed";
   readonly eligibility: CanSettleThreadResult;
   readonly effectiveSettlementTimestamp: string | null;
   readonly settlementBlocker: ThreadSettlementBlocker | null;
@@ -85,6 +87,7 @@ export interface ThreadInboxEntry {
   readonly pinned: boolean;
   readonly current: boolean;
   readonly isDraft: boolean;
+  readonly canSnooze: boolean;
   readonly focus: ThreadPriorityFocusMetadata | null;
 }
 
@@ -108,6 +111,7 @@ export interface ThreadInboxModel {
   readonly focus: ThreadInboxEntry[];
   readonly active: ThreadInboxEntry[];
   readonly settled: ThreadInboxEntry[];
+  readonly snoozed: ThreadInboxEntry[];
   readonly excludedCount: number;
   readonly nextSettlementEvaluationAtMs: number | null;
 }
@@ -353,6 +357,14 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
       excludedCount += 1;
       continue;
     }
+    const snoozed =
+      isThreadSnoozed(thread, input.nowMs) &&
+      !policyInput.hasLocalQueuedMessage &&
+      !policyInput.deliveryUnknown;
+    if (snoozed) {
+      const wake = Date.parse(thread.snoozedUntil!);
+      nextSettlementEvaluationAtMs = Math.min(nextSettlementEvaluationAtMs ?? wake, wake);
+    }
     const eligibility = canSettleThread(policyInput);
     const blocker = mutationBlocker(environment, false);
     entries.push({
@@ -366,7 +378,7 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
       worktree,
       environment,
       lifecycle: {
-        classification,
+        classification: snoozed ? "snoozed" : classification,
         eligibility,
         effectiveSettlementTimestamp: getEffectiveSettlementTimestamp(policyInput),
         settlementBlocker: eligibility.blocker,
@@ -376,6 +388,12 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
       pinned: pinnedKeys.has(key),
       current: input.currentThreadKey === key,
       isDraft: false,
+      canSnooze:
+        environment.threadSnoozeSupported === true &&
+        environment.connected &&
+        environment.shellCurrent &&
+        environment.mutationReady &&
+        canSnoozeThread(policyInput).canSnooze,
       focus: null,
     });
   }
@@ -422,6 +440,7 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
       pinned: pinnedKeys.has(key),
       current: input.currentThreadKey === key,
       isDraft: true,
+      canSnooze: false,
       focus: null,
     });
   }
@@ -454,6 +473,11 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
   });
 
   return {
+    snoozed: visibleEntries
+      .filter((entry) => entry.lifecycle.classification === "snoozed")
+      .toSorted((left, right) =>
+        (left.thread?.snoozedUntil ?? "").localeCompare(right.thread?.snoozedUntil ?? ""),
+      ),
     focus: priorityPartition.focus.map(({ value, focus }) => ({ ...value, focus })),
     active: [...priorityPartition.active],
     settled: visibleEntries

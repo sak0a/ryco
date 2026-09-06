@@ -77,7 +77,9 @@ it("routes each event only to its explicit projection owners", () => {
   assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["thread.turn-steer-rejected"], []);
   assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["thread.settled"], ["projection.threads"]);
   assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["thread.unsettled"], ["projection.threads"]);
-  assert.equal(Object.keys(ORCHESTRATION_EVENT_PROJECTORS).length, 42);
+  assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["thread.snoozed"], ["projection.threads"]);
+  assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["thread.unsnoozed"], ["projection.threads"]);
+  assert.equal(Object.keys(ORCHESTRATION_EVENT_PROJECTORS).length, 44);
 });
 
 it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
@@ -229,6 +231,49 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       for (const row of stateRows) {
         assert.equal(row.lastAppliedSequence, 4);
       }
+
+      const snoozedUntil = new Date(Date.parse(now) + 3_600_000).toISOString();
+      const snoozedEvent = yield* eventStore.append({
+        type: "thread.snoozed",
+        eventId: EventId.make("evt-snooze"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        occurredAt: settledAt,
+        commandId: CommandId.make("cmd-snooze"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          snoozedAt: settledAt,
+          snoozedUntil,
+          updatedAt: settledAt,
+        },
+      });
+      yield* projectionPipeline.projectEvent(snoozedEvent);
+      yield* projectionPipeline.bootstrap;
+      const snoozeRows =
+        yield* sql`SELECT snoozed_until, snoozed_at, settled_override FROM projection_threads WHERE thread_id = 'thread-1'`;
+      assert.deepEqual(snoozeRows, [
+        { snoozed_until: snoozedUntil, snoozed_at: settledAt, settled_override: "active" },
+      ]);
+      const wakeEvent = yield* eventStore.append({
+        type: "thread.unsnoozed",
+        eventId: EventId.make("evt-wake"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        occurredAt: settledAt,
+        commandId: CommandId.make("cmd-wake"),
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        payload: { threadId: ThreadId.make("thread-1"), updatedAt: settledAt },
+      });
+      yield* projectionPipeline.projectEvent(wakeEvent);
+      assert.deepEqual(
+        yield* sql`SELECT snoozed_until, snoozed_at FROM projection_threads WHERE thread_id = 'thread-1'`,
+        [{ snoozed_until: null, snoozed_at: null }],
+      );
     }),
   );
 

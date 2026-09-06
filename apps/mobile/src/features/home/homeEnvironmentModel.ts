@@ -9,6 +9,7 @@ export interface DirectHomeEnvironmentInput {
   readonly connectionState: "connecting" | "connected" | "disconnected" | "error";
   readonly role: "client" | "owner" | null;
   readonly threadSettlementSupported?: boolean;
+  readonly threadSnoozeSupported?: boolean;
   readonly shellCurrent?: boolean;
   readonly apiAvailable?: boolean;
 }
@@ -35,6 +36,7 @@ export interface HostedHomeEnvironmentInput {
     | "closed";
   readonly role: "viewer" | "operator" | "owner" | null;
   readonly threadSettlementSupported?: boolean;
+  readonly threadSnoozeSupported?: boolean;
   readonly shellCurrent?: boolean;
   readonly apiAvailable?: boolean;
 }
@@ -157,6 +159,7 @@ export function buildHomeEnvironments(input: {
       label: direct.label,
       connectionState: directState(direct),
       threadSettlementSupported: direct.threadSettlementSupported ?? false,
+      threadSnoozeSupported: direct.threadSnoozeSupported ?? false,
       mutationReady: direct.connectionState === "connected" && (direct.apiAvailable ?? false),
       shellCurrent: direct.shellCurrent ?? false,
       ...roleFields(direct.role),
@@ -190,6 +193,7 @@ export function buildHomeEnvironments(input: {
       label: hosted.label,
       connectionState: hostedState(hosted),
       threadSettlementSupported: hosted.threadSettlementSupported ?? false,
+      threadSnoozeSupported: hosted.threadSnoozeSupported ?? false,
       mutationReady:
         hostedState(hosted) === "connected" &&
         hosted.role !== "viewer" &&

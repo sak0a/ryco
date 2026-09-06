@@ -1668,6 +1668,44 @@ describe("thread settlement state", () => {
     expect(threadsOf(state)[0]).toMatchObject({ settledOverride: "settled", settledAt });
   });
 
+  it("keeps snooze events in shell and sidebar state and clears them on unsnooze", () => {
+    const threadId = ThreadId.make("thread-settlement");
+    const initial = syncServerShellSnapshot(
+      makeEmptyState(),
+      makeShellSnapshot(null, null),
+      localEnvironmentId,
+    );
+    const snoozedAt = "2026-07-31T03:00:00.000Z";
+    const snoozedUntil = "2026-07-31T04:00:00.000Z";
+    const snoozed = applyOrchestrationEvent(
+      initial,
+      makeEvent("thread.snoozed", { threadId, snoozedAt, snoozedUntil, updatedAt: snoozedAt }),
+      localEnvironmentId,
+    );
+    expect(localEnvironmentStateOf(snoozed).threadShellById[threadId]).toMatchObject({
+      snoozedAt,
+      snoozedUntil,
+      settledOverride: "active",
+    });
+    expect(localEnvironmentStateOf(snoozed).sidebarThreadSummaryById[threadId]).toMatchObject({
+      snoozedAt,
+      snoozedUntil,
+    });
+    const awake = applyOrchestrationEvent(
+      snoozed,
+      makeEvent("thread.unsnoozed", { threadId, updatedAt: snoozedUntil }),
+      localEnvironmentId,
+    );
+    expect(localEnvironmentStateOf(awake).threadShellById[threadId]).toMatchObject({
+      snoozedAt: null,
+      snoozedUntil: null,
+    });
+    expect(localEnvironmentStateOf(awake).sidebarThreadSummaryById[threadId]).toMatchObject({
+      snoozedAt: null,
+      snoozedUntil: null,
+    });
+  });
+
   it("applies raw settle and activity-unsettle events to shell and sidebar state", () => {
     const threadId = ThreadId.make("thread-settlement");
     const initial = syncServerShellSnapshot(

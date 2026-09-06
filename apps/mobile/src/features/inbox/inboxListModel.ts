@@ -17,10 +17,14 @@ export const MOBILE_SETTLED_PAGE_SIZE = 20;
 export function flattenInboxSections(input: {
   readonly sections: ReadonlyArray<InboxSection>;
   readonly settledOpen: boolean;
+  readonly snoozedOpen?: boolean;
   readonly settledVisibleCount: number;
 }): ReadonlyArray<InboxListItem> {
   return input.sections.flatMap((section): ReadonlyArray<InboxListItem> => {
-    const expanded = section.key !== "settled" || input.settledOpen;
+    const expanded =
+      section.key === "snoozed"
+        ? input.snoozedOpen === true
+        : section.key !== "settled" || input.settledOpen;
     const visibleRows =
       section.key === "settled" ? section.rows.slice(0, input.settledVisibleCount) : section.rows;
     return [

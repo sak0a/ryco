@@ -34,7 +34,13 @@ export type InboxSidebarThreadState =
   | "offline"
   | "idle";
 
-export type InboxSidebarSectionKey = "focus" | "active" | "needs-input" | "recent" | "settled";
+export type InboxSidebarSectionKey =
+  | "focus"
+  | "active"
+  | "needs-input"
+  | "recent"
+  | "settled"
+  | "snoozed";
 export type InboxSidebarStatusFilter = "all" | InboxSidebarSectionKey;
 
 export interface InboxSidebarEnvironment {
@@ -54,6 +60,7 @@ export interface InboxSidebarEnvironment {
     | "identity-conflict";
   readonly deliveryUnknown: boolean;
   readonly threadSettlementSupported: boolean;
+  readonly threadSnoozeSupported?: boolean | undefined;
   readonly mutationReady: boolean;
   readonly shellCurrent: boolean;
 }
@@ -63,6 +70,13 @@ export interface InboxSidebarRow {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly title: string;
+  readonly pinned: boolean;
+  readonly mutationEnabled: boolean;
+  readonly pullRequest: {
+    readonly number: number;
+    readonly state: "open" | "closed" | "merged" | null;
+    readonly isDraft: boolean;
+  } | null;
   readonly machineLabel: string;
   readonly projectLabel: string;
   readonly project: Project | null;
@@ -83,6 +97,9 @@ export interface InboxSidebarRow {
   readonly trustLabel: "Not verified" | "Encrypted · Account trusted" | "Identity conflict" | null;
   readonly roleLabel: "Viewer" | null;
   readonly settled: boolean;
+  readonly snoozedUntil: string | null;
+  readonly canSnooze: boolean;
+  readonly canUnsnooze: boolean;
   readonly settlementActionEnabled: boolean;
   readonly settlementDisabledReason: string | null;
   readonly effectiveSettlementTimestamp: string | null;
@@ -91,7 +108,7 @@ export interface InboxSidebarRow {
 
 export interface InboxSidebarSection {
   readonly key: InboxSidebarSectionKey;
-  readonly title: "Focus" | "Active now" | "Needs input" | "Recent" | "Settled";
+  readonly title: "Focus" | "Active now" | "Needs input" | "Recent" | "Settled" | "Snoozed";
   readonly rows: ReadonlyArray<InboxSidebarRow>;
 }
 
@@ -136,6 +153,7 @@ export function buildPrimaryInboxSidebarEnvironment(input: {
   readonly connectionState: WsConnectionUiState;
   readonly hydratedFromCache: boolean;
   readonly threadSettlementSupported: boolean;
+  readonly threadSnoozeSupported?: boolean | undefined;
 }): InboxSidebarEnvironment {
   const connectionState =
     input.connectionState === "error" ? "reconnecting" : input.connectionState;
@@ -150,6 +168,7 @@ export function buildPrimaryInboxSidebarEnvironment(input: {
     trust: "not-required",
     deliveryUnknown: false,
     threadSettlementSupported: input.threadSettlementSupported,
+    threadSnoozeSupported: input.threadSnoozeSupported,
     mutationReady: connectionState === "connected" && !stale,
     shellCurrent: !stale,
   };
@@ -237,12 +256,14 @@ function timestamp(thread: SidebarThreadSummary): string {
 }
 
 function compareRecent(left: InboxSidebarRow, right: InboxSidebarRow): number {
+  if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
   const delta = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
   if (Number.isFinite(delta) && delta !== 0) return delta;
   return left.key.localeCompare(right.key);
 }
 
 function compareActive(left: InboxSidebarRow, right: InboxSidebarRow): number {
+  if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
   const leftPriority = ACTIVE_PRIORITY[left.state as keyof typeof ACTIVE_PRIORITY] ?? 0;
   const rightPriority = ACTIVE_PRIORITY[right.state as keyof typeof ACTIVE_PRIORITY] ?? 0;
   return leftPriority - rightPriority || compareRecent(left, right);
@@ -317,6 +338,7 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
       environmentId: environment.environmentId,
       label: environment.label,
       threadSettlementSupported: environment.threadSettlementSupported,
+      threadSnoozeSupported: environment.threadSnoozeSupported,
       connected: environment.connectionState === "connected",
       mutationReady: environment.mutationReady,
       shellCurrent: environment.shellCurrent,
@@ -335,7 +357,7 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
   });
 
   const rows: InboxSidebarRow[] = [];
-  for (const entry of [...inbox.focus, ...inbox.active, ...inbox.settled]) {
+  for (const entry of [...inbox.focus, ...inbox.active, ...inbox.settled, ...inbox.snoozed]) {
     const thread = entry.thread;
     if (!thread) continue;
     const environment = environmentById.get(thread.environmentId);
@@ -348,7 +370,14 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
     const contextLabel = `${machineLabel} · ${projectLabel} · ${workspaceLabel}`;
     const state = resolveThreadState(thread, environment, deliveryUnknownThreadKeys);
     const settled = entry.lifecycle.classification === "settled";
-    const rowSection = settled ? "settled" : entry.focus ? "focus" : sectionKey(state);
+    const snoozed = entry.lifecycle.classification === "snoozed";
+    const rowSection = snoozed
+      ? "snoozed"
+      : settled
+        ? "settled"
+        : entry.focus
+          ? "focus"
+          : sectionKey(state);
     if (input.filters.status !== "all" && input.filters.status !== rowSection) continue;
     const providerDriver = resolveProviderDriver(thread);
     rows.push({
@@ -356,6 +385,20 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
       environmentId: thread.environmentId,
       threadId: thread.id,
       title: thread.title || "Untitled task",
+      pinned: entry.pinned,
+      mutationEnabled: Boolean(
+        environment?.mutationReady &&
+        environment.shellCurrent &&
+        environment.connectionState === "connected",
+      ),
+      pullRequest:
+        worktree?.prNumber != null
+          ? {
+              number: worktree.prNumber,
+              state: worktree.prState,
+              isDraft: worktree.prIsDraft === true,
+            }
+          : null,
       machineLabel,
       projectLabel,
       project: project ?? null,
@@ -396,6 +439,13 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
               : null,
       roleLabel: environment?.role === "viewer" ? "Viewer" : null,
       settled,
+      snoozedUntil: snoozed ? (thread.snoozedUntil ?? null) : null,
+      canSnooze: entry.canSnooze,
+      canUnsnooze:
+        environment?.threadSnoozeSupported === true &&
+        environment.mutationReady &&
+        environment.shellCurrent &&
+        environment.connectionState === "connected",
       settlementActionEnabled:
         entry.mutationEnabled && (settled || entry.lifecycle.eligibility.canSettle),
       settlementDisabledReason: settlementDisabledReason(entry),
@@ -404,12 +454,12 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
     });
   }
 
-  const unsettledRows = rows.filter((row) => !row.settled);
+  const unsettledRows = rows.filter((row) => !row.settled && !row.snoozedUntil);
   const focus = unsettledRows.filter((row) => row.focus !== null);
   const active = unsettledRows
     .filter((row) => row.focus === null && sectionKey(row.state) === "active")
     .toSorted(compareActive);
-  const needsInput = rows
+  const needsInput = unsettledRows
     .filter((row) => row.focus === null && !row.settled && sectionKey(row.state) === "needs-input")
     .toSorted(compareRecent);
   const recent = unsettledRows
@@ -431,6 +481,15 @@ export function buildInboxSidebarModel(input: BuildInboxSidebarInput): InboxSide
         ? [{ key: "needs-input", title: "Needs input", rows: needsInput } as const]
         : []),
       ...(recent.length > 0 ? [{ key: "recent", title: "Recent", rows: recent } as const] : []),
+      ...(inbox.snoozed.length > 0 && rows.some((row) => row.snoozedUntil)
+        ? [
+            {
+              key: "snoozed",
+              title: "Snoozed",
+              rows: rows.filter((row) => row.snoozedUntil),
+            } as const,
+          ]
+        : []),
       ...(settled.length > 0 ? [{ key: "settled", title: "Settled", rows: settled } as const] : []),
     ],
     nextSettlementEvaluationAtMs: inbox.nextSettlementEvaluationAtMs,
