@@ -57,6 +57,49 @@ const makeThreadDeletedEvent = (sequence: number): OrchestrationEvent => ({
 });
 
 describe("orchestrationEventCoalescing", () => {
+  it.effect("keeps matching activity ids from different threads independent", () =>
+    Effect.gen(function* () {
+      const offered: OrchestrationEvent[] = [];
+      const coalescer = yield* makeOrchestrationEventCoalescer({
+        offer: (event) =>
+          Effect.sync(() => {
+            offered.push(event);
+          }),
+        windowMs: Number.MAX_SAFE_INTEGER,
+      });
+      const first = makeTaskProgressEvent(1, "same", "a");
+      const second = {
+        ...makeTaskProgressEvent(2, "same", "b"),
+        aggregateId: ThreadId.make("another-thread"),
+      };
+      yield* coalescer.push(first);
+      yield* coalescer.push(second);
+      yield* coalescer.flush;
+      assert.deepEqual(
+        offered.map((event) => event.sequence),
+        [1, 2],
+      );
+    }),
+  );
+
+  it("keeps distinct context-window activity ids independent", () => {
+    const first = makeTaskProgressEvent(1, "one", "a");
+    const second = makeTaskProgressEvent(2, "two", "b");
+    if (first.type !== "thread.activity-appended" || second.type !== "thread.activity-appended")
+      throw new Error("expected activities");
+    const gauge = (event: typeof first): OrchestrationEvent => ({
+      ...event,
+      payload: {
+        ...event.payload,
+        activity: { ...event.payload.activity, kind: "context-window.updated" },
+      },
+    });
+    assert.notEqual(
+      orchestrationProgressFrameKey(gauge(first)),
+      orchestrationProgressFrameKey(gauge(second)),
+    );
+  });
+
   it.effect("collapses progress bursts to the latest frame per key", () =>
     Effect.gen(function* () {
       const offered = yield* Ref.make<ReadonlyArray<OrchestrationEvent>>([]);
@@ -142,7 +185,8 @@ describe("orchestrationEventCoalescing", () => {
 
       const coalescedRef = yield* Ref.make<ReadonlyArray<OrchestrationEvent>>([]);
       const coalescer = yield* makeOrchestrationEventCoalescer({
-        offer: (event) => Ref.update(coalescedRef, (events) => [...events, event]).pipe(Effect.asVoid),
+        offer: (event) =>
+          Ref.update(coalescedRef, (events) => [...events, event]).pipe(Effect.asVoid),
         windowMs: Number.MAX_SAFE_INTEGER,
       });
       for (const event of uncoalesced) {

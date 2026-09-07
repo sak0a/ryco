@@ -1,8 +1,5 @@
 import { Effect, Semaphore } from "effect";
-import {
-  type OrchestrationEvent,
-  OrchestrationGetSnapshotError,
-} from "@ryco/contracts";
+import { type OrchestrationEvent, OrchestrationGetSnapshotError } from "@ryco/contracts";
 
 import { approximateJsonBytes } from "../../observability/PerfInstrumentation.ts";
 
@@ -16,9 +13,8 @@ import { approximateJsonBytes } from "../../observability/PerfInstrumentation.ts
  * - `thread.activity-appended` for replaceable progress activities (task and
  *   tool progress heartbeats, streaming subagent messages): the client stores
  *   activities by id, latest wins, and these ids are stable per task/item.
- * - `thread.activity-appended` for `context-window.updated` gauges: the
- *   projection itself retains only the newest value (see
- *   `pruneStaleContextWindowActivities`), so only the latest tick matters.
+ * - `thread.activity-appended` for `context-window.updated` gauges: only updates sharing an activity id can replace each other; the client
+ *   retains distinct activity ids even when the projection prunes old gauges.
  * - `thread.proposed-plan-upserted`: plans are upserts keyed by plan id.
  *
  * Everything else — turn lifecycle, session state, diffs, reverts, user
@@ -32,24 +28,24 @@ export const orchestrationProgressFrameKey = (event: OrchestrationEvent): string
   if (event.type === "thread.activity-appended") {
     const activity = event.payload.activity;
     if (activity.kind === "task.progress" || activity.kind === "tool.progress") {
-      return `activity:${activity.id}`;
+      return JSON.stringify(["activity", event.aggregateId, activity.id]);
     }
     if (activity.kind === "agent.message") {
       const streaming = (activity.payload as { streaming?: unknown } | null)?.streaming;
       // Streaming agent-message upserts carry the full text so far; the final
       // (non-streaming) frame shares the id and replaces the pending state.
       if (streaming === true) {
-        return `activity:${activity.id}`;
+        return JSON.stringify(["activity", event.aggregateId, activity.id]);
       }
       return null;
     }
     if (activity.kind === "context-window.updated") {
-      return `context-window:${event.aggregateId}`;
+      return JSON.stringify(["activity", event.aggregateId, activity.id]);
     }
     return null;
   }
   if (event.type === "thread.proposed-plan-upserted") {
-    return `plan:${event.payload.proposedPlan.id}`;
+    return JSON.stringify(["plan", event.aggregateId, event.payload.proposedPlan.id]);
   }
   return null;
 };
@@ -95,7 +91,9 @@ export const makeOrchestrationEventCoalescer = (input: {
       if (pending.size === 0) {
         return;
       }
-      const ordered = [...pending.values()].toSorted((left, right) => left.sequence - right.sequence);
+      const ordered = [...pending.values()].toSorted(
+        (left, right) => left.sequence - right.sequence,
+      );
       pending.clear();
       pendingBytes = 0;
       oldestPushedAtMs = 0;

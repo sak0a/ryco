@@ -772,7 +772,9 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
 
   it.effect("bounds retained history by bytes, trimming from the head", () =>
     Effect.gen(function* () {
-      const { manager, ptyAdapter, logsDir } = yield* createManager(5_000, { maxHistoryBytes: 200 });
+      const { manager, ptyAdapter, logsDir } = yield* createManager(5_000, {
+        maxHistoryBytes: 200,
+      });
       yield* manager.open(openInput());
       const process = ptyAdapter.processes[0];
       expect(process).toBeDefined();

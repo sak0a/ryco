@@ -11,7 +11,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationProjectShell,
   ProviderDriverKind,
-  type OrchestrationThread,
+  type OrchestrationThreadShell,
   type ProjectId,
   type OrchestrationSession,
   ThreadId,
@@ -324,15 +324,9 @@ const make = Effect.gen(function* () {
   });
 
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
-    return yield* projectionSnapshotQuery.getThreadShellById(threadId).pipe(
-      Effect.map(
-        Option.map((shell): ThreadCoreFields => ({
-          ...shell,
-          deletedAt: null,
-        })),
-      ),
-      Effect.map(Option.getOrUndefined),
-    );
+    return yield* projectionSnapshotQuery
+      .getThreadShellById(threadId)
+      .pipe(Effect.map(Option.getOrUndefined));
   });
 
   /**
@@ -371,11 +365,7 @@ const make = Effect.gen(function* () {
   };
 
   const ensureRecordedWorktreeAvailable = Effect.fn("ensureRecordedWorktreeAvailable")(function* (
-    thread: {
-      readonly id: ThreadId;
-      readonly worktreePath: string | null;
-      readonly modelSelection: ModelSelection;
-    },
+    thread: OrchestrationThreadShell,
     project: OrchestrationProjectShell | undefined,
   ) {
     if (thread.worktreePath === null) {

@@ -2,12 +2,9 @@ import { assert, describe, it } from "@effect/vitest";
 import { Cause, Effect, Exit, Queue } from "effect";
 import { type TerminalEvent, TerminalSubscriptionResyncError } from "@ryco/contracts";
 
-import {
-  makeTerminalSubscriberOffer,
-  releaseTerminalSubscriberEvent,
-} from "./terminalRpc.ts";
+import { makeTerminalSubscriberOffer, releaseTerminalSubscriberEvent } from "./terminalRpc.ts";
 
-const event = (data: string): TerminalEvent => ({
+const event = (data: string): Extract<TerminalEvent, { type: "output" }> => ({
   type: "output",
   threadId: "thread-1",
   terminalId: "default",

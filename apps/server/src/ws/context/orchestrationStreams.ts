@@ -56,7 +56,9 @@ export const offerOrchestrationLiveEventOrFail = (input: {
   Effect.gen(function* () {
     const capacity = input.capacity ?? ORCHESTRATION_LIVE_QUEUE_MAX_EVENTS;
     const byteBudget = input.byteBudget ?? ORCHESTRATION_LIVE_QUEUE_MAX_BYTES;
-    const eventBytes = input.eventBytes ?? (input.queuedBytesRef === undefined ? 0 : approximateJsonBytes(input.event));
+    const eventBytes =
+      input.eventBytes ??
+      (input.queuedBytesRef === undefined ? 0 : approximateJsonBytes(input.event));
 
     if (input.queuedBytesRef !== undefined) {
       const queuedBytes = yield* Ref.get(input.queuedBytesRef);
@@ -113,8 +115,10 @@ const failLiveQueueWithOverflow = (
   });
 
 /** Releases one drained event's bytes from the live queue ledger. */
-export const releaseQueuedEventBytes = (queuedBytesRef: Ref.Ref<number>, event: OrchestrationEvent) =>
-  Ref.update(queuedBytesRef, (bytes) => Math.max(0, bytes - approximateJsonBytes(event)));
+export const releaseQueuedEventBytes = (
+  queuedBytesRef: Ref.Ref<number>,
+  event: OrchestrationEvent,
+) => Ref.update(queuedBytesRef, (bytes) => Math.max(0, bytes - approximateJsonBytes(event)));
 
 /**
  * Raw, uncoalesced offer primitive for one thread-subscription live event:
@@ -435,19 +439,18 @@ export const makeOrchestrationStreamHelpers = (deps: {
           ),
         ).pipe(Effect.ignoreCause({ log: true })),
       );
-      yield* Stream.fromSubscription(input.liveSubscription)
-        .pipe(
-          Stream.runForEach((event) => input.onEvent(event, coalescer.push)),
-          Effect.ensuring(
-            Effect.gen(function* () {
-              yield* Fiber.interrupt(flushTickFiber).pipe(Effect.ignore);
-              yield* coalescer.flush.pipe(Effect.ignoreCause({ log: true }));
-              yield* Queue.shutdown(input.liveQueue);
-            }),
-          ),
-          Effect.ignoreCause({ log: true }),
-          Effect.forkScoped,
-        );
+      yield* Stream.fromSubscription(input.liveSubscription).pipe(
+        Stream.runForEach((event) => input.onEvent(event, coalescer.push)),
+        Effect.ensuring(
+          Effect.gen(function* () {
+            yield* Fiber.interrupt(flushTickFiber).pipe(Effect.ignore);
+            yield* coalescer.flush.pipe(Effect.ignoreCause({ log: true }));
+            yield* Queue.shutdown(input.liveQueue);
+          }),
+        ),
+        Effect.ignoreCause({ log: true }),
+        Effect.forkScoped,
+      );
       return queuedBytesRef;
     });
 
@@ -576,6 +579,7 @@ export const makeOrchestrationStreamHelpers = (deps: {
           errorMessage: "Failed to replay orchestration thread events",
         }).pipe(Stream.tap((event) => replayMetrics.recordReplayEvent(event.sequence)));
         const liveStream = Stream.fromQueue(liveQueue).pipe(
+          Stream.tap((event) => releaseQueuedEventBytes(queuedBytesRef, event)),
           Stream.tap((event) => replayMetrics.recordLiveDequeued(event.sequence)),
         );
 

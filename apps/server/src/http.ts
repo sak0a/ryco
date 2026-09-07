@@ -119,7 +119,7 @@ export function staticFileEtag(fileInfo: {
 }): string | null {
   const mtimeMs = Option.match(fileInfo.mtime, {
     onNone: () => null,
-    onSome: (date) => Number.isFinite(date.getTime()) ? date.getTime() : null,
+    onSome: (date) => (Number.isFinite(date.getTime()) ? date.getTime() : null),
   });
   if (mtimeMs === null) {
     return null;
@@ -227,7 +227,10 @@ const staticFileResponse = (input: {
       status: 200,
       contentType: resolveStaticContentType(input.filePath, path),
       headers,
-    });
+    }).pipe(
+      // The platform generates its own ETag; restore the validator used above.
+      Effect.map(HttpServerResponse.setHeaders(headers)),
+    );
   }).pipe(
     Effect.catch(() =>
       Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),

@@ -38,7 +38,7 @@ export function makeTerminalSubscriberOffer(
   byteBudget = TERMINAL_SUBSCRIBER_MAX_BYTES,
 ) {
   let overflowed = false;
-  const failWithResync = (event: TerminalEvent) =>
+  const failWithResync = () =>
     Effect.gen(function* () {
       if (overflowed) return;
       overflowed = true;
@@ -56,14 +56,14 @@ export function makeTerminalSubscriberOffer(
       recordServerPerfPayload("server.ws.terminal.events", event);
       const eventBytes = approximateJsonBytes(event);
       if (ledger.bytes + eventBytes > byteBudget) {
-        yield* failWithResync(event);
+        yield* failWithResync();
         return;
       }
       if (Queue.offerUnsafe(queue, event)) {
         ledger.bytes += eventBytes;
         return;
       }
-      yield* failWithResync(event);
+      yield* failWithResync();
     });
 }
 

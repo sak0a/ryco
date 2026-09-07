@@ -86,7 +86,19 @@ const dropHeadToByteBudget = (
   // Extend the cut to the next line boundary so the retained tail starts on
   // a fresh line, keeping the byte ledger exact for the bytes actually
   // removed.
-  const nextNewline = state.history.indexOf("\n", index);
+  // A cut already at a line boundary must not discard another line.
+  // Never retain the low half of a surrogate pair.
+  if (
+    index > 0 &&
+    state.history.charCodeAt(index - 1) >= 0xd800 &&
+    state.history.charCodeAt(index - 1) <= 0xdbff &&
+    state.history.charCodeAt(index) >= 0xdc00 &&
+    state.history.charCodeAt(index) <= 0xdfff
+  ) {
+    dropped += 3;
+    index += 1;
+  }
+  const nextNewline = state.history[index - 1] === "\n" ? -1 : state.history.indexOf("\n", index);
   if (nextNewline !== -1) {
     while (index <= nextNewline) {
       dropped += utf8ByteLength(state.history[index] ?? "");
@@ -104,7 +116,10 @@ const dropHeadToByteBudget = (
 };
 
 /** Drop `linesToDrop` whole head lines in a single pass. */
-const dropHeadLines = (state: HistoryBufferState, linesToDrop: number): HistoryBufferState | null => {
+const dropHeadLines = (
+  state: HistoryBufferState,
+  linesToDrop: number,
+): HistoryBufferState | null => {
   if (linesToDrop <= 0) {
     return null;
   }
@@ -123,10 +138,7 @@ const dropHeadLines = (state: HistoryBufferState, linesToDrop: number): HistoryB
   }
   return {
     history: state.history.slice(index),
-    approxBytes: Math.max(
-      0,
-      state.approxBytes - utf8ByteLength(state.history.slice(0, index)),
-    ),
+    approxBytes: Math.max(0, state.approxBytes - utf8ByteLength(state.history.slice(0, index))),
     newlineCount: Math.max(0, state.newlineCount - droppedLines),
   };
 };

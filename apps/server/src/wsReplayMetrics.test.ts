@@ -98,9 +98,8 @@ describe("wsReplayMetrics", () => {
         findGaugeValue(snapshots, "t3_ws_orchestration_coalesced_frames_total", attributes),
         2,
       );
-      // 16 is genuinely undrained, so lag is exactly 1 even though 14 and 15
-      // never drain — a superseded frame is fully accounted for.
-      assert.equal(findGaugeValue(snapshots, "t3_ws_orchestration_replay_lag", attributes), 1);
+      // Coalescing must not advance the consumer watermark past undrained events.
+      assert.equal(findGaugeValue(snapshots, "t3_ws_orchestration_replay_lag", attributes), 3);
 
       yield* metrics.reset;
     }),

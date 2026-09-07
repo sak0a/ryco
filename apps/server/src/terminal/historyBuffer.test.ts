@@ -67,6 +67,16 @@ describe("appendTerminalHistoryChunk", () => {
     expect(state.history).toBe("ééé\n".repeat(4));
   });
 
+  it("retains the next line when the byte cut already ends at a newline", () => {
+    expect(historyBufferStateFrom("old\nnew\n", limits(4)).history).toBe("new\n");
+  });
+
+  it("does not split a surrogate pair when trimming a partial line", () => {
+    const state = historyBufferStateFrom("😀ab", limits(5));
+    expect(state.history).toBe("ab");
+    expect(state.approxBytes).toBe(2);
+  });
+
   it("ignores empty chunks", () => {
     const state = appendTerminalHistoryChunk(
       appendTerminalHistoryChunk(emptyHistoryBufferState(), "kept\n", limits(100)),
