@@ -29,3 +29,5 @@ squashfs-root/
 .superpowers/
 .gradle/
 scripts/**/*.d.ts
+
+/native/resource-monitor/target/

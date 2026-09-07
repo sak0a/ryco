@@ -1,0 +1,60 @@
+# Diagnostics parity reference
+
+Compared against [`pingdotgg/t3code` at `de28fa1ff3ac3c3a96bebd9ec5ce23dd09f61af0`](https://github.com/pingdotgg/t3code/tree/de28fa1ff3ac3c3a96bebd9ec5ce23dd09f61af0). The reference checkout was isolated from this worktree; its application, dependency installation and lifecycle scripts were not run. Native monitor source provenance is recorded with the monitor sources.
+
+This is feature correspondence, not an assertion that every operating system exposes the same counters. Ryco opens with the resource monitor, host and collection state, resource timeline, live process tree, instrumented I/O and trace diagnostics. Its existing performance overview and support evidence remain below these primary sections. The frozen web phone presentation is unchanged.
+
+| Upstream feature                                                                                                                 | Ryco implementation                                                                                                                      |
+| -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Current CPU, resident memory, process count, read/write throughput                                                               | Resource monitor group table: all Ryco, backend, Electron and monitor overhead; CPU is not capped at 100%                                |
+| CPU time, peak memory, cumulative I/O, process starts/exits                                                                      | Group counters and process details                                                                                                       |
+| Native and desktop source health, last sample/error, version/PID, collection duration, scan/inaccessible counts, restarts, retry | Resource monitor health and Retry monitor                                                                                                |
+| Battery, idle, suspension, thermal state, CPU speed limit                                                                        | Desktop power state received over an inherited private pipe; unsupported values remain unknown                                           |
+| Low-power mode, screen lock, power freshness                                                                                     | Desktop power state fields; unsupported low-power APIs return unknown                                                                    |
+| Live process tree and expandable descendant branches                                                                             | Resource process details, PID/start-time keyed subtree expansion, command details and category                                           |
+| Process CPU/time, memory, I/O rate/total and identity                                                                            | Resource process details; also peak/virtual memory, wakeups, first/last seen and runtime when available                                  |
+| Interrupt and kill descendant process                                                                                            | Live descendant processes; confirmation, owner authorization, PID/start-time validation and current-descendant check                     |
+| Resource timeline with 5/15/30/60-minute windows                                                                                 | Process resource history: average/peak CPU, RSS, I/O read/write charts and selectable windows                                            |
+| Historical process CPU time, peak CPU/RSS, I/O, sample count and PID                                                             | Historical per-process table, with average CPU, last-seen time and total window CPU time across identities before top-process truncation |
+| Instrumented logical application I/O                                                                                             | Logical I/O attribution by bounded component/operation labels, separate from native storage counters                                     |
+| Trace span/failure/slow/parse-error counts                                                                                       | Trace collection, including interruptions, slow threshold and first/last timestamps                                                      |
+| Partial trace file failures                                                                                                      | Trace collection partial-result notice and diagnostics warnings                                                                          |
+| Latest failures and expandable causes                                                                                            | Existing Failures plus detailed recent spans with expandable failure text                                                                |
+| Most common failures, counts and last seen                                                                                       | Most common failures                                                                                                                     |
+| Slowest spans, duration, completion time and trace identity                                                                      | Slowest and recent spans expose trace IDs and copy controls, with raw details retained                                                   |
+| Warning/error span logs                                                                                                          | Span warning and error logs with full messages and copyable trace IDs                                                                    |
+| Top span names, counts, failures, average/max durations                                                                          | Span name statistics, including total duration                                                                                           |
+| Refresh and last checked                                                                                                         | Main snapshot and history refresh controls, sample timestamps, pause/resume and hidden-page polling suppression                          |
+| Open log directory                                                                                                               | Existing support section                                                                                                                 |
+
+Ryco additionally retains its connection/push-gap diagnostics, provider status, queue pressure, trace-sink health, snapshot/checkpoint timings, duration buckets and redacted support bundle.
+
+## Safety and collection behavior
+
+- Diagnostics reads, history, retries and process controls use the selected environment. Hosted controls reuse the shared authorization policy and require the current selected-node shell and session. Server authorization is authoritative.
+- Requests are single-flight within a mounted target/window. Disposal prevents delayed success or failure from an old target/window publishing into the current UI. Changing environments remounts the snapshot state. Hidden pages do not initiate automatic requests.
+- Interrupt/kill requests carry PID and sampled start time. The UI rechecks the selected target and identity after confirmation; the server checks identity and descendant ownership again before signaling. Server, desktop and monitor processes are not offered as signal targets.
+- Native collection uses a bundled executable with bounded protocol responses, timeouts and history retention. It does not execute shell text obtained from diagnostics or download executables on demand.
+- Desktop process/power telemetry uses an inherited backend-generation pipe rather than a renderer-callable telemetry publishing API. Frames and process arrays are bounded and validated.
+- Process command arguments are intentionally omitted at the native protocol boundary. This prevents tokens or other argument secrets from becoming diagnostics content. Displayed command details therefore identify the executable rather than exposing complete argument vectors.
+- Trace records and support exports are sanitized. Logical attribution stores bounded labels and counters, not payloads, paths or credentials.
+
+## Platform and presentation differences
+
+- Native storage counters, process visibility, virtual memory and cumulative CPU availability depend on the operating system and permissions. I/O semantics are displayed; unavailable counters are not claimed to be actual measured storage activity.
+- Electron-only process, wakeup and power fields are unavailable on standalone server/browser connections. Unknown power and speed-limit values remain explicitly unknown. No privileged helper is installed to obtain unavailable fields.
+- Native history and application attribution are bounded and reset on restart. A selected window can therefore contain fewer samples than its duration suggests. Historic exited processes remain visible only while their samples are retained.
+- Ryco uses one resource-history presentation rather than displaying the upstream legacy history and newer telemetry history as two separate sections. It includes the metrics from both. Signal controls are in the descendant-process section rather than duplicated in the telemetry table.
+- Explanatory text, table layout and section grouping follow Ryco's existing settings UI. This is functional correspondence rather than a pixel-identical copy.
+
+## Verification
+
+Focused web checks cover single-flight/disposed requests, multi-core percentages, process subtree/PID reuse, process confirmation identity, target changes during confirmation, stale history-window responses, pause/manual refresh and authorization-denied requests. The browser interaction suite is `apps/web/src/components/settings/DiagnosticsParity.browser.tsx`; pure tests are alongside the diagnostics helpers. Backend/native/desktop checks are separate from this frontend suite.
+
+The full-page `DiagnosticsSettings.browser.tsx` regression suite uses the real capability and runtime stores: a connected primary connection without a saved-node role requests and renders telemetry, while a disconnected primary does not. Primary authentication belongs to the primary connection; saved-node role hydration must not prevent its diagnostics requests. Server owner authorization remains authoritative.
+
+Live verification against an isolated source backend and production web build confirmed changing CPU, RSS and I/O, stable displayed samples while paused, manual refresh while paused, and resumed automatic updates. CPU, memory and throughput are visible at the top of settings without expanding a disclosure. Fresh installations with no log files do not show missing-file warnings.
+
+### Repository backstop baseline
+
+The broader checks are not entirely green. An isolated, unchanged checkout with the pinned Bun version and frozen lockfile reproduced all six browser-suite import failures (`ChatMarkdown`, `DiffPanel`, `NewThreadSourcePicker`, `AgentControlMcpInstallations`, `IntegrationsSettings`, and `IntegrationsSettingsPanel`). It also reproduced the `statusAnimations` reduced-motion assertion and the `ChatView` idle-provider staging assertion (`interactionMode: null` versus expected `default`). The isolated server approval integration test also reproduced its existing timeout waiting for `req-approval-1`. These failures therefore predate the diagnostics changes. The other five failing `ChatView` assertions from the full browser run were not independently baseline-classified. This note does not claim a passing full browser suite; the focused diagnostics tests pass separately.

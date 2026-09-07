@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./diagnosticRedaction": {
+      "types": "./src/diagnosticRedaction.ts",
+      "import": "./src/diagnosticRedaction.ts"
+    },
+    "./desktopResourceTelemetry": {
+      "types": "./src/desktopResourceTelemetry.ts",
+      "import": "./src/desktopResourceTelemetry.ts"
+    },
     "./contextWindow": {
       "types": "./src/contextWindow.ts",
       "import": "./src/contextWindow.ts"

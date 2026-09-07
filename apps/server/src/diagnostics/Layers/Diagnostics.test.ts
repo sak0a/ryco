@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { assert, describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
+import { DiagnosticsSnapshot } from "@ryco/contracts";
 import { vi } from "vite-plus/test";
 
 import type { ServerConfigShape } from "../../config.ts";
@@ -161,6 +162,97 @@ describe("Diagnostics", () => {
       },
     );
   });
+
+  it.effect("summarizes rotated traces and warning logs without exposing credentials", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-diag-"));
+      try {
+        const config = makeDiagnosticsConfig(tempDir);
+        const record = {
+          ...makeTraceRecord(),
+          events: [
+            {
+              name: "authorization=private-value",
+              timeUnixNano: "1700000000500000000",
+              attributes: { "effect.logLevel": "Warning" },
+            },
+          ],
+        };
+        fs.writeFileSync(
+          `${config.serverTracePath}.1`,
+          `${JSON.stringify(record)}\ninvalid-json\n`,
+        );
+        fs.writeFileSync(config.serverLogPath, "error Bearer private-value\n");
+        const diagnostics = yield* makeDiagnosticsService(config);
+        diagnostics.recordTraceRecords([record, makeInterruptedTraceRecord()]);
+        const snapshot = yield* diagnostics.getSnapshot({ providers: [], terminals: [] });
+        assert.equal(snapshot.tracing.retainedSpanCount, 2);
+        Schema.decodeUnknownSync(DiagnosticsSnapshot)(snapshot);
+        assert.equal(snapshot.tracing.summary?.failureCount, 1);
+        assert.equal(snapshot.tracing.summary?.interruptionCount, 1);
+        assert.equal(snapshot.tracing.summary?.slowSpanCount, 2);
+        assert.equal(snapshot.tracing.summary?.parseErrorCount, 1);
+        assert.equal(snapshot.tracing.summary?.logLevelCounts.warning, 1);
+        assert.equal(snapshot.tracing.summary?.latestWarningAndErrorLogs[0]?.message, "[redacted]");
+        assert.equal(JSON.stringify(snapshot).includes("private-value"), false);
+        assert.equal(snapshot.resources.host?.cpuCount, os.cpus().length);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("refuses trace symlinks and tolerates malformed event payloads", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-diag-"));
+      try {
+        const config = makeDiagnosticsConfig(tempDir);
+        fs.unlinkSync(config.serverTracePath);
+        fs.symlinkSync(config.serverLogPath, config.serverTracePath);
+        const diagnostics = yield* makeDiagnosticsService(config);
+        diagnostics.recordTraceRecords([
+          { ...makeTraceRecord(), events: [null, { name: 42 }] } as unknown as TraceRecord,
+        ]);
+        const snapshot = yield* diagnostics.getSnapshot({ providers: [], terminals: [] });
+        assert.equal(snapshot.tracing.retainedSpanCount, 1);
+        assert.equal(snapshot.tracing.summary?.partialFailure, true);
+        assert.equal(
+          snapshot.warnings.some(
+            (warning) => warning.code === "diagnostics.trace-tail-unavailable",
+          ),
+          true,
+        );
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("treats absent fresh-install logs as empty but warns on unreadable log paths", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-diag-"));
+      try {
+        const config = makeDiagnosticsConfig(tempDir);
+        fs.unlinkSync(config.serverLogPath);
+        fs.unlinkSync(config.providerEventLogPath);
+        const diagnostics = yield* makeDiagnosticsService(config);
+        const snapshot = yield* diagnostics.getSnapshot({ providers: [], terminals: [] });
+        assert.equal(
+          snapshot.warnings.some((warning) => warning.code === "diagnostics.log-tail-unavailable"),
+          false,
+        );
+        fs.mkdirSync(config.providerEventLogPath);
+        const unreadable = yield* makeDiagnosticsService(config);
+        const partial = yield* unreadable.getSnapshot({ providers: [], terminals: [] });
+        assert.equal(
+          partial.warnings.some((warning) => warning.code === "diagnostics.log-tail-unavailable"),
+          true,
+        );
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
 
   it.effect("samples resources only while a diagnostics snapshot is requested", () =>
     Effect.scoped(

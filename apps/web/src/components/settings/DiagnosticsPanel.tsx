@@ -15,6 +15,7 @@ import {
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { isElectron } from "../../env";
 import {
+  readEnvironmentConnection,
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
   type SavedEnvironmentRecord,
@@ -22,6 +23,7 @@ import {
 } from "../../environments/runtime";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
+import { useSettingsTarget } from "../../settingsTarget";
 import { ensureLocalApi } from "../../localApi";
 import {
   useServerAvailableEditors,
@@ -116,9 +118,21 @@ export function DiagnosticsSupportSections({
   const registryById = useSavedEnvironmentRegistryStore((state) => state.byId);
   const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
   const pushById = usePushSequenceMonitor((state) => state.byEnvironment);
-  const providers = useServerProviders();
-  const observability = useServerObservability();
-  const availableEditors = useServerAvailableEditors();
+  const target = useSettingsTarget();
+  const primaryProviders = useServerProviders();
+  const primaryObservability = useServerObservability();
+  const primaryAvailableEditors = useServerAvailableEditors();
+  const providers = useMemo(
+    () => (target ? (target.serverConfig?.providers ?? []) : primaryProviders),
+    [target, primaryProviders],
+  );
+  const observability =
+    snapshot?.observability ??
+    (target ? (target.serverConfig?.observability ?? null) : primaryObservability);
+  const availableEditors = useMemo(
+    () => (target ? (target.serverConfig?.availableEditors ?? []) : primaryAvailableEditors),
+    [target, primaryAvailableEditors],
+  );
   const localMetrics = snapshot?.performance?.local ?? null;
 
   const [isOpeningLogs, setIsOpeningLogs] = useState(false);
@@ -210,8 +224,13 @@ export function DiagnosticsSupportSections({
       );
       return;
     }
-    void ensureLocalApi()
-      .shell.openInEditor(logsDirectoryPath, editor)
+    const openLogs = target
+      ? (readEnvironmentConnection(target.environmentId)?.client.shell.openInEditor({
+          cwd: logsDirectoryPath,
+          editor,
+        }) ?? Promise.reject(new Error("Selected environment is disconnected.")))
+      : ensureLocalApi().shell.openInEditor(logsDirectoryPath, editor);
+    void openLogs
       .catch((error: unknown) => {
         toastManager.add(
           stackedThreadToast({
@@ -224,7 +243,7 @@ export function DiagnosticsSupportSections({
       .finally(() => {
         setIsOpeningLogs(false);
       });
-  }, [availableEditors, logsDirectoryPath]);
+  }, [availableEditors, logsDirectoryPath, target]);
 
   return (
     <>

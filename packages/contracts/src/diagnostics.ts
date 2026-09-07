@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ResourceTelemetrySnapshot } from "./resourceTelemetry.ts";
 
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
@@ -51,7 +52,15 @@ export const DiagnosticsResourceSample = Schema.Struct({
 });
 export type DiagnosticsResourceSample = typeof DiagnosticsResourceSample.Type;
 
+export const DiagnosticsHostResources = Schema.Struct({
+  cpuCount: NonNegativeInt,
+  totalMemoryBytes: NonNegativeInt,
+  availableMemoryBytes: NonNegativeInt,
+});
+export type DiagnosticsHostResources = typeof DiagnosticsHostResources.Type;
+
 export const DiagnosticsResources = Schema.Struct({
+  host: Schema.optional(DiagnosticsHostResources),
   current: DiagnosticsResourceSample,
   history: Schema.Array(DiagnosticsResourceSample),
 });
@@ -156,7 +165,32 @@ export const DiagnosticsDurationBucket = Schema.Struct({
 });
 export type DiagnosticsDurationBucket = typeof DiagnosticsDurationBucket.Type;
 
+export const DiagnosticsTraceSummary = Schema.Struct({
+  parseErrorCount: NonNegativeInt,
+  scannedFilePaths: Schema.Array(TrimmedNonEmptyString),
+  firstSpanAt: Schema.NullOr(IsoDateTime),
+  lastSpanAt: Schema.NullOr(IsoDateTime),
+  failureCount: NonNegativeInt,
+  interruptionCount: NonNegativeInt,
+  slowSpanThresholdMs: NonNegativeInt,
+  slowSpanCount: NonNegativeInt,
+  logLevelCounts: Schema.Record(Schema.String, NonNegativeInt),
+  latestWarningAndErrorLogs: Schema.Array(
+    Schema.Struct({
+      traceId: TrimmedNonEmptyString,
+      spanId: TrimmedNonEmptyString,
+      spanName: TrimmedNonEmptyString,
+      level: TrimmedNonEmptyString,
+      message: Schema.String,
+      seenAt: IsoDateTime,
+    }),
+  ),
+  partialFailure: Schema.Boolean,
+});
+export type DiagnosticsTraceSummary = typeof DiagnosticsTraceSummary.Type;
+
 export const DiagnosticsTracing = Schema.Struct({
+  summary: Schema.optional(DiagnosticsTraceSummary),
   retainedSpanCount: NonNegativeInt,
   recentSpans: Schema.Array(DiagnosticsSpan),
   slowestSpans: Schema.Array(DiagnosticsSpan),
@@ -260,6 +294,42 @@ export const DiagnosticsLimits = Schema.Struct({
 });
 export type DiagnosticsLimits = typeof DiagnosticsLimits.Type;
 
+export const DiagnosticsProcessEntry = Schema.Struct({
+  pid: NonNegativeInt,
+  ppid: NonNegativeInt,
+  startTimeMs: NonNegativeInt,
+  command: Schema.String,
+  status: Schema.String,
+  cpuPercent: Schema.Number,
+  rssBytes: NonNegativeInt,
+  elapsed: Schema.String,
+  depth: NonNegativeInt,
+  childPids: Schema.Array(NonNegativeInt),
+});
+export type DiagnosticsProcessEntry = typeof DiagnosticsProcessEntry.Type;
+export const DiagnosticsProcessTree = Schema.Struct({
+  readAt: IsoDateTime,
+  serverPid: NonNegativeInt,
+  processes: Schema.Array(DiagnosticsProcessEntry),
+  totalCpuPercent: Schema.Number,
+  totalRssBytes: NonNegativeInt,
+  error: Schema.optional(Schema.String),
+});
+export type DiagnosticsProcessTree = typeof DiagnosticsProcessTree.Type;
+export const DiagnosticsSignalProcessInput = Schema.Struct({
+  pid: NonNegativeInt,
+  startTimeMs: NonNegativeInt,
+  signal: Schema.Literals(["SIGINT", "SIGKILL"]),
+});
+export type DiagnosticsSignalProcessInput = typeof DiagnosticsSignalProcessInput.Type;
+export const DiagnosticsSignalProcessResult = Schema.Struct({
+  pid: NonNegativeInt,
+  signal: Schema.Literals(["SIGINT", "SIGKILL"]),
+  signaled: Schema.Boolean,
+  message: Schema.optional(Schema.String),
+});
+export type DiagnosticsSignalProcessResult = typeof DiagnosticsSignalProcessResult.Type;
+
 export const DiagnosticsSnapshot = Schema.Struct({
   generatedAt: IsoDateTime,
   serverStartedAt: IsoDateTime,
@@ -268,6 +338,8 @@ export const DiagnosticsSnapshot = Schema.Struct({
   observability: DiagnosticsObservability,
   resources: DiagnosticsResources,
   liveProcesses: DiagnosticsLiveProcesses,
+  processTree: Schema.optional(DiagnosticsProcessTree),
+  telemetry: Schema.optional(ResourceTelemetrySnapshot),
   tracing: DiagnosticsTracing,
   failures: DiagnosticsFailures,
   client: DiagnosticsClient,

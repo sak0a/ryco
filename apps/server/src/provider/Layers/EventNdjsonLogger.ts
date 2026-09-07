@@ -12,6 +12,7 @@ import type { ThreadId } from "@ryco/contracts";
 import { AsyncRotatingFileSink } from "@ryco/shared/logging";
 import { Effect, SynchronizedRef } from "effect";
 
+import { recordResourceAttribution } from "../../diagnostics/ResourceAttribution.ts";
 import { toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
 import { increment, providerEventLogRecordsDroppedTotal } from "../../observability/Metrics.ts";
 
@@ -243,7 +244,15 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
     operation = (async () => {
       try {
         for (const message of messages) {
+          const startedAt = performance.now();
           await sink.write(message);
+          recordResourceAttribution(
+            `provider-${input.stream}`,
+            "append",
+            0,
+            Buffer.byteLength(message),
+            performance.now() - startedAt,
+          );
         }
       } catch (error) {
         runWarning(

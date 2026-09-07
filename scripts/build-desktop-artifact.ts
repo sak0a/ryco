@@ -931,6 +931,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       buildResources: "apps/desktop/resources",
     },
     files: DESKTOP_BUILD_FILES,
+    asarUnpack: ["apps/server/dist/resource-monitor/**"],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
   const publishConfig = resolveGitHubPublishConfig(updateChannel);
@@ -1205,6 +1206,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         shell: process.platform === "win32",
       })`bun run build:desktop`,
       { label: "bun run build:desktop", verbose: options.verbose },
+    );
+  }
+
+  if (!options.skipBuild) {
+    const monitorPlatform =
+      options.platform === "mac" ? "darwin" : options.platform === "win" ? "win32" : "linux";
+    yield* runCommand(
+      ChildProcess.make(
+        process.execPath,
+        [path.join(repoRoot, "scripts/build-resource-monitor.ts"), options.arch, monitorPlatform],
+        { cwd: repoRoot, stdout: "inherit", stderr: "inherit" },
+      ),
+      { label: "Build target resource monitor", verbose: options.verbose },
     );
   }
 

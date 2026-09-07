@@ -165,6 +165,19 @@ const buildCmd = Command.make(
         }),
       );
 
+      yield* Effect.log("[cli] Building native resource monitor...");
+      yield* runCommand(
+        ChildProcess.make(
+          process.execPath,
+          [path.join(repoRoot, "scripts/build-resource-monitor.ts")],
+          {
+            cwd: repoRoot,
+            stdout: config.verbose ? "inherit" : "ignore",
+            stderr: "inherit",
+          },
+        ),
+      );
+
       const deviceHelperSource = path.join(serverDir, "native/device-helper");
       const deviceHelperTarget = path.join(serverDir, "dist/device-helper");
       if (!(yield* fs.exists(path.join(deviceHelperSource, "build.sh")))) {

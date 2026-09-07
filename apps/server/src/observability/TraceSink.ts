@@ -1,6 +1,8 @@
 import { AsyncRotatingFileSink } from "@ryco/shared/logging";
 import { Effect } from "effect";
 
+import { recordResourceAttribution } from "../diagnostics/ResourceAttribution.ts";
+
 import type { TraceRecord } from "./TraceRecord.ts";
 
 const FLUSH_BUFFER_THRESHOLD = 32;
@@ -146,9 +148,18 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
     buffer = [];
     bufferedBytes = 0;
 
+    const flushStartedAt = performance.now();
     const operation = sink
       .write(chunk)
       .then(() => {
+        recordResourceAttribution(
+          "server-trace",
+          "append",
+          0,
+          pendingBytes,
+          performance.now() - flushStartedAt,
+          pendingRecords.length,
+        );
         retryDelayMs = 0;
       })
       .catch(() => {

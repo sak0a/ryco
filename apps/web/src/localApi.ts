@@ -166,6 +166,16 @@ function createBrowserLocalApi(
         withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getSettings()),
       updateSettings: (patch) =>
         withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.updateSettings(patch)),
+      getResourceTelemetryHistory: (input) =>
+        withRpcClient(readRpcClient, (rpcClient) =>
+          rpcClient.server.getResourceTelemetryHistory(input),
+        ),
+      retryResourceTelemetry: () =>
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.retryResourceTelemetry()),
+      signalDiagnosticProcess: (input) =>
+        withRpcClient(readRpcClient, (rpcClient) =>
+          rpcClient.server.signalDiagnosticProcess(input),
+        ),
       getDiagnosticsSnapshot: () =>
         withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getDiagnosticsSnapshot()),
       discoverSourceControl: () =>

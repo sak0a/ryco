@@ -50,6 +50,10 @@ runs:
       with:
         bun-version-file: package.json
 
+    - name: Setup pinned resource monitor toolchain
+      shell: bash
+      run: rustup toolchain install 1.95.0 --profile minimal
+
     - name: Compute Turbo cache key
       id: turbo-cache-key
       shell: bash

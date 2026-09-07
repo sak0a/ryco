@@ -14,7 +14,9 @@ describe("Desktop-main local control credential boundary", () => {
 
     expect(startBackend).toContain('Crypto.randomBytes(32).toString("base64url")');
     expect(startBackend).toContain("desktopControlToken: childControlToken");
-    expect(startBackend).toContain('stdio: ["ignore", "pipe", "pipe", "pipe"]');
+    expect(startBackend).toContain('stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"]');
+    expect(startBackend).toContain("const bootstrapStream = child.stdio[3]");
+    expect(startBackend).toContain("desktopTelemetryFd: 4");
     expect(startBackend).not.toContain("process.env.desktopControlToken");
   });
 

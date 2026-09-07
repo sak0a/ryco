@@ -1,11 +1,5 @@
-import type { DiagnosticsSnapshot, DiagnosticsSpan } from "@ryco/contracts";
-import {
-  ChevronDownIcon,
-  PauseIcon,
-  PlayIcon,
-  RefreshCwIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
+import { WS_METHODS, type DiagnosticsSnapshot, type DiagnosticsSpan } from "@ryco/contracts";
+import { PauseIcon, PlayIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useSavedEnvironmentRuntimeStore } from "../../environments/runtime";
@@ -19,6 +13,11 @@ import { useSettingsTarget } from "../../settingsTarget";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { useDiagnosticsCapability } from "./useDiagnosticsCapability";
+import { createDiagnosticsRefresh } from "./diagnosticsRefresh";
+import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
+import { ProcessDiagnosticsSection } from "./ProcessDiagnosticsSection";
+import { DetailedTraceDiagnostics, DiagnosticsTraceId } from "./DetailedTraceDiagnostics";
 import { DiagnosticsSupportSections } from "./DiagnosticsPanel";
 import { NotificationsTestSection } from "./NotificationsTestSection";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
@@ -183,7 +182,13 @@ function RawDetails({ value }: { value: unknown }) {
   );
 }
 
-function SpanRows({ spans }: { spans: ReadonlyArray<DiagnosticsSpan> }) {
+function SpanRows({
+  spans,
+  showTraceId = false,
+}: {
+  spans: ReadonlyArray<DiagnosticsSpan>;
+  showTraceId?: boolean;
+}) {
   if (spans.length === 0) {
     return <p className="px-4 py-4 text-muted-foreground text-sm">No spans retained yet.</p>;
   }
@@ -207,6 +212,7 @@ function SpanRows({ spans }: { spans: ReadonlyArray<DiagnosticsSpan> }) {
             <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
               {span.source} / {span.kind} / {span.spanId}
             </div>
+            {showTraceId ? <DiagnosticsTraceId value={span.traceId} /> : null}
             {span.failureMessage && isDiagnosticsSpanFailure(span.status) ? (
               <div className="mt-1 line-clamp-2 text-[11px] text-destructive">
                 {span.failureMessage}
@@ -253,8 +259,10 @@ function ResourceHistorySection({
 
 function TracingDiagnosticsSection({
   snapshot,
+  showTraceId = false,
 }: {
   readonly snapshot: DiagnosticsSnapshot | null;
+  readonly showTraceId?: boolean;
 }) {
   return (
     <SettingsSection title="Tracing diagnostics">
@@ -276,7 +284,7 @@ function TracingDiagnosticsSection({
         <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
           Slowest spans
         </div>
-        <SpanRows spans={snapshot?.tracing.slowestSpans ?? []} />
+        <SpanRows spans={snapshot?.tracing.slowestSpans ?? []} showTraceId={showTraceId} />
       </div>
     </SettingsSection>
   );
@@ -560,82 +568,83 @@ export function DiagnosticsSettings({
   readonly presentation?: DiagnosticsPresentation;
 }) {
   const settingsTarget = useSettingsTarget();
+  return (
+    <DiagnosticsSettingsContent
+      key={settingsTarget?.environmentId ?? "local"}
+      presentation={presentation}
+    />
+  );
+}
+
+function DiagnosticsSettingsContent({
+  presentation,
+}: {
+  readonly presentation: DiagnosticsPresentation;
+}) {
+  const settingsTarget = useSettingsTarget();
   const [snapshot, setSnapshot] = useState<DiagnosticsSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
-  const refreshInFlightRef = useRef(false);
-  const hasSnapshotRef = useRef(false);
-  const cancelledRef = useRef(false);
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   const slowRpcAcks = useSlowRpcAckRequests();
   const environmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
   const nowMs = Date.now();
+  const readCapability = useDiagnosticsCapability(WS_METHODS.serverGetDiagnosticsSnapshot);
+  const targetEnvironmentId = settingsTarget?.environmentId;
+  const targetLabel = settingsTarget?.nodeLabel;
 
-  const refresh = useCallback(
-    async (allowHidden = false) => {
-      if (!allowHidden && document.visibilityState !== "visible") return;
-      if (refreshInFlightRef.current) return;
-      refreshInFlightRef.current = true;
-      setLoading((current) => current && !hasSnapshotRef.current);
-      try {
-        const server = settingsTarget
-          ? readEnvironmentApi(settingsTarget.environmentId)?.server
-          : ensureLocalApi().server;
-        if (!server)
-          throw new Error(`Diagnostics are unavailable on ${settingsTarget?.nodeLabel}.`);
-        const next = await server.getDiagnosticsSnapshot();
-        if (cancelledRef.current) return;
-        setSnapshot(next);
-        setError(null);
-        hasSnapshotRef.current = true;
-      } catch (refreshError) {
-        if (cancelledRef.current) return;
-        setError(
-          refreshError instanceof Error ? refreshError.message : "Unable to refresh diagnostics.",
-        );
-      } finally {
-        refreshInFlightRef.current = false;
-        if (!cancelledRef.current) {
-          setLoading(false);
-        }
-      }
-    },
-    [settingsTarget],
-  );
+  const refresh = useCallback(async (_allowHidden = false) => {
+    await refreshRef.current?.();
+  }, []);
 
   useEffect(() => {
-    cancelledRef.current = false;
-    void refresh();
-    if (paused) {
-      return () => {
-        cancelledRef.current = true;
-      };
+    setSnapshot(null);
+    setError(null);
+    setLoading(true);
+    if (!readCapability.allowed) {
+      setError(readCapability.reason);
+      setLoading(false);
+      return;
     }
-    let intervalId: number | null = null;
-    const stopPolling = () => {
-      if (intervalId === null) return;
-      window.clearInterval(intervalId);
-      intervalId = null;
+    const controller = createDiagnosticsRefresh({
+      fetch: async () => {
+        const server = targetEnvironmentId
+          ? readEnvironmentApi(targetEnvironmentId)?.server
+          : ensureLocalApi().server;
+        if (!server)
+          throw new Error(`Diagnostics are unavailable on ${targetLabel ?? "this environment"}.`);
+        return server.getDiagnosticsSnapshot();
+      },
+      onSuccess: (next) => {
+        setSnapshot(next);
+        setError(null);
+      },
+      onError: (refreshError) =>
+        setError(
+          refreshError instanceof Error ? refreshError.message : "Unable to refresh diagnostics.",
+        ),
+      onLoading: setLoading,
+    });
+    refreshRef.current = controller.refresh;
+    const poll = () => {
+      if (!pausedRef.current && document.visibilityState === "visible") void controller.refresh();
     };
-    const startPolling = () => {
-      if (document.visibilityState !== "visible" || intervalId !== null) return;
-      intervalId = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    };
-    startPolling();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void refresh();
-        startPolling();
-        return;
-      }
-      stopPolling();
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    poll();
+    const intervalId = window.setInterval(poll, POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", poll);
     return () => {
-      cancelledRef.current = true;
-      stopPolling();
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      controller.dispose();
+      refreshRef.current = null;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", poll);
     };
+  }, [targetEnvironmentId, targetLabel, readCapability.allowed, readCapability.reason]);
+
+  useEffect(() => {
+    if (!paused && document.visibilityState === "visible") void refresh();
   }, [paused, refresh]);
 
   const memorySeries = useMemo(
@@ -695,11 +704,7 @@ export function DiagnosticsSettings({
 
       <DiagnosticsWarnings snapshot={snapshot} error={error} />
 
-      {import.meta.env.DEV ? <TierPreviewSection /> : null}
-
-      {/* Not on `phone-legacy`: that presentation is the frozen web-phone
-          tier, which must not gain new controls. */}
-      {presentation === "phone-legacy" ? null : <NotificationsTestSection />}
+      {import.meta.env.DEV && presentation === "phone-legacy" ? <TierPreviewSection /> : null}
 
       {presentation === "phone-legacy" ? (
         <LegacyDiagnosticsSections
@@ -712,6 +717,21 @@ export function DiagnosticsSettings({
         />
       ) : (
         <>
+          <ResourceTelemetryDiagnostics
+            key={`telemetry:${targetEnvironmentId ?? "local"}`}
+            telemetry={snapshot?.telemetry}
+            paused={paused}
+            refresh={refresh}
+          />
+          <ProcessDiagnosticsSection
+            key={targetEnvironmentId ?? "local"}
+            snapshot={snapshot}
+            refresh={refresh}
+          />
+          <DetailedTraceDiagnostics snapshot={snapshot} nowMs={nowMs} />
+          <TracingDiagnosticsSection snapshot={snapshot} showTraceId />
+          <FailuresSection snapshot={snapshot} nowMs={nowMs} />
+          <LiveActivitySection snapshot={snapshot} slowRpcAcks={slowRpcAcks} nowMs={nowMs} />
           <SettingsSection title="Performance now">
             <div className="grid sm:grid-cols-2 lg:grid-cols-3">
               <OverviewMetric
@@ -838,7 +858,7 @@ export function DiagnosticsSettings({
             <EvidenceRow
               label="Reconnect / resume"
               value={websocketState}
-              detail={`${performance?.local.wsReconnectCount ?? 0} server-side reconnects. Per-environment push gaps and recovery state are in Advanced diagnostics.`}
+              detail={`${performance?.local.wsReconnectCount ?? 0} server-side reconnects. Per-environment push gaps and recovery state are in the Environments section.`}
             />
             <EvidenceRow
               label="Recent failure"
@@ -864,19 +884,10 @@ export function DiagnosticsSettings({
             />
           </SettingsSection>
 
-          <details className="group/diagnostics">
-            <summary className="flex cursor-pointer list-none items-center justify-between rounded-xl border bg-card px-4 py-3 text-sm font-medium text-foreground shadow-sm/4 marker:hidden hover:bg-accent/30">
-              Advanced diagnostics
-              <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-open/diagnostics:rotate-180 motion-reduce:transition-none" />
-            </summary>
-            <div className="mt-5 space-y-5">
-              <ResourceHistorySection memorySeries={memorySeries} cpuSeries={cpuSeries} />
-              <TracingDiagnosticsSection snapshot={snapshot} />
-              <FailuresSection snapshot={snapshot} nowMs={nowMs} />
-              <LiveActivitySection snapshot={snapshot} slowRpcAcks={slowRpcAcks} nowMs={nowMs} />
-              <DiagnosticsSupportSections snapshot={snapshot} />
-            </div>
-          </details>
+          <ResourceHistorySection memorySeries={memorySeries} cpuSeries={cpuSeries} />
+          <DiagnosticsSupportSections snapshot={snapshot} />
+          <NotificationsTestSection />
+          {import.meta.env.DEV ? <TierPreviewSection /> : null}
         </>
       )}
     </SettingsPageContainer>

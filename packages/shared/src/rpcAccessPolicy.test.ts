@@ -29,6 +29,16 @@ describe("shared RPC access policy", () => {
   });
 
   it("fails closed for missing or stale hosted roles", () => {
+    for (const method of [
+      WS_METHODS.serverSignalDiagnosticProcess,
+      WS_METHODS.serverRetryResourceTelemetry,
+      WS_METHODS.serverGetResourceTelemetryHistory,
+    ]) {
+      expect(hostedRoleAllows("viewer", method)).toBe(false);
+      expect(hostedRoleAllows("operator", method)).toBe(false);
+      expect(hostedRoleAllows("owner", method, false)).toBe(false);
+      expect(hostedRoleAllows("owner", method)).toBe(true);
+    }
     expect(hostedRoleAllows(null, WS_METHODS.projectsList)).toBe(false);
     expect(hostedRoleAllows("owner", WS_METHODS.projectsList, false)).toBe(false);
     expect(hostedRoleAllows("viewer", WS_METHODS.projectsList)).toBe(true);

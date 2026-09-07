@@ -1,4 +1,9 @@
 import type {
+  ResourceTelemetrySnapshot,
+  ResourceTelemetryHistoryInput,
+  ResourceTelemetryHistory,
+} from "./resourceTelemetry.ts";
+import type {
   GitArchiveWorktreeInput,
   GitCreateWorktreeForProjectInput,
   GitCreateWorktreeForProjectOutput,
@@ -146,7 +151,11 @@ import type {
   OrchestrationThreadStreamItem,
 } from "./orchestration.ts";
 import type { EnvironmentId, ThreadId } from "./baseSchemas.ts";
-import type { DiagnosticsSnapshot } from "./diagnostics.ts";
+import type {
+  DiagnosticsSnapshot,
+  DiagnosticsSignalProcessInput,
+  DiagnosticsSignalProcessResult,
+} from "./diagnostics.ts";
 import type { StatisticsSnapshot } from "./statistics.ts";
 import type { UsageSummary, UsageSummaryRequest } from "./usage.ts";
 import type {
@@ -732,6 +741,13 @@ export interface LocalApi {
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     getDiagnosticsSnapshot: () => Promise<DiagnosticsSnapshot>;
+    getResourceTelemetryHistory?: (
+      input: ResourceTelemetryHistoryInput,
+    ) => Promise<ResourceTelemetryHistory>;
+    retryResourceTelemetry?: () => Promise<ResourceTelemetrySnapshot>;
+    signalDiagnosticProcess?: (
+      input: DiagnosticsSignalProcessInput,
+    ) => Promise<DiagnosticsSignalProcessResult>;
     discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
     listOpinionatedPlugins: () => Promise<OpinionatedPluginListResult>;
     checkOpinionatedPlugins: (
@@ -777,6 +793,13 @@ export interface EnvironmentApi {
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getDiagnosticsSnapshot: () => Promise<DiagnosticsSnapshot>;
+    getResourceTelemetryHistory?: (
+      input: ResourceTelemetryHistoryInput,
+    ) => Promise<ResourceTelemetryHistory>;
+    retryResourceTelemetry?: () => Promise<ResourceTelemetrySnapshot>;
+    signalDiagnosticProcess?: (
+      input: DiagnosticsSignalProcessInput,
+    ) => Promise<DiagnosticsSignalProcessResult>;
     discoverSourceControl: () => Promise<SourceControlDiscoveryResult>;
     listOpinionatedPlugins: () => Promise<OpinionatedPluginListResult>;
     checkOpinionatedPlugins: (

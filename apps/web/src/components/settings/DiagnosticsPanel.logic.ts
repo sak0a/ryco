@@ -5,6 +5,10 @@ import type {
   ServerObservability,
   ServerProvider,
 } from "@ryco/contracts";
+import {
+  DIAGNOSTIC_SECRET_KEY_PATTERN,
+  redactDiagnosticText,
+} from "@ryco/shared/diagnosticRedaction";
 
 import type { PushSequenceEnvironmentState } from "../../diagnostics/pushSequenceMonitor";
 import type {
@@ -18,8 +22,7 @@ export const REDACTED_PLACEHOLDER = "[redacted]";
  * Property names whose values must never leave the device. Matched
  * case-insensitively against object keys during redaction.
  */
-const SECRET_KEY_PATTERN =
-  /(token|secret|password|passwd|credential|authorization|bearer|api[-_]?key|apikey|cookie|session[-_]?id|private[-_]?key|pairing[-_]?code|access[-_]?key|signature|email)/i;
+const SECRET_KEY_PATTERN = DIAGNOSTIC_SECRET_KEY_PATTERN;
 
 /**
  * Strip user-info and known sensitive query parameters from a URL string.
@@ -62,7 +65,7 @@ function redactSecretsInternal(value: unknown, keyIsSecret: boolean): unknown {
   }
 
   if (typeof value === "string") {
-    return redactUrl(value);
+    return redactDiagnosticText(redactUrl(value));
   }
 
   if (Array.isArray(value)) {
