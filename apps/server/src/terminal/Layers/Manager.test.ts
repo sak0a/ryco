@@ -208,6 +208,7 @@ interface CreateManagerOptions {
   maxRetainedInactiveSessions?: number;
   maxPendingProcessEvents?: number;
   maxPendingProcessOutputBytes?: number;
+  maxHistoryBytes?: number;
   ptyAdapter?: FakePtyAdapter;
   restrictToBaseDir?: boolean;
 }
@@ -261,6 +262,9 @@ const createManager = (
           : {}),
         ...(options.maxPendingProcessOutputBytes !== undefined
           ? { maxPendingProcessOutputBytes: options.maxPendingProcessOutputBytes }
+          : {}),
+        ...(options.maxHistoryBytes !== undefined
+          ? { maxHistoryBytes: options.maxHistoryBytes }
           : {}),
       });
       const eventsRef = yield* Ref.make<ReadonlyArray<TerminalEvent>>([]);
@@ -763,6 +767,33 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
       const reopened = yield* manager.open(openInput());
       const nonEmptyLines = reopened.history.split("\n").filter((line) => line.length > 0);
       expect(nonEmptyLines).toEqual(["line2", "line3", "line4"]);
+    }),
+  );
+
+  it.effect("bounds retained history by bytes, trimming from the head", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, logsDir } = yield* createManager(5_000, {
+        maxHistoryBytes: 200,
+      });
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      // One chunk larger than the whole budget: only its tail can be retained.
+      process.emitData(`${"a".repeat(150)}\n${"b".repeat(150)}\n`);
+      yield* waitFor(
+        Effect.flatMap(readFileString(historyLogPath(logsDir)), (text) =>
+          Effect.succeed(text.length <= 200 && text.startsWith("b")),
+        ),
+      );
+
+      const snapshot = yield* manager.listSessions;
+      const session = snapshot.find((entry) => entry.threadId === "thread-1");
+      expect(session?.history).toBeDefined();
+      expect(session?.history.startsWith("a")).toBe(false);
+      expect(session?.history.endsWith("\n")).toBe(true);
+      expect(session?.history.length).toBeLessThanOrEqual(200);
     }),
   );
 

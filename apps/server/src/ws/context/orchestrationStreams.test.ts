@@ -10,6 +10,7 @@ import { Cause, Effect, Metric, Queue, Ref } from "effect";
 
 import { makeWsReplayMetrics } from "../../wsReplayMetrics.ts";
 import {
+  releaseQueuedEventBytes,
   offerOrchestrationLiveEventOrFail,
   offerOrchestrationThreadLiveEventOrFail,
 } from "./orchestrationStreams.ts";
@@ -168,4 +169,124 @@ describe("orchestrationStreams", () => {
       yield* replayMetrics.reset;
     }),
   );
+
+  it.effect("fails the live queue when the byte budget trips so clients resync", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-byte-overflow");
+      const baselineOverflowCount = sumMetricValue(
+        yield* Metric.snapshot,
+        LIVE_OVERFLOWS_METRIC_ID,
+      );
+      const liveQueue = yield* Queue.bounded<OrchestrationEvent, OrchestrationGetSnapshotError>(4);
+      const overflowedRef = yield* Ref.make(false);
+      const queuedBytesRef = yield* Ref.make(0);
+      const replayMetrics = yield* makeWsReplayMetrics({
+        stream: "thread",
+        subscriptionId: "orchestration-stream-byte-overflow-unit",
+        snapshotSequence: 0,
+      });
+      const offer = (event: OrchestrationEvent) =>
+        offerOrchestrationLiveEventOrFail({
+          stream: "thread",
+          event,
+          liveQueue,
+          overflowedRef,
+          replayMetrics,
+          queuedBytesRef,
+          byteBudget: 512,
+        });
+
+      // One frame fits the 512-byte budget; the second trips it.
+      yield* offer(makeThreadMessageEvent(1, threadId));
+      assert.isAbove(yield* Ref.get(queuedBytesRef), 0);
+      yield* offer(makeLargeActivityEvent(2, threadId, 256));
+
+      const takeResult = yield* Queue.take(liveQueue).pipe(Effect.exit);
+      const result =
+        takeResult._tag === "Failure" ? takeResult : yield* Queue.take(liveQueue).pipe(Effect.exit);
+      const overflowCount = sumMetricValue(yield* Metric.snapshot, LIVE_OVERFLOWS_METRIC_ID);
+
+      assert.equal(yield* Ref.get(overflowedRef), true);
+      assert.equal(overflowCount - baselineOverflowCount, 1);
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        const error = Cause.squash(result.cause);
+        assert.instanceOf(error, OrchestrationGetSnapshotError);
+        // The cause names the byte budget so operators can tell it from a
+        // pure count overflow.
+        assert.include(String(error.cause), "bytes overflow");
+      }
+
+      yield* replayMetrics.reset;
+    }),
+  );
+
+  it.effect("releases queued bytes on drain so a healthy subscriber never trips the budget", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-byte-drain");
+      const liveQueue = yield* Queue.bounded<OrchestrationEvent, OrchestrationGetSnapshotError>(8);
+      const overflowedRef = yield* Ref.make(false);
+      const queuedBytesRef = yield* Ref.make(0);
+      const replayMetrics = yield* makeWsReplayMetrics({
+        stream: "thread",
+        subscriptionId: "orchestration-stream-byte-drain-unit",
+        snapshotSequence: 0,
+      });
+      const offer = (event: OrchestrationEvent) =>
+        offerOrchestrationLiveEventOrFail({
+          stream: "thread",
+          event,
+          liveQueue,
+          overflowedRef,
+          replayMetrics,
+          queuedBytesRef,
+          byteBudget: 4_096,
+        });
+      const bigEvent = makeLargeActivityEvent(1, threadId, 300);
+
+      yield* offer(bigEvent);
+      const queuedBeforeDrain = yield* Ref.get(queuedBytesRef);
+      assert.isAbove(queuedBeforeDrain, 0);
+
+      const drained = yield* Queue.take(liveQueue);
+      yield* releaseQueuedEventBytes(queuedBytesRef, drained);
+      assert.equal(yield* Ref.get(queuedBytesRef), 0);
+
+      // The ledger is empty again, so further offers fit the same budget.
+      yield* offer(bigEvent);
+      assert.equal(yield* Ref.get(overflowedRef), false);
+      assert.isAbove(yield* Ref.get(queuedBytesRef), 0);
+
+      yield* replayMetrics.reset;
+    }),
+  );
+});
+
+const makeLargeActivityEvent = (
+  sequence: number,
+  threadId: ThreadId,
+  payloadChars: number,
+): OrchestrationEvent => ({
+  sequence,
+  eventId: EventId.make(`event-large-${sequence}`),
+  aggregateKind: "thread",
+  aggregateId: threadId,
+  occurredAt: "2026-04-05T00:00:00.000Z",
+  commandId: null,
+  causationEventId: null,
+  correlationId: null,
+  metadata: {},
+  type: "thread.activity-appended",
+  payload: {
+    threadId,
+    activity: {
+      id: EventId.make(`task-progress:${threadId}:task-${sequence}`),
+      tone: "info",
+      kind: "task.progress",
+      summary: "Reasoning update",
+      payload: { detail: "x".repeat(payloadChars) },
+      turnId: null,
+      createdAt: "2026-04-05T00:00:00.000Z",
+    },
+  },
 });

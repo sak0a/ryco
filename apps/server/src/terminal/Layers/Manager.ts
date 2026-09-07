@@ -51,6 +51,13 @@ import {
   type TerminalManagerShape,
 } from "../Services/Manager.ts";
 import {
+  type HistoryBufferLimits,
+  type HistoryBufferState,
+  appendTerminalHistoryChunk,
+  emptyHistoryBufferState,
+  historyBufferStateFrom,
+} from "../historyBuffer.ts";
+import {
   PtyAdapter,
   PtySpawnError,
   type PtyAdapterShape,
@@ -59,6 +66,7 @@ import {
 } from "../Services/PTY.ts";
 
 const DEFAULT_HISTORY_LINE_LIMIT = 5_000;
+const DEFAULT_HISTORY_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PERSIST_DEBOUNCE_MS = 40;
 const DEFAULT_SUBPROCESS_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_PROCESS_KILL_GRACE_MS = 1_000;
@@ -120,7 +128,8 @@ interface TerminalSessionState {
   worktreePath: string | null;
   status: TerminalSessionStatus;
   pid: number | null;
-  history: string;
+  /** Retained scrollback, byte- and line-bounded. Trimmed from the head. */
+  historyState: HistoryBufferState;
   pendingHistoryControlSequence: string;
   pendingProcessEvents: Array<PendingProcessEvent>;
   pendingProcessEventIndex: number;
@@ -178,7 +187,7 @@ function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
     worktreePath: session.worktreePath,
     status: session.status,
     pid: session.pid,
-    history: session.history,
+    history: session.historyState.history,
     exitCode: session.exitCode,
     exitSignal: session.exitSignal,
     updatedAt: session.updatedAt,
@@ -867,6 +876,8 @@ function normalizedRuntimeEnv(
 interface TerminalManagerOptions {
   logsDir: string;
   historyLineLimit?: number;
+  /** Scrollback byte ceiling per session; trimmed from the head on rollover. */
+  maxHistoryBytes?: number;
   ptyAdapter: PtyAdapterShape;
   shellResolver?: () => string;
   platform?: NodeJS.Platform;
@@ -899,6 +910,11 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
     const logsDir = options.logsDir;
     const historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT;
+    const maxHistoryBytes = Math.max(1, options.maxHistoryBytes ?? DEFAULT_HISTORY_MAX_BYTES);
+    const historyLimits: HistoryBufferLimits = {
+      maxBytes: maxHistoryBytes,
+      maxLines: historyLineLimit,
+    };
     const platform = options.platform ?? process.platform;
     const baseEnv = options.env ?? process.env;
     const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
@@ -1440,9 +1456,13 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             );
             session.pendingHistoryControlSequence = sanitized.pendingControlSequence;
             if (sanitized.visibleText.length > 0) {
-              session.history = capHistory(
-                `${session.history}${sanitized.visibleText}`,
-                historyLineLimit,
+              // Appending re-enforces both the byte and line budgets; only a
+              // budget overflow touches the retained history, so the
+              // steady-state cost of a chunk is proportional to the chunk.
+              session.historyState = appendTerminalHistoryChunk(
+                session.historyState,
+                sanitized.visibleText,
+                historyLimits,
               );
             }
             session.updatedAt = new Date().toISOString();
@@ -1451,7 +1471,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               type: "output",
               threadId: session.threadId,
               terminalId: session.terminalId,
-              history: sanitized.visibleText.length > 0 ? session.history : null,
+              history: sanitized.visibleText.length > 0 ? session.historyState.history : null,
               data: nextEvent.data,
             } as const;
           }
@@ -1742,7 +1762,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
       if (Option.isSome(session)) {
         yield* stopProcess(session.value);
-        yield* persistHistory(threadId, terminalId, session.value.history);
+        yield* persistHistory(threadId, terminalId, session.value.historyState.history);
       }
 
       yield* flushPersist(threadId, terminalId);
@@ -1893,7 +1913,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               worktreePath: input.worktreePath ?? null,
               status: "starting",
               pid: null,
-              history,
+              historyState: historyBufferStateFrom(history, historyLimits),
               pendingHistoryControlSequence: "",
               pendingProcessEvents: [],
               pendingProcessEventIndex: 0,
@@ -1947,24 +1967,24 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             liveSession.cwd = input.cwd;
             liveSession.worktreePath = input.worktreePath ?? null;
             liveSession.runtimeEnv = nextRuntimeEnv;
-            liveSession.history = "";
+            liveSession.historyState = emptyHistoryBufferState();
             liveSession.pendingHistoryControlSequence = "";
             clearPendingProcessEvents(liveSession);
             yield* persistHistory(
               liveSession.threadId,
               liveSession.terminalId,
-              liveSession.history,
+              liveSession.historyState.history,
             );
           } else if (liveSession.status === "exited" || liveSession.status === "error") {
             liveSession.runtimeEnv = nextRuntimeEnv;
             liveSession.worktreePath = input.worktreePath ?? null;
-            liveSession.history = "";
+            liveSession.historyState = emptyHistoryBufferState();
             liveSession.pendingHistoryControlSequence = "";
             clearPendingProcessEvents(liveSession);
             yield* persistHistory(
               liveSession.threadId,
               liveSession.terminalId,
-              liveSession.history,
+              liveSession.historyState.history,
             );
           }
 
@@ -2032,11 +2052,11 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         Effect.gen(function* () {
           const terminalId = input.terminalId ?? DEFAULT_TERMINAL_ID;
           const session = yield* requireSession(input.threadId, terminalId);
-          session.history = "";
+          session.historyState = emptyHistoryBufferState();
           session.pendingHistoryControlSequence = "";
           clearPendingProcessEvents(session);
           session.updatedAt = new Date().toISOString();
-          yield* persistHistory(input.threadId, terminalId, session.history);
+          yield* persistHistory(input.threadId, terminalId, session.historyState.history);
           yield* publishEvent({
             type: "cleared",
             threadId: input.threadId,
@@ -2067,7 +2087,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
               worktreePath: input.worktreePath ?? null,
               status: "starting",
               pid: null,
-              history: "",
+              historyState: emptyHistoryBufferState(),
               pendingHistoryControlSequence: "",
               pendingProcessEvents: [],
               pendingProcessEventIndex: 0,
@@ -2102,10 +2122,10 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const cols = input.cols ?? session.cols;
           const rows = input.rows ?? session.rows;
 
-          session.history = "";
+          session.historyState = emptyHistoryBufferState();
           session.pendingHistoryControlSequence = "";
           clearPendingProcessEvents(session);
-          yield* persistHistory(input.threadId, terminalId, session.history);
+          yield* persistHistory(input.threadId, terminalId, session.historyState.history);
           yield* startSession(
             session,
             {

@@ -10,6 +10,7 @@ export const wsReplayMetricNames = {
   liveBufferHighWater: "t3_ws_orchestration_live_buffer_high_water",
   liveBufferOverflowsTotal: "t3_ws_orchestration_live_buffer_overflows_total",
   replayLag: "t3_ws_orchestration_replay_lag",
+  coalescedFramesTotal: "t3_ws_orchestration_coalesced_frames_total",
 } as const;
 
 export const wsOrchestrationReplayDepth = Metric.gauge(wsReplayMetricNames.replayDepth, {
@@ -44,11 +45,25 @@ export const wsOrchestrationReplayLag = Metric.gauge(wsReplayMetricNames.replayL
     "Sequence lag between the latest live event observed and the latest replay/live event drained by a replayable WebSocket subscription.",
 });
 
+export const wsOrchestrationCoalescedFramesTotal = Metric.counter(
+  wsReplayMetricNames.coalescedFramesTotal,
+  {
+    description:
+      "Total progress-grade live frames skipped by pre-broadcast coalescing (latest-per-key frames superseded before enqueue).",
+    incremental: true,
+  },
+);
+
 export interface WsReplayMetrics {
   readonly recordReplayEvent: (sequence: number) => Effect.Effect<void>;
   readonly recordLiveEnqueued: (sequence: number) => Effect.Effect<void>;
   readonly recordLiveDequeued: (sequence: number) => Effect.Effect<void>;
   readonly recordLiveOverflow: (sequence: number, capacity: number) => Effect.Effect<void>;
+  /**
+   * Counts a superseded progress frame without advancing the drain watermark.
+   * Older queued events still contribute to lag until the consumer drains them.
+   */
+  readonly recordCoalesced: (sequence: number) => Effect.Effect<void>;
   readonly reset: Effect.Effect<void>;
 }
 
@@ -184,6 +199,15 @@ export const makeWsReplayMetrics = (input: {
           );
           yield* Effect.all(
             [updateGauge(wsOrchestrationLiveBufferOverflowsTotal, attributes, 1), publishAggregate],
+            { discard: true },
+          );
+        }),
+      recordCoalesced: (sequence) =>
+        Effect.gen(function* () {
+          const normalizedSequence = normalizeSequence(sequence);
+          yield* Ref.update(latestLiveSequence, (current) => Math.max(current, normalizedSequence));
+          yield* Effect.all(
+            [updateGauge(wsOrchestrationCoalescedFramesTotal, attributes, 1), publishAggregate],
             { discard: true },
           );
         }),

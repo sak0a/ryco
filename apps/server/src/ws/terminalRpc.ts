@@ -1,22 +1,46 @@
 import { Cause, Effect, Queue, Stream } from "effect";
 import { type TerminalEvent, TerminalSubscriptionResyncError, WS_METHODS } from "@ryco/contracts";
 
+import {
+  approximateJsonBytes,
+  recordServerPerfPayload,
+} from "../observability/PerfInstrumentation.ts";
 import { observeRpcEffect, observeRpcStream } from "../observability/RpcInstrumentation.ts";
-import { recordServerPerfPayload } from "../observability/PerfInstrumentation.ts";
 import { defineWsHandlers, type WsRpcContext } from "./context.ts";
 
 const TERMINAL_SUBSCRIBER_CAPACITY = 256;
+/**
+ * Byte ceiling on queued-but-undrained terminal events per subscriber. The
+ * event count bound alone lets a stalled client accumulate arbitrarily large
+ * output payloads; tripping this budget fails the subscription with the same
+ * `slowConsumer` resync signal as count overflow, so the client resynchronizes
+ * from the session snapshot (which carries the retained history) instead of
+ * the server growing memory without bound.
+ */
+const TERMINAL_SUBSCRIBER_MAX_BYTES = 4 * 1024 * 1024;
+
+export interface TerminalSubscriberLedger {
+  bytes: number;
+}
+
+export const releaseTerminalSubscriberEvent = (
+  ledger: TerminalSubscriberLedger,
+  event: TerminalEvent,
+): Effect.Effect<void> =>
+  Effect.sync(() => {
+    ledger.bytes = Math.max(0, ledger.bytes - approximateJsonBytes(event));
+  });
 
 export function makeTerminalSubscriberOffer(
   queue: Queue.Queue<TerminalEvent, TerminalSubscriptionResyncError | Cause.Done<void>>,
   capacity = TERMINAL_SUBSCRIBER_CAPACITY,
+  ledger: TerminalSubscriberLedger = { bytes: 0 },
+  byteBudget = TERMINAL_SUBSCRIBER_MAX_BYTES,
 ) {
   let overflowed = false;
-  return (event: TerminalEvent) =>
+  const failWithResync = () =>
     Effect.gen(function* () {
       if (overflowed) return;
-      recordServerPerfPayload("server.ws.terminal.events", event);
-      if (Queue.offerUnsafe(queue, event)) return;
       overflowed = true;
       yield* Queue.fail(
         queue,
@@ -25,6 +49,21 @@ export function makeTerminalSubscriberOffer(
           capacity,
         }),
       );
+    });
+  return (event: TerminalEvent) =>
+    Effect.gen(function* () {
+      if (overflowed) return;
+      recordServerPerfPayload("server.ws.terminal.events", event);
+      const eventBytes = approximateJsonBytes(event);
+      if (ledger.bytes + eventBytes > byteBudget) {
+        yield* failWithResync();
+        return;
+      }
+      if (Queue.offerUnsafe(queue, event)) {
+        ledger.bytes += eventBytes;
+        return;
+      }
+      yield* failWithResync();
     });
 }
 
@@ -85,33 +124,42 @@ export const makeTerminalHandlers = (ctx: WsRpcContext) => {
         WS_METHODS.subscribeTerminalEvents,
         ownerStream(
           WS_METHODS.subscribeTerminalEvents,
-          Stream.callback<TerminalEvent, TerminalSubscriptionResyncError>(
-            (queue) =>
-              Effect.acquireRelease(
-                Effect.gen(function* () {
-                  const offerEvent = makeTerminalSubscriberOffer(queue);
-                  const unsubscribe = yield* terminalManager.subscribe(offerEvent);
-                  const snapshots = yield* terminalManager.listSessions;
-                  yield* Effect.forEach(
-                    snapshots.filter((snapshot) => snapshot.status === "running"),
-                    (snapshot) => {
-                      const event: TerminalEvent = {
-                        type: "started",
-                        threadId: snapshot.threadId,
-                        terminalId: snapshot.terminalId,
-                        createdAt: new Date().toISOString(),
-                        snapshot,
-                      };
-                      return offerEvent(event);
-                    },
-                    { discard: true },
-                  );
-                  return unsubscribe;
-                }),
-                (unsubscribe) => Effect.sync(unsubscribe),
-              ),
-            { bufferSize: TERMINAL_SUBSCRIBER_CAPACITY, strategy: "dropping" },
-          ),
+          // One fresh byte ledger per subscription run; the release tap keeps
+          // it in sync with what the RPC transport has actually pulled.
+          Stream.suspend(() => {
+            const ledger: TerminalSubscriberLedger = { bytes: 0 };
+            return Stream.callback<TerminalEvent, TerminalSubscriptionResyncError>(
+              (queue) =>
+                Effect.acquireRelease(
+                  Effect.gen(function* () {
+                    const offerEvent = makeTerminalSubscriberOffer(
+                      queue,
+                      TERMINAL_SUBSCRIBER_CAPACITY,
+                      ledger,
+                    );
+                    const unsubscribe = yield* terminalManager.subscribe(offerEvent);
+                    const snapshots = yield* terminalManager.listSessions;
+                    yield* Effect.forEach(
+                      snapshots.filter((snapshot) => snapshot.status === "running"),
+                      (snapshot) => {
+                        const event: TerminalEvent = {
+                          type: "started",
+                          threadId: snapshot.threadId,
+                          terminalId: snapshot.terminalId,
+                          createdAt: new Date().toISOString(),
+                          snapshot,
+                        };
+                        return offerEvent(event);
+                      },
+                      { discard: true },
+                    );
+                    return unsubscribe;
+                  }),
+                  (unsubscribe) => Effect.sync(unsubscribe),
+                ),
+              { bufferSize: TERMINAL_SUBSCRIBER_CAPACITY, strategy: "dropping" },
+            ).pipe(Stream.tap((event) => releaseTerminalSubscriberEvent(ledger, event)));
+          }),
         ),
         { "rpc.aggregate": "terminal" },
       ),

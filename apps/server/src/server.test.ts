@@ -1242,6 +1242,16 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.status, 200);
       assert.equal(response.headers["cache-control"], "no-cache");
       assert.include(yield* response.text, "router-static-ok");
+      const etag = response.headers.etag;
+      assert.isDefined(etag);
+      const cached = yield* HttpClient.get("/", { headers: { "if-none-match": etag! } });
+      assert.equal(cached.status, 304);
+      assert.equal(cached.headers.etag, etag);
+      assert.equal(yield* cached.text, "");
+      yield* fileSystem.writeFileString(indexPath, "<html>updated router content</html>");
+      const updated = yield* HttpClient.get("/", { headers: { "if-none-match": etag! } });
+      assert.equal(updated.status, 200);
+      assert.notEqual(updated.headers.etag, etag);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -5649,6 +5659,89 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.deepEqual(
         result.map((item) => (item.kind === "snapshot" ? "snapshot" : item.event.sequence)),
         ["snapshot", 11, 12],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("keeps a draining thread subscription alive beyond its cumulative byte budget", () =>
+    Effect.gen(function* () {
+      const now = "2026-04-05T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-detail-handoff");
+      const makeActivityEvent = (sequence: number) =>
+        ({
+          sequence,
+          eventId: EventId.make(`event-thread-handoff-${sequence}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.activity-appended",
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.make(`activity-thread-handoff-${sequence}`),
+              tone: "info",
+              kind: "handoff.test",
+              summary: `handoff event ${sequence}`,
+              payload: { detail: "x".repeat(512 * 1024) },
+              turnId: null,
+              sequence,
+              createdAt: now,
+            },
+          },
+        }) satisfies Extract<OrchestrationEvent, { type: "thread.activity-appended" }>;
+      const livePubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            readEventsPage: (fromSequenceExclusive) =>
+              Effect.succeed({
+                events: [],
+                nextSequence: fromSequenceExclusive,
+                hasMore: false,
+              }),
+            subscribeDomainEvents: Effect.gen(function* () {
+              const subscription = yield* PubSub.subscribe(livePubSub);
+              return subscription;
+            }),
+          },
+          projectionSnapshotQuery: {
+            getThreadDetailById: (requestedThreadId) =>
+              Effect.succeed(
+                requestedThreadId === threadId
+                  ? Option.some({
+                      ...makeDefaultOrchestrationReadModel().threads[0]!,
+                      id: threadId,
+                    })
+                  : Option.none(),
+              ),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 10 }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({ threadId }).pipe(
+            Stream.tap((item) => {
+              const next = item.kind === "snapshot" ? 11 : item.event.sequence + 1;
+              return next <= 22 ? PubSub.publish(livePubSub, makeActivityEvent(next)) : Effect.void;
+            }),
+            Stream.take(13),
+            Stream.runCollect,
+            Effect.map((items) => Array.from(items)),
+          ),
+        ),
+      );
+
+      assert.deepEqual(
+        result.map((item) => (item.kind === "snapshot" ? "snapshot" : item.event.sequence)),
+        ["snapshot", ...Array.from({ length: 12 }, (_, index) => index + 11)],
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
