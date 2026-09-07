@@ -3,6 +3,7 @@ import { parsePersistedServerObservabilitySettings } from "@ryco/shared/serverSe
 import {
   AuthSessionId,
   CommandId,
+  ComputerUseBridgeConfig,
   HubConnectorStatus,
   HubEnrollmentCeremonyDetail,
   HubEnrollmentStartResult,
@@ -102,6 +103,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   devUrl: Schema.optional(Schema.URLFromString),
   noBrowser: Schema.optional(Schema.Boolean),
   desktopBootstrapToken: Schema.optional(Schema.String),
+  computerUseBridge: Schema.optional(ComputerUseBridgeConfig),
   desktopControlToken: Schema.optional(
     Schema.String.check(
       Schema.isMinLength(43),
@@ -618,6 +620,9 @@ export const resolveServerConfig = (
       startupPresentation,
       desktopBootstrapToken,
       ...(desktopControlToken === undefined ? {} : { desktopControlToken }),
+      ...(mode === "desktop" && bootstrap?.computerUseBridge
+        ? { computerUseBridge: bootstrap.computerUseBridge }
+        : {}),
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
       tailscaleServeEnabled,
