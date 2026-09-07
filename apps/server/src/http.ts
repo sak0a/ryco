@@ -108,6 +108,44 @@ export function resolveStaticCacheControl(staticRelativePath: string): string {
   return hasBuildHash ? STATIC_IMMUTABLE_CACHE_CONTROL : STATIC_INDEX_CACHE_CONTROL;
 }
 
+/**
+ * Weak, metadata-derived ETag for a static file (size + mtime). Weak because
+ * metadata-derived tags do not prove byte-for-byte identity; comparison is
+ * opaque per RFC 9110 §8.8.3.
+ */
+export function staticFileEtag(fileInfo: {
+  readonly size: bigint;
+  readonly mtime: Option.Option<Date>;
+}): string | null {
+  const mtimeMs = Option.match(fileInfo.mtime, {
+    onNone: () => null,
+    onSome: (date) => Number.isFinite(date.getTime()) ? date.getTime() : null,
+  });
+  if (mtimeMs === null) {
+    return null;
+  }
+  return `W/"${fileInfo.size.toString(36)}-${Math.floor(mtimeMs).toString(36)}"`;
+}
+
+/**
+ * RFC 9110 §13.1.2 If-None-Match evaluation for cache revalidation. Weak
+ * comparison (ignores the `W/` prefix), `*` matches any representation.
+ */
+export function ifNoneMatchSatisfies(header: string | undefined, etag: string): boolean {
+  if (header === undefined) {
+    return false;
+  }
+  const trimmed = header.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  if (trimmed === "*") {
+    return true;
+  }
+  const target = etag.replace(/^W\//i, "");
+  return trimmed.split(",").some((candidate) => candidate.trim().replace(/^W\//i, "") === target);
+}
+
 /** Build a download disposition with a safe ASCII fallback and UTF-8 filename. */
 export function downloadContentDisposition(fileName?: string): string {
   if (fileName === undefined) {
@@ -164,15 +202,31 @@ function resolveStaticContentType(filePath: string, path: Path.Path): string {
   return STATIC_CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
 }
 
-const staticFileResponse = (filePath: string, staticRelativePath: string) =>
+const staticFileResponse = (input: {
+  readonly filePath: string;
+  readonly staticRelativePath: string;
+  readonly fileInfo: FileSystem.File.Info;
+  readonly ifNoneMatch?: string | undefined;
+}) =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
-    return yield* HttpServerResponse.file(filePath, {
+    const cacheControl = resolveStaticCacheControl(input.staticRelativePath);
+    const etag = staticFileEtag(input.fileInfo);
+    const headers: Record<string, string> = { "Cache-Control": cacheControl };
+    if (etag) {
+      // Revalidation hit: no body is produced and the platform never opens
+      // the file, so a repeat visit to a hot asset costs one stat + one 304.
+      if (ifNoneMatchSatisfies(input.ifNoneMatch, etag)) {
+        return HttpServerResponse.empty({ status: 304, headers: { ...headers, ETag: etag } });
+      }
+      headers.ETag = etag;
+    }
+    // File bodies stream from the platform (`HttpServerResponse.file` is a
+    // lazy platform file response) — never a whole-file memory buffer.
+    return yield* HttpServerResponse.file(input.filePath, {
       status: 200,
-      contentType: resolveStaticContentType(filePath, path),
-      headers: {
-        "Cache-Control": resolveStaticCacheControl(staticRelativePath),
-      },
+      contentType: resolveStaticContentType(input.filePath, path),
+      headers,
     });
   }).pipe(
     Effect.catch(() =>
@@ -731,9 +785,19 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       if (!indexInfo || indexInfo.type !== "File") {
         return HttpServerResponse.text("Not Found", { status: 404 });
       }
-      return yield* staticFileResponse(indexPath, "index.html");
+      return yield* staticFileResponse({
+        filePath: indexPath,
+        staticRelativePath: "index.html",
+        fileInfo: indexInfo,
+        ifNoneMatch: request.headers["if-none-match"],
+      });
     }
 
-    return yield* staticFileResponse(filePath, staticRelativePath);
+    return yield* staticFileResponse({
+      filePath,
+      staticRelativePath,
+      fileInfo,
+      ifNoneMatch: request.headers["if-none-match"],
+    });
   }),
 );

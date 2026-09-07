@@ -10,6 +10,7 @@ export const wsReplayMetricNames = {
   liveBufferHighWater: "t3_ws_orchestration_live_buffer_high_water",
   liveBufferOverflowsTotal: "t3_ws_orchestration_live_buffer_overflows_total",
   replayLag: "t3_ws_orchestration_replay_lag",
+  coalescedFramesTotal: "t3_ws_orchestration_coalesced_frames_total",
 } as const;
 
 export const wsOrchestrationReplayDepth = Metric.gauge(wsReplayMetricNames.replayDepth, {
@@ -44,11 +45,27 @@ export const wsOrchestrationReplayLag = Metric.gauge(wsReplayMetricNames.replayL
     "Sequence lag between the latest live event observed and the latest replay/live event drained by a replayable WebSocket subscription.",
 });
 
+export const wsOrchestrationCoalescedFramesTotal = Metric.counter(
+  wsReplayMetricNames.coalescedFramesTotal,
+  {
+    description:
+      "Total progress-grade live frames skipped by pre-broadcast coalescing (latest-per-key frames superseded before enqueue).",
+    incremental: true,
+  },
+);
+
 export interface WsReplayMetrics {
   readonly recordReplayEvent: (sequence: number) => Effect.Effect<void>;
   readonly recordLiveEnqueued: (sequence: number) => Effect.Effect<void>;
   readonly recordLiveDequeued: (sequence: number) => Effect.Effect<void>;
   readonly recordLiveOverflow: (sequence: number, capacity: number) => Effect.Effect<void>;
+  /**
+   * Told that a progress-grade frame at `sequence` will never reach this
+   * subscription because a later frame superseded it before enqueue. Counts
+   * the skipped frame and keeps the replay-lag gauge honest: a superseded
+   * sequence is fully accounted for even though nothing drains it.
+   */
+  readonly recordCoalesced: (sequence: number) => Effect.Effect<void>;
   readonly reset: Effect.Effect<void>;
 }
 
@@ -57,6 +74,7 @@ interface ActiveReplayMetricState {
   readonly replayDepth: Ref.Ref<number>;
   readonly latestLiveSequence: Ref.Ref<number>;
   readonly lastDrainedSequence: Ref.Ref<number>;
+  readonly supersededSequence: Ref.Ref<number>;
   readonly liveBufferDepth: Ref.Ref<number>;
   readonly liveBufferHighWater: Ref.Ref<number>;
 }
@@ -85,6 +103,7 @@ export const makeWsReplayMetrics = (input: {
     const replayDepth = yield* Ref.make(0);
     const latestLiveSequence = yield* Ref.make(snapshotSequence);
     const lastDrainedSequence = yield* Ref.make(snapshotSequence);
+    const supersededSequence = yield* Ref.make(snapshotSequence);
     const liveBufferDepth = yield* Ref.make(0);
     const liveBufferHighWater = yield* Ref.make(0);
 
@@ -93,6 +112,7 @@ export const makeWsReplayMetrics = (input: {
       replayDepth,
       latestLiveSequence,
       lastDrainedSequence,
+      supersededSequence,
       liveBufferDepth,
       liveBufferHighWater,
     } satisfies ActiveReplayMetricState;
@@ -105,6 +125,7 @@ export const makeWsReplayMetrics = (input: {
           replayDepth: Ref.get(candidate.replayDepth),
           latestLiveSequence: Ref.get(candidate.latestLiveSequence),
           lastDrainedSequence: Ref.get(candidate.lastDrainedSequence),
+          supersededSequence: Ref.get(candidate.supersededSequence),
           liveBufferDepth: Ref.get(candidate.liveBufferDepth),
           liveBufferHighWater: Ref.get(candidate.liveBufferHighWater),
         }),
@@ -120,7 +141,14 @@ export const makeWsReplayMetrics = (input: {
       );
       const replayLagMax = values.reduce(
         (largest, value) =>
-          Math.max(largest, Math.max(0, value.latestLiveSequence - value.lastDrainedSequence)),
+          Math.max(
+            largest,
+            Math.max(
+              0,
+              value.latestLiveSequence -
+                Math.max(value.lastDrainedSequence, value.supersededSequence),
+            ),
+          ),
         0,
       );
 
@@ -184,6 +212,20 @@ export const makeWsReplayMetrics = (input: {
           );
           yield* Effect.all(
             [updateGauge(wsOrchestrationLiveBufferOverflowsTotal, attributes, 1), publishAggregate],
+            { discard: true },
+          );
+        }),
+      recordCoalesced: (sequence) =>
+        Effect.gen(function* () {
+          const normalizedSequence = normalizeSequence(sequence);
+          yield* Ref.update(latestLiveSequence, (current) =>
+            Math.max(current, normalizedSequence),
+          );
+          yield* Ref.update(supersededSequence, (current) =>
+            Math.max(current, normalizedSequence),
+          );
+          yield* Effect.all(
+            [updateGauge(wsOrchestrationCoalescedFramesTotal, attributes, 1), publishAggregate],
             { discard: true },
           );
         }),

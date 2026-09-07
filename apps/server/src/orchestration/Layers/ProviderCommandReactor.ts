@@ -6,6 +6,7 @@ import {
   CommandId,
   DEFAULT_AGENT_TOKEN_MODE,
   EventId,
+  type MessageId,
   type ModelSelection,
   type OrchestrationEvent,
   type OrchestrationProjectShell,
@@ -323,13 +324,58 @@ const make = Effect.gen(function* () {
   });
 
   const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
-    return yield* projectionSnapshotQuery
-      .getThreadDetailById(threadId)
-      .pipe(Effect.map(Option.getOrUndefined));
+    return yield* projectionSnapshotQuery.getThreadShellById(threadId).pipe(
+      Effect.map(
+        Option.map((shell): ThreadCoreFields => ({
+          ...shell,
+          deletedAt: null,
+        })),
+      ),
+      Effect.map(Option.getOrUndefined),
+    );
   });
 
+  /**
+   * Targeted message reads for the turn-start path. Callers fall back to the
+   * full detail load when a query double does not implement the narrow
+   * methods, so behavior is identical either way.
+   */
+  const resolveTurnStartMessage = (threadId: ThreadId, messageId: MessageId) => {
+    const targeted = projectionSnapshotQuery.getThreadMessageById;
+    if (targeted) {
+      return targeted({ threadId, messageId }).pipe(Effect.map(Option.getOrUndefined));
+    }
+    return projectionSnapshotQuery.getThreadDetailById(threadId).pipe(
+      Effect.map(
+        Option.match({
+          onNone: () => undefined,
+          onSome: (thread) => thread.messages.find((entry) => entry.id === messageId),
+        }),
+      ),
+    );
+  };
+
+  const resolveUserMessageCount = (threadId: ThreadId) => {
+    const targeted = projectionSnapshotQuery.countThreadUserMessages;
+    if (targeted) {
+      return targeted(threadId);
+    }
+    return projectionSnapshotQuery.getThreadDetailById(threadId).pipe(
+      Effect.map(
+        Option.match({
+          onNone: () => 0,
+          onSome: (thread) => thread.messages.filter((entry) => entry.role === "user").length,
+        }),
+      ),
+    );
+  };
+
   const ensureRecordedWorktreeAvailable = Effect.fn("ensureRecordedWorktreeAvailable")(function* (
-    thread: OrchestrationThread,
+    thread: {
+      readonly id: ThreadId;
+      readonly worktreePath: string | null;
+      readonly modelSelection: ModelSelection;
+    },
     project: OrchestrationProjectShell | undefined,
   ) {
     if (thread.worktreePath === null) {
@@ -909,7 +955,7 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
+    const message = yield* resolveTurnStartMessage(event.payload.threadId, event.payload.messageId);
     if (!message || message.role !== "user") {
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -922,8 +968,7 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const isFirstUserMessageTurn =
-      thread.messages.filter((entry) => entry.role === "user").length === 1;
+    const isFirstUserMessageTurn = (yield* resolveUserMessageCount(event.payload.threadId)) === 1;
     const handleTurnStartFailure = (cause: Cause.Cause<unknown>) => {
       if (Cause.hasInterruptsOnly(cause)) {
         return Effect.void;

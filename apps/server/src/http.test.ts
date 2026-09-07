@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
+import { Option } from "effect";
 
 import {
   downloadContentDisposition,
+  ifNoneMatchSatisfies,
   inlineImageResponseHeaders,
   isLoopbackHostname,
   resolveDevRedirectUrl,
+  resolveStaticCacheControl,
+  staticFileEtag,
   userAssetResponseHeaders,
 } from "./http.ts";
 
@@ -85,6 +89,53 @@ describe("user asset response headers", () => {
       "Content-Security-Policy": "default-src 'none'; sandbox",
       "Content-Type": "application/octet-stream",
     });
+  });
+});
+
+describe("static asset caching", () => {
+  const fileInfo = (size: bigint, mtime: Date | null) => ({
+    size,
+    mtime: mtime === null ? Option.none() : Option.some(mtime),
+  });
+
+  it("marks content-hashed build assets immutable and HTML revalidate", () => {
+    expect(resolveStaticCacheControl("assets/index-7f3a91bc2d.js")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(resolveStaticCacheControl("assets/chunk.8b1f22aa9c.css")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(resolveStaticCacheControl("index.html")).toBe("no-cache");
+    expect(resolveStaticCacheControl("nested/index.html")).toBe("no-cache");
+    expect(resolveStaticCacheControl("favicon.png")).toBe("no-cache");
+  });
+
+  it("derives a stable weak etag from size and mtime", () => {
+    const first = staticFileEtag(fileInfo(1234n, new Date(1_700_000_000_000)));
+    const again = staticFileEtag(fileInfo(1234n, new Date(1_700_000_000_000)));
+    const changed = staticFileEtag(fileInfo(1235n, new Date(1_700_000_000_000)));
+    expect(first).not.toBeNull();
+    expect(first).toBe(again);
+    expect(changed).not.toBe(first);
+    expect(first?.startsWith("W/")).toBe(true);
+  });
+
+  it("returns no etag without a usable mtime", () => {
+    expect(staticFileEtag(fileInfo(1234n, null))).toBeNull();
+  });
+
+  it("matches exact and weak if-none-match candidates", () => {
+    const etag = staticFileEtag(fileInfo(1234n, new Date(1_700_000_000_000)));
+    if (!etag) throw new Error("etag missing");
+    const strongForm = etag.replace("W/", "");
+    expect(ifNoneMatchSatisfies(undefined, etag)).toBe(false);
+    expect(ifNoneMatchSatisfies("", etag)).toBe(false);
+    expect(ifNoneMatchSatisfies(etag, etag)).toBe(true);
+    expect(ifNoneMatchSatisfies(strongForm, etag)).toBe(true);
+    expect(ifNoneMatchSatisfies(`W/${strongForm}`, etag)).toBe(true);
+    expect(ifNoneMatchSatisfies(`"other", ${etag}`, etag)).toBe(true);
+    expect(ifNoneMatchSatisfies("*", etag)).toBe(true);
+    expect(ifNoneMatchSatisfies('"other"', etag)).toBe(false);
   });
 });
 

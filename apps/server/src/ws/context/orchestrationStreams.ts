@@ -1,4 +1,4 @@
-import { Effect, Option, Queue, Ref, Stream } from "effect";
+import { Effect, Fiber, Option, PubSub, Queue, Ref, Stream } from "effect";
 import {
   type OrchestrationEvent,
   type OrchestrationShellSnapshot,
@@ -11,27 +11,32 @@ import {
 import type { OrchestrationEngineShape } from "../../orchestration/Services/OrchestrationEngine.ts";
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import type { RepositoryIdentityResolverShape } from "../../project/Services/RepositoryIdentityResolver.ts";
+import { approximateJsonBytes } from "../../observability/PerfInstrumentation.ts";
 import {
   type WsReplayMetrics,
   type WsReplayStreamKind,
   makeWsReplayMetrics,
 } from "../../wsReplayMetrics.ts";
 import {
+  ORCHESTRATION_LIVE_QUEUE_MAX_BYTES,
   ORCHESTRATION_LIVE_QUEUE_MAX_EVENTS,
+  ORCHESTRATION_PROGRESS_COALESCE_WINDOW_MS,
   ORCHESTRATION_REPLAY_PAGE_MAX_LIMIT,
 } from "./constants.ts";
 import { isThreadDetailEvent } from "./orchestrationEvents.ts";
 import { randomShortId } from "./branchNaming.ts";
+import { makeOrchestrationEventCoalescer } from "./orchestrationEventCoalescing.ts";
 
 const makeLiveQueueOverflowError = (input: {
   readonly stream: WsReplayStreamKind;
   readonly sequence: number;
   readonly capacity: number;
+  readonly reason: "count" | "bytes";
 }) =>
   new OrchestrationGetSnapshotError({
     message: `Orchestration ${input.stream} live event queue overflowed; reconnect to resynchronize`,
     cause: new Error(
-      `orchestration ${input.stream} live queue overflow at sequence ${input.sequence} with capacity ${input.capacity}`,
+      `orchestration ${input.stream} live queue ${input.reason} overflow at sequence ${input.sequence} with capacity ${input.capacity}`,
     ),
   });
 
@@ -42,14 +47,48 @@ export const offerOrchestrationLiveEventOrFail = (input: {
   readonly overflowedRef: Ref.Ref<boolean>;
   readonly replayMetrics: WsReplayMetrics;
   readonly capacity?: number;
+  /** Byte ledger for queued-but-undrained events; see LIVE_QUEUE_MAX_BYTES. */
+  readonly queuedBytesRef?: Ref.Ref<number>;
+  readonly byteBudget?: number;
+  /** Precomputed event size, so coalescing can share one measurement. */
+  readonly eventBytes?: number;
 }) =>
   Effect.gen(function* () {
     const capacity = input.capacity ?? ORCHESTRATION_LIVE_QUEUE_MAX_EVENTS;
+    const byteBudget = input.byteBudget ?? ORCHESTRATION_LIVE_QUEUE_MAX_BYTES;
+    const eventBytes = input.eventBytes ?? (input.queuedBytesRef === undefined ? 0 : approximateJsonBytes(input.event));
+
+    if (input.queuedBytesRef !== undefined) {
+      const queuedBytes = yield* Ref.get(input.queuedBytesRef);
+      if (queuedBytes + eventBytes > byteBudget) {
+        yield* failLiveQueueWithOverflow(input, capacity, "bytes");
+        return;
+      }
+    }
+
     if (Queue.offerUnsafe(input.liveQueue, input.event)) {
+      if (input.queuedBytesRef !== undefined) {
+        yield* Ref.update(input.queuedBytesRef, (bytes) => bytes + eventBytes);
+      }
       yield* input.replayMetrics.recordLiveEnqueued(input.event.sequence);
       return;
     }
 
+    yield* failLiveQueueWithOverflow(input, capacity, "count");
+  });
+
+const failLiveQueueWithOverflow = (
+  input: {
+    readonly stream: WsReplayStreamKind;
+    readonly event: OrchestrationEvent;
+    readonly liveQueue: Queue.Queue<OrchestrationEvent, OrchestrationGetSnapshotError>;
+    readonly overflowedRef: Ref.Ref<boolean>;
+    readonly replayMetrics: WsReplayMetrics;
+  },
+  capacity: number,
+  reason: "count" | "bytes",
+) =>
+  Effect.gen(function* () {
     const shouldFail = yield* Ref.modify(input.overflowedRef, (overflowed) => [!overflowed, true]);
     if (!shouldFail) {
       return;
@@ -60,6 +99,7 @@ export const offerOrchestrationLiveEventOrFail = (input: {
       stream: input.stream,
       sequence: input.event.sequence,
       capacity,
+      reason,
     });
     yield* Queue.fail(
       input.liveQueue,
@@ -67,10 +107,21 @@ export const offerOrchestrationLiveEventOrFail = (input: {
         stream: input.stream,
         sequence: input.event.sequence,
         capacity,
+        reason,
       }),
     );
   });
 
+/** Releases one drained event's bytes from the live queue ledger. */
+export const releaseQueuedEventBytes = (queuedBytesRef: Ref.Ref<number>, event: OrchestrationEvent) =>
+  Ref.update(queuedBytesRef, (bytes) => Math.max(0, bytes - approximateJsonBytes(event)));
+
+/**
+ * Raw, uncoalesced offer primitive for one thread-subscription live event:
+ * records the live sequence, filters to the subscription's thread detail
+ * events, and enqueues with overflow handling. Production streams compose the
+ * coalescer in front of this (see `runLiveFeed`); tests use it directly.
+ */
 export const offerOrchestrationThreadLiveEventOrFail = (input: {
   readonly threadId: ThreadId;
   readonly event: OrchestrationEvent;
@@ -79,6 +130,9 @@ export const offerOrchestrationThreadLiveEventOrFail = (input: {
   readonly overflowedRef: Ref.Ref<boolean>;
   readonly replayMetrics: WsReplayMetrics;
   readonly capacity?: number;
+  readonly queuedBytesRef?: Ref.Ref<number>;
+  readonly byteBudget?: number;
+  readonly eventBytes?: number;
 }) =>
   Effect.gen(function* () {
     yield* input.recordLiveSequence(input.event.sequence);
@@ -96,6 +150,9 @@ export const offerOrchestrationThreadLiveEventOrFail = (input: {
       liveQueue: input.liveQueue,
       overflowedRef: input.overflowedRef,
       replayMetrics: input.replayMetrics,
+      ...(input.queuedBytesRef !== undefined ? { queuedBytesRef: input.queuedBytesRef } : {}),
+      ...(input.byteBudget !== undefined ? { byteBudget: input.byteBudget } : {}),
+      ...(input.eventBytes !== undefined ? { eventBytes: input.eventBytes } : {}),
       ...(input.capacity === undefined ? {} : { capacity: input.capacity }),
     });
     return true;
@@ -339,6 +396,61 @@ export const makeOrchestrationStreamHelpers = (deps: {
       ),
     );
 
+  /**
+   * Wires one subscription's live feed: coalesces progress-grade frames
+   * before enqueue, keeps a byte ledger over queued-but-undrained events, and
+   * runs the coalescer's flush tick for the feed's lifetime.
+   */
+  const runLiveFeed = (input: {
+    readonly stream: WsReplayStreamKind;
+    readonly liveSubscription: PubSub.Subscription<OrchestrationEvent>;
+    readonly liveQueue: Queue.Queue<OrchestrationEvent, OrchestrationGetSnapshotError>;
+    readonly overflowedRef: Ref.Ref<boolean>;
+    readonly replayMetrics: WsReplayMetrics;
+    readonly onEvent: (
+      event: OrchestrationEvent,
+      push: (event: OrchestrationEvent) => Effect.Effect<void, OrchestrationGetSnapshotError>,
+    ) => Effect.Effect<void, OrchestrationGetSnapshotError>;
+  }) =>
+    Effect.gen(function* () {
+      const queuedBytesRef = yield* Ref.make(0);
+      const coalescer = yield* makeOrchestrationEventCoalescer({
+        offer: (event, eventBytes) =>
+          offerOrchestrationLiveEventOrFail({
+            stream: input.stream,
+            event,
+            liveQueue: input.liveQueue,
+            overflowedRef: input.overflowedRef,
+            replayMetrics: input.replayMetrics,
+            queuedBytesRef,
+            eventBytes,
+          }),
+        onCoalesced: (sequence) => input.replayMetrics.recordCoalesced(sequence),
+        windowMs: ORCHESTRATION_PROGRESS_COALESCE_WINDOW_MS,
+      });
+      const flushTickFiber = yield* Effect.forkScoped(
+        Effect.forever(
+          Effect.sleep(ORCHESTRATION_PROGRESS_COALESCE_WINDOW_MS).pipe(
+            Effect.andThen(coalescer.flush),
+          ),
+        ).pipe(Effect.ignoreCause({ log: true })),
+      );
+      yield* Stream.fromSubscription(input.liveSubscription)
+        .pipe(
+          Stream.runForEach((event) => input.onEvent(event, coalescer.push)),
+          Effect.ensuring(
+            Effect.gen(function* () {
+              yield* Fiber.interrupt(flushTickFiber).pipe(Effect.ignore);
+              yield* coalescer.flush.pipe(Effect.ignoreCause({ log: true }));
+              yield* Queue.shutdown(input.liveQueue);
+            }),
+          ),
+          Effect.ignoreCause({ log: true }),
+          Effect.forkScoped,
+        );
+      return queuedBytesRef;
+    });
+
   const makeReplayableShellStream = (
     snapshot: Effect.Effect<OrchestrationShellSnapshot, OrchestrationGetSnapshotError>,
   ) =>
@@ -359,23 +471,18 @@ export const makeOrchestrationStreamHelpers = (deps: {
           snapshotSequence,
         });
 
-        yield* Stream.fromSubscription(liveSubscription).pipe(
-          Stream.runForEach((event) =>
+        const queuedBytesRef = yield* runLiveFeed({
+          stream: "shell",
+          liveSubscription,
+          liveQueue,
+          overflowedRef,
+          replayMetrics,
+          onEvent: (event, push) =>
             Effect.gen(function* () {
               yield* replayBoundary.recordLiveSequence(event.sequence);
-              yield* offerOrchestrationLiveEventOrFail({
-                stream: "shell",
-                event,
-                liveQueue,
-                overflowedRef,
-                replayMetrics,
-              });
+              yield* push(event);
             }),
-          ),
-          Effect.ensuring(Queue.shutdown(liveQueue)),
-          Effect.ignoreCause({ log: true }),
-          Effect.forkScoped,
-        );
+        });
 
         const replayStream = makeBoundedReplayStream({
           snapshotSequence,
@@ -383,6 +490,7 @@ export const makeOrchestrationStreamHelpers = (deps: {
           errorMessage: "Failed to replay orchestration shell events",
         }).pipe(Stream.tap((event) => replayMetrics.recordReplayEvent(event.sequence)));
         const liveStream = Stream.fromQueue(liveQueue).pipe(
+          Stream.tap((event) => releaseQueuedEventBytes(queuedBytesRef, event)),
           Stream.tap((event) => replayMetrics.recordLiveDequeued(event.sequence)),
         );
 
@@ -446,21 +554,21 @@ export const makeOrchestrationStreamHelpers = (deps: {
             })),
           );
 
-        yield* Stream.fromSubscription(liveSubscription).pipe(
-          Stream.runForEach((event) =>
-            offerOrchestrationThreadLiveEventOrFail({
-              threadId,
-              event,
-              recordLiveSequence: replayBoundary.recordLiveSequence,
-              liveQueue,
-              overflowedRef,
-              replayMetrics,
+        const queuedBytesRef = yield* runLiveFeed({
+          stream: "thread",
+          liveSubscription,
+          liveQueue,
+          overflowedRef,
+          replayMetrics,
+          onEvent: (event, push) =>
+            Effect.gen(function* () {
+              yield* replayBoundary.recordLiveSequence(event.sequence);
+              if (!isMatchingThreadEvent(event)) {
+                return;
+              }
+              yield* push(event);
             }),
-          ),
-          Effect.ensuring(Queue.shutdown(liveQueue)),
-          Effect.ignoreCause({ log: true }),
-          Effect.forkScoped,
-        );
+        });
 
         const replayStream = makeBoundedReplayStream({
           snapshotSequence,

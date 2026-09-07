@@ -7,7 +7,9 @@
  * @module ProjectionSnapshotQuery
  */
 import type {
+  MessageId,
   OrchestrationCheckpointSummary,
+  OrchestrationMessage,
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
@@ -24,6 +26,7 @@ import type {
   OrchestrationWorktreeShell,
   ProjectId,
   ThreadId,
+  TurnId,
   WorktreeId,
 } from "@ryco/contracts";
 import { Context } from "effect";
@@ -173,6 +176,57 @@ export interface ProjectionSnapshotQueryShape {
       readonly scriptPaths: ReadonlyArray<string>;
       readonly outputPaths: ReadonlyArray<string>;
     },
+    ProjectionRepositoryError
+  >;
+
+  /**
+   * Read a single projected message by id without hydrating the thread.
+   * Turn start validates the requested message with this instead of loading
+   * every message, part, and activity. Optional so existing test doubles
+   * stay valid; callers fall back to `getThreadDetailById`.
+   */
+  readonly getThreadMessageById?: (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+  }) => Effect.Effect<Option.Option<OrchestrationMessage>, ProjectionRepositoryError>;
+
+  /**
+   * Read the newest bounded slice of one turn's messages (newest first, up to
+   * `limit`). Turn completion and streaming boundaries use this so per-turn
+   * finalization never triggers a full-thread read. Optional so existing test
+   * doubles stay valid; callers fall back to `getThreadDetailById`.
+   */
+  readonly listThreadMessagesByTurn?: (input: {
+    readonly threadId: ThreadId;
+    readonly turnId: TurnId;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationMessage>, ProjectionRepositoryError>;
+
+  /**
+   * Count projected user messages for one thread (aggregate only). Turn start
+   * uses this to detect the first user message without reading them all.
+   * Optional so existing test doubles stay valid; callers fall back to
+   * `getThreadDetailById`.
+   */
+  readonly countThreadUserMessages?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<number, ProjectionRepositoryError>;
+
+  /**
+   * Read a single projected proposed plan by id. Plan finalization only needs
+   * the prior timestamps of the plan it replaces. Optional so existing test
+   * doubles stay valid; callers fall back to `getThreadDetailById`.
+   */
+  readonly getThreadProposedPlanById?: (input: {
+    readonly threadId: ThreadId;
+    readonly planId: string;
+  }) => Effect.Effect<
+    Option.Option<{
+      readonly id: string;
+      readonly createdAt: string;
+      readonly implementedAt: string | null;
+      readonly implementationThreadId: ThreadId | null;
+    }>,
     ProjectionRepositoryError
   >;
 

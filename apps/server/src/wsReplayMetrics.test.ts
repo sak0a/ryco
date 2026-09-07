@@ -74,6 +74,38 @@ describe("wsReplayMetrics", () => {
     }),
   );
 
+  it.effect("counts coalesced frames and keeps replay lag honest for superseded sequences", () =>
+    Effect.gen(function* () {
+      const attributes = {
+        stream: "thread",
+      };
+      const metrics = yield* makeWsReplayMetrics({
+        stream: "thread",
+        subscriptionId: "ws-replay-coalesced-unit",
+        snapshotSequence: 10,
+      });
+
+      // Live events 11..13 enqueued and drained; 14 and 15 superseded before
+      // enqueue (coalesced); 16 enqueued but not yet drained.
+      yield* metrics.recordLiveEnqueued(13);
+      yield* metrics.recordLiveDequeued(13);
+      yield* metrics.recordCoalesced(14);
+      yield* metrics.recordCoalesced(15);
+      yield* metrics.recordLiveEnqueued(16);
+
+      const snapshots = yield* Metric.snapshot;
+      assert.equal(
+        findGaugeValue(snapshots, "t3_ws_orchestration_coalesced_frames_total", attributes),
+        2,
+      );
+      // 16 is genuinely undrained, so lag is exactly 1 even though 14 and 15
+      // never drain — a superseded frame is fully accounted for.
+      assert.equal(findGaugeValue(snapshots, "t3_ws_orchestration_replay_lag", attributes), 1);
+
+      yield* metrics.reset;
+    }),
+  );
+
   it.effect("publishes bounded per-stream aggregates across active subscriptions", () =>
     Effect.gen(function* () {
       const first = yield* makeWsReplayMetrics({
