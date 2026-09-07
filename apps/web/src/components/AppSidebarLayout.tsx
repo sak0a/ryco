@@ -23,7 +23,8 @@ import { useHostedRpcCapability } from "../hostedHub/capabilities";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_OPEN_STORAGE_KEY = "chat_thread_sidebar_open";
-const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
+// Desktop window controls need extra room beside the logo and essential header actions.
+const THREAD_SIDEBAR_MIN_WIDTH = (isElectron ? 15 : 13) * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 
 function readPersistedThreadSidebarOpen(): boolean {

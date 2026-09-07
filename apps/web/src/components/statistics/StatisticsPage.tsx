@@ -3,6 +3,11 @@ import { ActivityIcon, BarChart3Icon, ShieldAlertIcon } from "lucide-react";
 
 import { useHostedRpcCapability } from "~/hostedHub/capabilities";
 import { cn } from "~/lib/utils";
+import {
+  APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS,
+  COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS,
+} from "~/appChrome";
+import { useAppSidebarCollapsed } from "~/hooks/useAppSidebarCollapsed";
 
 import { SidebarInset } from "../ui/sidebar";
 import { ScrollArea } from "../ui/scroll-area";
@@ -18,19 +23,26 @@ export function StatisticsPage({
   readonly search: StatisticsSearch;
   readonly onSearchChange: (next: StatisticsSearch) => void;
 }) {
+  const appSidebarCollapsed = useAppSidebarCollapsed();
   const method =
     search.view === "usage" ? WS_METHODS.serverGetUsageSummary : WS_METHODS.serverGetStatistics;
   const capability = useHostedRpcCapability(method);
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex min-h-14 shrink-0 items-center border-b border-border/75 bg-background/90 px-5 backdrop-blur-sm sm:px-7">
-          <div className="flex min-w-0 flex-1 items-center gap-5">
+        <header
+          className={cn(
+            "flex min-h-14 shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-b border-border/75 bg-background/90 py-2 pr-5 backdrop-blur-sm sm:pr-7",
+            APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS,
+            appSidebarCollapsed ? COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS : "pl-5 sm:pl-7",
+          )}
+        >
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 gap-y-2">
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold tracking-tight">Statistics</h1>
               <p className="text-[11px] text-muted-foreground">Usage and work signals</p>
             </div>
-            <div className="inline-flex rounded-lg bg-muted/75 p-0.5">
+            <div className="inline-flex shrink-0 rounded-lg bg-muted/75 p-0.5">
               {(["usage", "activity"] as const).map((view) => {
                 const Icon = view === "usage" ? BarChart3Icon : ActivityIcon;
                 return (

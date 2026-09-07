@@ -32,6 +32,8 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   onModeChange: (mode: SidebarMode) => void;
 }) {
   const { isMobile, setOpenMobile, toggleSidebar } = useSidebar();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const statisticsCapability = useHostedRpcCapability(WS_METHODS.serverGetStatistics);
   const openSettings = useSettingsDialogStore((s) => s.openSettings);
   const handleSettingsClick = useCallback(() => {
     if (isMobile) {
@@ -45,6 +47,33 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
   const actionButtons = (
     <div className="ml-auto flex shrink-0 items-center gap-0.5">
+      {statisticsCapability.allowed ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Link
+                to="/statistics"
+                aria-label="Open statistics"
+                aria-current={pathname === "/statistics" ? "page" : undefined}
+                onClick={() => {
+                  if (isMobile) setOpenMobile(false);
+                }}
+                className={cn(
+                  SIDEBAR_HEADER_ACTION_CLASS_NAME,
+                  // Reserve narrow headers for the mode, settings, and collapse controls.
+                  "@max-[10rem]/sidebar-header:hidden",
+                  pathname === "/statistics" && "bg-sidebar-accent text-sidebar-accent-foreground",
+                )}
+              >
+                <BarChart3Icon className="size-3.5" />
+              </Link>
+            }
+          />
+          <TooltipPopup side="bottom" sideOffset={2}>
+            Statistics
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -89,7 +118,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           render={
             <Link
               aria-label="Go to threads"
-              className="ml-1 flex min-w-0 cursor-pointer items-center rounded-md outline-hidden ring-ring transition-opacity hover:opacity-80 focus-visible:ring-2"
+              className="ml-1 flex shrink-0 cursor-pointer items-center rounded-md outline-hidden ring-ring transition-opacity hover:opacity-80 focus-visible:ring-2"
               to="/"
             >
               <RycoLetterMark className="h-4.5 text-foreground" />
@@ -140,25 +169,8 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 });
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const statisticsCapability = useHostedRpcCapability(WS_METHODS.serverGetStatistics);
   return (
     <SidebarFooter className="p-2">
-      {statisticsCapability.allowed ? (
-        <Link
-          to="/statistics"
-          aria-label="Open statistics"
-          className={cn(
-            "flex h-8 items-center gap-2 rounded-md px-2 text-xs font-medium transition-colors",
-            pathname === "/statistics"
-              ? "bg-sidebar-accent text-sidebar-accent-foreground"
-              : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-          )}
-        >
-          <BarChart3Icon className="size-3.5" />
-          <span>Statistics</span>
-        </Link>
-      ) : null}
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
     </SidebarFooter>
