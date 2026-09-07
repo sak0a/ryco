@@ -1,4 +1,9 @@
-import { open } from "node:fs/promises";
+import {
+  DIAGNOSTIC_SECRET_KEY_PATTERN,
+  redactDiagnosticText,
+} from "@ryco/shared/diagnosticRedaction";
+import { constants } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import os from "node:os";
 
 import {
@@ -10,6 +15,7 @@ import {
   type DiagnosticsSpanEvent,
   type DiagnosticsSpanNameSummary,
   type DiagnosticsTraceSinkHealth,
+  type DiagnosticsTraceSummary,
   type DiagnosticsWarning,
 } from "@ryco/contracts";
 import { Effect, Layer } from "effect";
@@ -18,6 +24,9 @@ import type { ServerConfigShape } from "../../config.ts";
 import { ServerConfig } from "../../config.ts";
 import type { TraceSinkHealth } from "../../observability/TraceSink.ts";
 import type { TraceRecord } from "../../observability/TraceRecord.ts";
+import { nativeResourceMonitor } from "../NativeResourceMonitor.ts";
+import { readResourceTelemetry, recordResourceAttribution } from "../ResourceTelemetry.ts";
+import { readProcessDiagnostics } from "../ProcessDiagnostics.ts";
 import { summarizeOperationalMetrics } from "../OperationalMetrics.ts";
 import {
   Diagnostics,
@@ -33,8 +42,7 @@ const LIST_LIMIT = 50;
 const EVENT_LIMIT = 80;
 const RAW_MESSAGE_LIMIT = 1_200;
 
-const SENSITIVE_KEY_PATTERN =
-  /(?:token|secret|password|authorization|api[-_]?key|cookie|session|credential)/iu;
+const SENSITIVE_KEY_PATTERN = DIAGNOSTIC_SECRET_KEY_PATTERN;
 
 interface RingBuffer<A> {
   readonly push: (value: A) => void;
@@ -138,7 +146,12 @@ export function redactDiagnosticValue(value: unknown, depth = 0, keyHint = ""): 
     return value;
   }
   if (typeof value === "string") {
-    return SENSITIVE_KEY_PATTERN.test(value) ? "[redacted]" : value.slice(0, RAW_MESSAGE_LIMIT);
+    return SENSITIVE_KEY_PATTERN.test(value) ||
+      /(?:Bearer\s+\S+|https?:\/\/[^\s/]+@|sk-[A-Za-z0-9_-]{8,}|-----BEGIN .*PRIVATE KEY)/iu.test(
+        value,
+      )
+      ? "[redacted]"
+      : redactDiagnosticText(value).slice(0, RAW_MESSAGE_LIMIT);
   }
   if (typeof value !== "object") {
     return value;
@@ -154,8 +167,17 @@ export function redactDiagnosticValue(value: unknown, depth = 0, keyHint = ""): 
   return redacted;
 }
 
-function truncateMessage(value: string): string {
-  return value.length <= RAW_MESSAGE_LIMIT ? value : `${value.slice(0, RAW_MESSAGE_LIMIT)}...`;
+function diagnosticEndpoint(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "[redacted endpoint]";
+  }
 }
 
 function toIsoFromUnixNano(value: string): string {
@@ -205,12 +227,12 @@ function spanFailureMessage(record: TraceRecord): string | undefined {
   if (record.type === "effect-span") {
     const exit = record.exit;
     if (exit?._tag === "Failure") {
-      return truncateMessage(exit.cause);
+      return String(redactDiagnosticValue(exit.cause));
     }
     return undefined;
   }
   if (record.type === "otlp-span" && record.status?.message) {
-    return truncateMessage(record.status.message);
+    return String(redactDiagnosticValue(record.status.message));
   }
   return undefined;
 }
@@ -247,18 +269,74 @@ function toDiagnosticsSpanEvents(
 ): ReadonlyArray<DiagnosticsSpanEvent> {
   return records
     .flatMap((record) => {
-      const events = record.events ?? [];
-      return events.map((event) => ({
-        traceId: record.traceId,
-        spanId: record.spanId,
-        spanName: record.name.trim() || "(unnamed span)",
-        name: event.name.trim() || "(unnamed event)",
-        time: toIsoFromUnixNano(event.timeUnixNano),
-        attributes: redactDiagnosticValue(event.attributes ?? {}) as Record<string, unknown>,
-      }));
+      const events = Array.isArray(record.events) ? record.events.slice(-EVENT_LIMIT) : [];
+      return events
+        .filter((event) => event && typeof event.name === "string")
+        .map((event) => ({
+          traceId: record.traceId,
+          spanId: record.spanId,
+          spanName: record.name.trim() || "(unnamed span)",
+          name: String(redactDiagnosticValue(event.name.trim())) || "(unnamed event)",
+          time: toIsoFromUnixNano(event.timeUnixNano),
+          attributes: redactDiagnosticValue(event.attributes ?? {}) as Record<string, unknown>,
+        }));
     })
     .toSorted((left, right) => right.time.localeCompare(left.time))
     .slice(0, EVENT_LIMIT);
+}
+
+function buildTraceSummary(
+  spans: ReadonlyArray<DiagnosticsSpan>,
+  records: ReadonlyArray<TraceRecord>,
+  warnings: ReadonlyArray<DiagnosticsWarning>,
+  scannedFilePaths: ReadonlyArray<string>,
+): DiagnosticsTraceSummary {
+  const logLevelCounts: Record<string, number> = Object.create(null);
+  const logs: DiagnosticsTraceSummary["latestWarningAndErrorLogs"][number][] = [];
+  for (const record of records) {
+    for (const event of Array.isArray(record.events) ? record.events.slice(-EVENT_LIMIT) : []) {
+      if (!event || typeof event.name !== "string") continue;
+      const rawLevel = event.attributes?.["effect.logLevel"];
+      if (typeof rawLevel !== "string" || !rawLevel.trim()) continue;
+      const level = rawLevel.toLowerCase().slice(0, 32);
+      logLevelCounts[level] = (logLevelCounts[level] ?? 0) + 1;
+      if (!["warning", "warn", "error", "fatal"].includes(level)) continue;
+      logs.push({
+        traceId: record.traceId,
+        spanId: record.spanId,
+        spanName: record.name?.trim() || "(unnamed span)",
+        level,
+        message: String(redactDiagnosticValue(event.name)),
+        seenAt: toIsoFromUnixNano(event.timeUnixNano),
+      });
+    }
+  }
+  return {
+    parseErrorCount: warnings
+      .filter((warning) => warning.code === "diagnostics.trace-tail-malformed-lines")
+      .reduce((sum, warning) => sum + (warning.count ?? 0), 0),
+    scannedFilePaths,
+    firstSpanAt: spans.length
+      ? spans.reduce(
+          (earliest, span) => (span.startTime < earliest ? span.startTime : earliest),
+          spans[0]!.startTime,
+        )
+      : null,
+    lastSpanAt: spans[0]?.endTime ?? null,
+    failureCount: spans.filter((span) => span.status === "failure" || span.status === "error")
+      .length,
+    interruptionCount: spans.filter((span) => span.status === "interrupted").length,
+    slowSpanThresholdMs: 1_000,
+    slowSpanCount: spans.filter((span) => span.durationMs >= 1_000).length,
+    logLevelCounts,
+    latestWarningAndErrorLogs: logs
+      .toSorted((a, b) => b.seenAt.localeCompare(a.seenAt))
+      .slice(0, LIST_LIMIT),
+    partialFailure: warnings.some(
+      (warning) =>
+        warning.source === "trace-file" || warning.code === "diagnostics.trace-records-skipped",
+    ),
+  };
 }
 
 function buildTopSpanNames(
@@ -377,13 +455,13 @@ function failureFromLogLine(input: {
     return null;
   }
   const timestamp = line.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/u)?.[0];
-  const message = truncateMessage(line);
+  const message = String(redactDiagnosticValue(line));
   return {
-    id: `log:${input.source}:${normalizeSignature(line).slice(0, 80)}`,
+    id: `log:${input.source}:${normalizeSignature(message).slice(0, 80)}`,
     occurredAt: timestamp ?? input.fallbackTime,
     source: input.source,
     category: "log",
-    signature: normalizeSignature(line),
+    signature: normalizeSignature(message),
     message,
     raw: redactDiagnosticValue({ line: message, source: input.source }),
   };
@@ -445,13 +523,25 @@ function buildFailureSummary(
 }
 
 async function readFileTail(filePath: string, maxBytes: number): Promise<string> {
-  const handle = await open(filePath, "r");
+  // Also reject links/special files on platforms without O_NOFOLLOW/O_NONBLOCK.
+  const before = await lstat(filePath);
+  if (!before.isFile()) throw new Error("Diagnostics only reads regular files.");
+  const handle = await open(
+    filePath,
+    constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
+  );
   try {
     const stat = await handle.stat();
+    if (!stat.isFile() || stat.dev !== before.dev || stat.ino !== before.ino) {
+      throw new Error("Diagnostics file identity changed while opening.");
+    }
     const length = Math.min(stat.size, maxBytes);
     const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, Math.max(0, stat.size - length));
-    return buffer.toString("utf8");
+    const { bytesRead } = await handle.read(buffer, 0, length, Math.max(0, stat.size - length));
+    recordResourceAttribution("diagnostics", "file-tail", bytesRead, 0, 0);
+    const text = buffer.subarray(0, bytesRead).toString("utf8");
+    // A bounded tail may begin in the middle of a record. Never parse that fragment.
+    return stat.size > length ? text.slice(text.indexOf("\n") + 1 || text.length) : text;
   } finally {
     await handle.close();
   }
@@ -467,7 +557,11 @@ function parseTraceRecordLine(line: string): TraceRecord | null {
       typeof parsed.spanId === "string" &&
       typeof parsed.startTimeUnixNano === "string" &&
       typeof parsed.endTimeUnixNano === "string" &&
-      typeof parsed.durationMs === "number"
+      typeof parsed.durationMs === "number" &&
+      Number.isFinite(parsed.durationMs) &&
+      parsed.durationMs >= 0 &&
+      parsed.traceId.trim().length > 0 &&
+      parsed.spanId.trim().length > 0
     ) {
       return parsed as TraceRecord;
     }
@@ -480,11 +574,13 @@ function parseTraceRecordLine(line: string): TraceRecord | null {
 async function readTraceTail(input: {
   readonly filePath: string;
   readonly warnings: DiagnosticsWarning[];
+  readonly optional?: boolean;
 }): Promise<ReadonlyArray<TraceRecord>> {
   let tail = "";
   try {
     tail = await readFileTail(input.filePath, FILE_TAIL_BYTES);
   } catch (error) {
+    if (input.optional && (error as NodeJS.ErrnoException).code === "ENOENT") return [];
     input.warnings.push({
       code: "diagnostics.trace-tail-unavailable",
       source: "trace-file",
@@ -513,7 +609,7 @@ async function readTraceTail(input: {
       count: malformed,
     });
   }
-  return records;
+  return records.slice(-TRACE_RECORD_LIMIT);
 }
 
 async function readFailureLogTail(input: {
@@ -526,6 +622,8 @@ async function readFailureLogTail(input: {
   try {
     tail = await readFileTail(input.filePath, FILE_TAIL_BYTES);
   } catch (error) {
+    // Fresh installations have no provider/server log until the first record is written.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     input.warnings.push({
       code: "diagnostics.log-tail-unavailable",
       source: input.source,
@@ -599,11 +697,19 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(
       readonly traceSinkHealth?: () => TraceSinkHealth;
     },
   ) =>
-    Effect.sync(() => {
+    Effect.sync((): DiagnosticsShape => {
       const serverStartedAtMs = Date.now();
       const serverStartedAt = new Date(serverStartedAtMs).toISOString();
       const traceRecords = makeRingBuffer<TraceRecord>(TRACE_RECORD_LIMIT);
       const resourceSampler = makeResourceSampler();
+      const scannedFilePaths = [
+        ...Array.from(
+          { length: Math.min(10, Math.max(0, Math.floor(config.traceMaxFiles))) },
+          (_, index) =>
+            `${config.serverTracePath}.${Math.min(10, Math.max(0, Math.floor(config.traceMaxFiles))) - index}`,
+        ),
+        config.serverTracePath,
+      ];
       let persistedDiagnosticsCache:
         | {
             readonly expiresAt: number;
@@ -620,10 +726,16 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(
         }
 
         const warnings: DiagnosticsWarning[] = [];
-        const traceTail = await readTraceTail({
-          filePath: config.serverTracePath,
-          warnings,
-        });
+        const traceTail: TraceRecord[] = [];
+        for (const filePath of scannedFilePaths) {
+          traceTail.push(
+            ...(await readTraceTail({
+              filePath,
+              warnings,
+              optional: filePath !== config.serverTracePath,
+            })),
+          );
+        }
         const failures = [
           ...(await readFailureLogTail({
             filePath: config.serverLogPath,
@@ -640,11 +752,21 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(
         ];
         persistedDiagnosticsCache = {
           expiresAt: now + FILE_TAIL_REFRESH_INTERVAL_MS,
-          traceRecords: traceTail,
+          traceRecords: traceTail.slice(-TRACE_RECORD_LIMIT),
           failures,
           warnings,
         };
         return persistedDiagnosticsCache;
+      };
+
+      let persistedRead: ReturnType<typeof readPersistedDiagnostics> | undefined;
+      const readPersistedShared = (fallbackTime: string) => {
+        if (persistedRead) return persistedRead;
+        const pending = readPersistedDiagnostics(fallbackTime).finally(() => {
+          persistedRead = undefined;
+        });
+        persistedRead = pending;
+        return pending;
       };
 
       return {
@@ -657,13 +779,21 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(
           const snapshotStartedAt = performance.now();
           return Effect.tryPromise(async () => {
             const generatedAt = new Date().toISOString();
-            const currentResource = await resourceSampler.sample();
-            const persistedDiagnostics = await readPersistedDiagnostics(generatedAt);
+            const [currentResource, processTree, telemetry] = await Promise.all([
+              resourceSampler.sample(),
+              readProcessDiagnostics(),
+              readResourceTelemetry({
+                terminalPids: input.terminals.flatMap((terminal) =>
+                  terminal.pid !== null && terminal.status === "running" ? [terminal.pid] : [],
+                ),
+              }),
+            ]);
+            const persistedDiagnostics = await readPersistedShared(generatedAt);
             const warnings = [...persistedDiagnostics.warnings];
             const allTraceRecords = dedupeTraceRecords([
               ...persistedDiagnostics.traceRecords,
               ...traceRecords.values(),
-            ]);
+            ]).slice(-TRACE_RECORD_LIMIT);
             let skippedSpanRecords = 0;
             const spans = allTraceRecords
               .flatMap((record) => {
@@ -704,18 +834,25 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(
                 providerEventLogPath: config.providerEventLogPath,
                 localTracingEnabled: true,
                 ...(config.otlpTracesUrl !== undefined
-                  ? { otlpTracesUrl: config.otlpTracesUrl }
+                  ? { otlpTracesUrl: diagnosticEndpoint(config.otlpTracesUrl) }
                   : {}),
                 otlpTracesEnabled: config.otlpTracesUrl !== undefined,
                 ...(config.otlpMetricsUrl !== undefined
-                  ? { otlpMetricsUrl: config.otlpMetricsUrl }
+                  ? { otlpMetricsUrl: diagnosticEndpoint(config.otlpMetricsUrl) }
                   : {}),
                 otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
               },
               resources: {
                 current: currentResource,
                 history: resourceHistory,
+                host: {
+                  cpuCount: os.cpus().length,
+                  totalMemoryBytes: os.totalmem(),
+                  availableMemoryBytes: os.freemem(),
+                },
               },
+              processTree,
+              telemetry,
               liveProcesses: {
                 server: {
                   pid: process.pid,
@@ -728,6 +865,7 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(
                 providers: [...input.providers],
               },
               tracing: {
+                summary: buildTraceSummary(spans, allTraceRecords, warnings, scannedFilePaths),
                 retainedSpanCount: allTraceRecords.length,
                 recentSpans: spans.slice(0, LIST_LIMIT),
                 slowestSpans: [...spans]
@@ -773,11 +911,11 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(
                     providerEventLogPath: config.providerEventLogPath,
                     localTracingEnabled: true,
                     ...(config.otlpTracesUrl !== undefined
-                      ? { otlpTracesUrl: config.otlpTracesUrl }
+                      ? { otlpTracesUrl: diagnosticEndpoint(config.otlpTracesUrl) }
                       : {}),
                     otlpTracesEnabled: config.otlpTracesUrl !== undefined,
                     ...(config.otlpMetricsUrl !== undefined
-                      ? { otlpMetricsUrl: config.otlpMetricsUrl }
+                      ? { otlpMetricsUrl: diagnosticEndpoint(config.otlpMetricsUrl) }
                       : {}),
                     otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
                   },
@@ -839,6 +977,7 @@ export const DiagnosticsLive = Layer.effect(
   Diagnostics,
   Effect.gen(function* () {
     const config = yield* ServerConfig;
+    yield* Effect.addFinalizer(() => Effect.sync(() => nativeResourceMonitor.close()));
     return yield* makeDiagnosticsService(config);
   }),
 );

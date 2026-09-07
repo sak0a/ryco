@@ -1,3 +1,8 @@
+import {
+  ResourceTelemetrySnapshot,
+  ResourceTelemetryHistoryInput,
+  ResourceTelemetryHistory,
+} from "./resourceTelemetry.ts";
 import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -27,7 +32,12 @@ import {
   AgentControlMcpInstallationMutationResult,
 } from "./agentControl.ts";
 import { AuthAccessStreamEvent, AuthRpcError } from "./auth.ts";
-import { DiagnosticsError, DiagnosticsSnapshot } from "./diagnostics.ts";
+import {
+  DiagnosticsError,
+  DiagnosticsSnapshot,
+  DiagnosticsSignalProcessInput,
+  DiagnosticsSignalProcessResult,
+} from "./diagnostics.ts";
 import { StatisticsSnapshot } from "./statistics.ts";
 import { UsageReadError, UsageSummary, UsageSummaryRequest } from "./usage.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
@@ -334,6 +344,9 @@ export const WS_METHODS = {
   serverCheckOpinionatedPlugins: "server.checkOpinionatedPlugins",
   serverInstallOpinionatedPlugin: "server.installOpinionatedPlugin",
   serverGetDiagnosticsSnapshot: "server.getDiagnosticsSnapshot",
+  serverGetResourceTelemetryHistory: "server.getResourceTelemetryHistory",
+  serverRetryResourceTelemetry: "server.retryResourceTelemetry",
+  serverSignalDiagnosticProcess: "server.signalDiagnosticProcess",
   serverGetStatistics: "server.getStatistics",
   serverGetUsageSummary: "server.getUsageSummary",
 
@@ -608,6 +621,30 @@ export const WsServerGetDiagnosticsSnapshotRpc = Rpc.make(WS_METHODS.serverGetDi
   success: DiagnosticsSnapshot,
   error: Schema.Union([DiagnosticsError, AuthRpcError]),
 });
+
+export const WsServerGetResourceTelemetryHistoryRpc = Rpc.make(
+  WS_METHODS.serverGetResourceTelemetryHistory,
+  {
+    payload: ResourceTelemetryHistoryInput,
+    success: ResourceTelemetryHistory,
+    error: Schema.Union([DiagnosticsError, AuthRpcError]),
+  },
+);
+
+export const WsServerRetryResourceTelemetryRpc = Rpc.make(WS_METHODS.serverRetryResourceTelemetry, {
+  payload: Schema.Struct({}),
+  success: ResourceTelemetrySnapshot,
+  error: Schema.Union([DiagnosticsError, AuthRpcError]),
+});
+
+export const WsServerSignalDiagnosticProcessRpc = Rpc.make(
+  WS_METHODS.serverSignalDiagnosticProcess,
+  {
+    payload: DiagnosticsSignalProcessInput,
+    success: DiagnosticsSignalProcessResult,
+    error: Schema.Union([DiagnosticsError, AuthRpcError]),
+  },
+);
 
 export const WsServerGetStatisticsRpc = Rpc.make(WS_METHODS.serverGetStatistics, {
   payload: Schema.Struct({}),
@@ -1627,6 +1664,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerGetDiagnosticsSnapshotRpc,
+  WsServerSignalDiagnosticProcessRpc,
+  WsServerGetResourceTelemetryHistoryRpc,
+  WsServerRetryResourceTelemetryRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerListOpinionatedPluginsRpc,
   WsServerCheckOpinionatedPluginsRpc,

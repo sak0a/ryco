@@ -226,6 +226,15 @@ export interface WsRpcClient {
     readonly updateSettings: (
       patch: ServerSettingsPatch,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
+    readonly getResourceTelemetryHistory: RpcUnaryMethod<
+      typeof WS_METHODS.serverGetResourceTelemetryHistory
+    >;
+    readonly retryResourceTelemetry: RpcUnaryNoArgMethod<
+      typeof WS_METHODS.serverRetryResourceTelemetry
+    >;
+    readonly signalDiagnosticProcess: RpcUnaryMethod<
+      typeof WS_METHODS.serverSignalDiagnosticProcess
+    >;
     readonly getDiagnosticsSnapshot: RpcUnaryNoArgMethod<
       typeof WS_METHODS.serverGetDiagnosticsSnapshot
     >;
@@ -563,6 +572,12 @@ export function createWsRpcClient(transport: WsTransport, device?: DeviceRpcClie
       getSettings: () => transport.request((client) => client[WS_METHODS.serverGetSettings]({})),
       updateSettings: (patch) =>
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
+      getResourceTelemetryHistory: (input) =>
+        transport.request((client) => client[WS_METHODS.serverGetResourceTelemetryHistory](input)),
+      retryResourceTelemetry: () =>
+        transport.request((client) => client[WS_METHODS.serverRetryResourceTelemetry]({})),
+      signalDiagnosticProcess: (input) =>
+        transport.request((client) => client[WS_METHODS.serverSignalDiagnosticProcess](input)),
       getDiagnosticsSnapshot: () =>
         transport.request((client) => client[WS_METHODS.serverGetDiagnosticsSnapshot]({})),
       discoverSourceControl: () =>

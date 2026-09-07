@@ -6,6 +6,7 @@ import { ThreadId } from "@ryco/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Metric } from "effect";
 
+import { getResourceAttribution } from "../../diagnostics/ResourceAttribution.ts";
 import { metricNames } from "../../observability/Metrics.ts";
 import { hasMetricSnapshot } from "../../observability/testMetricSnapshots.ts";
 import { makeEventNdjsonLogger, sweepStaleEventLogs } from "./EventNdjsonLogger.ts";
@@ -36,6 +37,9 @@ describe("EventNdjsonLogger", () => {
       const basePath = path.join(tempDir, "provider-native.ndjson");
 
       try {
+        const attributedBefore = getResourceAttribution().find(
+          (entry) => entry.component === "provider-native",
+        );
         const logger = yield* makeEventNdjsonLogger(basePath, { stream: "native" });
         assert.notEqual(logger, undefined);
         if (!logger) {
@@ -56,6 +60,14 @@ describe("EventNdjsonLogger", () => {
         const threadTwoPath = path.join(tempDir, "thread-2.native.log");
         assert.equal(fs.existsSync(threadOnePath), true);
         assert.equal(fs.existsSync(threadTwoPath), true);
+        const attributedAfter = getResourceAttribution().find(
+          (entry) => entry.component === "provider-native",
+        );
+        assert.equal(attributedAfter?.count, (attributedBefore?.count ?? 0) + 2);
+        assert.equal(
+          (attributedAfter?.logicalWriteBytes ?? 0) - (attributedBefore?.logicalWriteBytes ?? 0),
+          fs.statSync(threadOnePath).size + fs.statSync(threadTwoPath).size,
+        );
 
         const first = parseLogLine(fs.readFileSync(threadOnePath, "utf8").trim());
         const second = parseLogLine(fs.readFileSync(threadTwoPath, "utf8").trim());

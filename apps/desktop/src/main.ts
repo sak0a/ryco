@@ -1,3 +1,5 @@
+import { Duplex } from "node:stream";
+import { attachDesktopResourceTelemetry } from "./desktopResourceTelemetry.ts";
 import * as ChildProcess from "node:child_process";
 import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
@@ -2456,8 +2458,13 @@ function startBackend(): void {
     // the repository toolchain, this keeps Bun.secrets keychain custody stable
     // instead of switching the same dev identity to Electron/keytar at startup.
     env: childEnvironment,
-    stdio: ["ignore", "pipe", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"],
   });
+  const telemetryPipe = child.stdio[4];
+  if (telemetryPipe instanceof Duplex) {
+    const stopTelemetry = attachDesktopResourceTelemetry(telemetryPipe);
+    child.once("exit", stopTelemetry);
+  }
   const bootstrapStream = child.stdio[3];
   if (bootstrapStream && "write" in bootstrapStream) {
     bootstrapStream.write(
@@ -2469,6 +2476,7 @@ function startBackend(): void {
         host: backendBindHost,
         ...(isDevelopment ? { devUrl: resolveDesktopDevServerUrl() } : {}),
         desktopBootstrapToken: backendBootstrapToken,
+        desktopTelemetryFd: 4,
         desktopControlToken: childControlToken,
         tailscaleServeEnabled: desktopSettings.tailscaleServeEnabled,
         tailscaleServePort: desktopSettings.tailscaleServePort,

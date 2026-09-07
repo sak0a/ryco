@@ -6,6 +6,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { vi } from "vite-plus/test";
 
+import { getResourceAttribution } from "../diagnostics/ResourceAttribution.ts";
+
 import type { EffectTraceRecord, TraceRecord } from "./TraceRecord.ts";
 import { makeTraceSink } from "./TraceSink.ts";
 
@@ -47,10 +49,17 @@ describe("TraceSink", () => {
 
           assert.equal(setTimeoutSpy.mock.calls.length, 0);
 
+          const attributedBefore =
+            getResourceAttribution().find((entry) => entry.component === "server-trace")?.count ??
+            0;
           sink.push(makeRecord("alpha"));
           assert.equal(setTimeoutSpy.mock.calls.length, 1);
 
           yield* sink.flush;
+          assert.equal(
+            getResourceAttribution().find((entry) => entry.component === "server-trace")?.count,
+            attributedBefore + 1,
+          );
           sink.push(makeRecord("beta"));
           assert.equal(setTimeoutSpy.mock.calls.length, 2);
         } finally {

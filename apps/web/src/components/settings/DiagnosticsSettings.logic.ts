@@ -31,7 +31,7 @@ export function formatDuration(ms: number): string {
 
 export function formatPercent(value: number | undefined): string {
   if (value === undefined || !Number.isFinite(value)) return "n/a";
-  return `${Math.max(0, Math.min(100, value)).toFixed(1)}%`;
+  return `${Math.max(0, value).toFixed(1)}%`;
 }
 
 export function relativeTimeLabel(iso: string, nowMs = Date.now()): string {

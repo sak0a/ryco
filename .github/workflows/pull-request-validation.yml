@@ -110,6 +110,7 @@ jobs:
             const desktop = paths.some(
               (path) =>
                 shared(path) ||
+                path.startsWith("native/resource-monitor/") ||
                 path.startsWith("apps/desktop/") ||
                 path.startsWith("apps/server/") ||
                 path.startsWith("apps/web/"),

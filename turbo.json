@@ -3,7 +3,16 @@
   // Root configs every package's tsconfig extends. Listed here so a change to
   // them busts every task's cache — without this, the cached typecheck/build
   // could return a stale pass after a shared compiler-option change.
-  "globalDependencies": ["tsconfig.base.json", "tsconfig.node.json"],
+  "globalDependencies": [
+    "tsconfig.base.json",
+    "tsconfig.node.json",
+    "native/resource-monitor/Cargo.toml",
+    "native/resource-monitor/Cargo.lock",
+    "native/resource-monitor/rust-toolchain.toml",
+    "native/resource-monitor/src/**",
+    "scripts/build-resource-monitor.ts",
+    "scripts/resource-monitor-target.ts"
+  ],
   "globalEnv": [
     "HOST",
     "PORT",

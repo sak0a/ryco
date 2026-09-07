@@ -92,6 +92,8 @@ import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { WorkspaceAccessPolicyLive } from "./workspace/Layers/WorkspaceAccessPolicy.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 
+import { initializeDesktopResourceTelemetry } from "./diagnostics/DesktopResourceTelemetry.ts";
+
 const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
 
 const BootstrapEnvelopeSchema = Schema.Struct({
@@ -102,6 +104,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   devUrl: Schema.optional(Schema.URLFromString),
   noBrowser: Schema.optional(Schema.Boolean),
   desktopBootstrapToken: Schema.optional(Schema.String),
+  desktopTelemetryFd: Schema.optional(Schema.Literal(4)),
   desktopControlToken: Schema.optional(
     Schema.String.check(
       Schema.isMinLength(43),
@@ -397,6 +400,9 @@ export const resolveServerConfig = (
         ? yield* readBootstrapEnvelope(BootstrapEnvelopeSchema, bootstrapFd)
         : Option.none();
     const bootstrap = Option.getOrUndefined(bootstrapEnvelope);
+    if (bootstrap?.mode === "desktop" && bootstrap.desktopTelemetryFd === 4) {
+      initializeDesktopResourceTelemetry(bootstrap.desktopTelemetryFd);
+    }
 
     const mode: RuntimeMode = Option.getOrElse(
       resolveOptionPrecedence(

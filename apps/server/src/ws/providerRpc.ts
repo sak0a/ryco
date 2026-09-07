@@ -1,6 +1,11 @@
+import {
+  readResourceTelemetryHistory,
+  retryResourceTelemetry,
+} from "../diagnostics/ResourceTelemetry.ts";
 import { Duration, Effect, Ref, Stream } from "effect";
 import { type AuthAccessStreamEvent, TextGenerationError, WS_METHODS } from "@ryco/contracts";
 
+import { signalDiagnosticProcess } from "../diagnostics/ProcessDiagnostics.ts";
 import { observeRpcEffect, observeRpcStreamEffect } from "../observability/RpcInstrumentation.ts";
 import {
   checkOpinionatedPlugins,
@@ -65,6 +70,33 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
         {
           "rpc.aggregate": "server",
         },
+      ),
+    [WS_METHODS.serverGetResourceTelemetryHistory]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.serverGetResourceTelemetryHistory,
+        ownerEffect(
+          WS_METHODS.serverGetResourceTelemetryHistory,
+          Effect.promise(() => readResourceTelemetryHistory(input)),
+        ),
+        { "rpc.aggregate": "server" },
+      ),
+    [WS_METHODS.serverRetryResourceTelemetry]: () =>
+      observeRpcEffect(
+        WS_METHODS.serverRetryResourceTelemetry,
+        ownerEffect(
+          WS_METHODS.serverRetryResourceTelemetry,
+          Effect.promise(() => retryResourceTelemetry()),
+        ),
+        { "rpc.aggregate": "server" },
+      ),
+    [WS_METHODS.serverSignalDiagnosticProcess]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.serverSignalDiagnosticProcess,
+        ownerEffect(
+          WS_METHODS.serverSignalDiagnosticProcess,
+          Effect.promise(() => signalDiagnosticProcess(input)),
+        ),
+        { "rpc.aggregate": "server" },
       ),
     [WS_METHODS.serverRefreshProviders]: (input) =>
       observeRpcEffect(
